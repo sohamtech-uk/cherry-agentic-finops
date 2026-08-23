@@ -1,0 +1,92 @@
+name: Migrate Cloud Run health endpoint
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  migrate:
+    if: >-
+      github.event_name != 'issues' ||
+      (github.event.issue.title == '[migrate-health-endpoint]' &&
+       github.event.issue.user.login == 'sohamtechuk')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Replace reserved Cloud Run paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(
+            grep -RIl \
+              --exclude-dir=.git \
+              --exclude='api.py' \
+              --exclude='migrate-health-endpoint.yml' \
+              '/healthz' . || true
+          )
+          if (( ${#files[@]} )); then
+            sed -i 's#/healthz#/health#g' "${files[@]}"
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Validate source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+          ruff check .
+          ruff format --check .
+          pytest -q
+          python -m compileall -q app agents main.py
+
+      - name: Commit the migration
+        id: commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo 'commit='"$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git commit -m 'Use Cloud Run-safe health endpoint throughout'
+          git push origin HEAD:main
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+          echo 'commit='"$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Report result
+        if: ${{ github.event_name == 'issues' && always() }}
+        uses: actions/github-script@v7
+        env:
+          RESULT_COMMIT: ${{ steps.commit.outputs.commit }}
+          CHANGED: ${{ steps.commit.outputs.changed }}
+          JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `Cloud Run health endpoint migration: **${process.env.JOB_STATUS}**. Changed: **${process.env.CHANGED || 'unknown'}**. Commit: \`${process.env.RESULT_COMMIT || 'not-created'}\`.`
+            });
