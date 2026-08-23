@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
-from decimal import Decimal, ROUND_HALF_UP
+from datetime import UTC, date, datetime
+from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -15,7 +15,7 @@ def money(value: Decimal | float | int | str) -> Decimal:
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class WorkflowStatus(StrEnum):
@@ -77,14 +77,14 @@ class DocumentExtraction(BaseModel):
         return value.upper().strip() or "GBP"
 
     @model_validator(mode="after")
-    def validate_financial_totals(self) -> "DocumentExtraction":
+    def validate_financial_totals(self) -> DocumentExtraction:
         if self.total <= 0:
             raise ValueError("Document total must be greater than zero.")
         arithmetic_difference = abs((self.subtotal + self.tax) - self.total)
         if arithmetic_difference > Decimal("0.02"):
             warning = (
-                f"Subtotal plus tax differs from total by {arithmetic_difference.quantize(TWOPLACES)} "
-                f"{self.currency}."
+                "Subtotal plus tax differs from total by "
+                f"{arithmetic_difference.quantize(TWOPLACES)} {self.currency}."
             )
             if warning not in self.warnings:
                 self.warnings.append(warning)
