@@ -62,3 +62,5 @@ jobs:
           fi
           git commit -m "Add Cherry Agent implementation"
           git push origin HEAD:main
+
+# This comment deliberately triggers the bootstrap after the workflow exists on main.
