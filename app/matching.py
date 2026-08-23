@@ -60,14 +60,23 @@ def score_transaction(
     else:
         amount_score = 0
         amount_explanation = f"Amount differs materially by {variance}%."
-    factors.append(MatchFactor(name="Amount", score=amount_score, maximum=45, explanation=amount_explanation))
+    factors.append(
+        MatchFactor(
+            name="Amount",
+            score=amount_score,
+            maximum=45,
+            explanation=amount_explanation,
+        )
+    )
     score += amount_score
 
     target_date = extraction.due_date or extraction.issue_date
     distance = _days_between(target_date, transaction.booking_date)
     if distance is None:
         date_score = 5
-        date_explanation = "Document date was unavailable, so only a neutral date score was applied."
+        date_explanation = (
+            "Document date was unavailable, so only a neutral date score was applied."
+        )
     elif distance <= 2:
         date_score = 20
         date_explanation = f"Bank booking is {distance} day(s) from the expected date."
@@ -80,7 +89,14 @@ def score_transaction(
     else:
         date_score = 0
         date_explanation = f"Bank booking is {distance} days away from the document date."
-    factors.append(MatchFactor(name="Date", score=date_score, maximum=20, explanation=date_explanation))
+    factors.append(
+        MatchFactor(
+            name="Date",
+            score=date_score,
+            maximum=20,
+            explanation=date_explanation,
+        )
+    )
     score += date_score
 
     reference_haystack = " ".join(
@@ -147,7 +163,10 @@ def score_transaction(
             explanation=(
                 f"Currency matches ({extraction.currency})."
                 if currency_score
-                else f"Currency mismatch: document {extraction.currency}, bank {transaction.currency}."
+                else (
+                    f"Currency mismatch: document {extraction.currency}, "
+                    f"bank {transaction.currency}."
+                )
             ),
         )
     )
