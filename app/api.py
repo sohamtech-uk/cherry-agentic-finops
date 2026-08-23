@@ -77,8 +77,15 @@ async def home() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
-@app.get("/healthz", tags=["operations"])
+@app.get("/health", tags=["operations"])
 async def health() -> dict[str, str]:
+    """Return service health on a Cloud Run-safe URL.
+
+    Cloud Run reserves some paths ending in ``z``. In particular, ``/healthz``
+    can be intercepted by the platform before the request reaches FastAPI, so
+    the production health endpoint deliberately uses ``/health``.
+    """
+
     return {"status": "ok", "service": "cherry-agent", "version": "0.1.0"}
 
 
