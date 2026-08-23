@@ -48,14 +48,18 @@ def record_human_approval(workflow_id: str, approver_name: str, note: str) -> di
     the approver name. Never infer consent from context.
     """
 
-    return get_engine().approve(
-        workflow_id, ApprovalRequest(actor=approver_name, note=note)
-    ).model_dump(mode="json")
+    return (
+        get_engine()
+        .approve(workflow_id, ApprovalRequest(actor=approver_name, note=note))
+        .model_dump(mode="json")
+    )
 
 
 def reject_workflow(workflow_id: str, reviewer_name: str, reason: str) -> dict[str, Any]:
     """Reject a paused workflow after the user explicitly instructs you to do so."""
 
-    return get_engine().reject(
-        workflow_id, RejectionRequest(actor=reviewer_name, note=reason)
-    ).model_dump(mode="json")
+    return (
+        get_engine()
+        .reject(workflow_id, RejectionRequest(actor=reviewer_name, note=reason))
+        .model_dump(mode="json")
+    )

@@ -30,9 +30,7 @@ class Settings(BaseSettings):
     persistence_backend: Literal["memory", "firestore"] = Field(
         default="memory", validation_alias="CHERRY_PERSISTENCE_BACKEND"
     )
-    gemini_model: str = Field(
-        default="gemini-3.7-flash", validation_alias="CHERRY_GEMINI_MODEL"
-    )
+    gemini_model: str = Field(default="gemini-3.7-flash", validation_alias="CHERRY_GEMINI_MODEL")
     auto_reconcile_score: int = Field(
         default=90, ge=0, le=100, validation_alias="CHERRY_AUTO_RECONCILE_SCORE"
     )
@@ -44,28 +42,20 @@ class Settings(BaseSettings):
     )
     max_upload_mb: int = Field(default=12, ge=1, le=50, validation_alias="CHERRY_MAX_UPLOAD_MB")
 
-    google_cloud_project: str | None = Field(
-        default=None, validation_alias="GOOGLE_CLOUD_PROJECT"
-    )
-    google_cloud_location: str = Field(
-        default="global", validation_alias="GOOGLE_CLOUD_LOCATION"
-    )
+    google_cloud_project: str | None = Field(default=None, validation_alias="GOOGLE_CLOUD_PROJECT")
+    google_cloud_location: str = Field(default="global", validation_alias="GOOGLE_CLOUD_LOCATION")
     google_api_key: SecretStr | None = Field(default=None, validation_alias="GOOGLE_API_KEY")
     use_vertex_ai: bool = Field(default=True, validation_alias="GOOGLE_GENAI_USE_VERTEXAI")
 
     firestore_collection: str = Field(
         default="finance_workflows", validation_alias="CHERRY_FIRESTORE_COLLECTION"
     )
-    evidence_bucket: str | None = Field(
-        default=None, validation_alias="CHERRY_EVIDENCE_BUCKET"
-    )
+    evidence_bucket: str | None = Field(default=None, validation_alias="CHERRY_EVIDENCE_BUCKET")
     pubsub_topic: str | None = Field(
         default="finance-workflow-events", validation_alias="CHERRY_PUBSUB_TOPIC"
     )
 
-    cherry_money_api_url: str | None = Field(
-        default=None, validation_alias="CHERRY_MONEY_API_URL"
-    )
+    cherry_money_api_url: str | None = Field(default=None, validation_alias="CHERRY_MONEY_API_URL")
     cherry_money_api_token: SecretStr | None = Field(
         default=None, validation_alias="CHERRY_MONEY_API_TOKEN"
     )

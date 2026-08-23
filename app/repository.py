@@ -55,7 +55,9 @@ class FirestoreWorkflowRepository(WorkflowRepository):
         try:
             from google.cloud import firestore
         except ImportError as exc:  # pragma: no cover - only possible in reduced local installs
-            raise RuntimeError("Install google-cloud-firestore to use Firestore persistence.") from exc
+            raise RuntimeError(
+                "Install google-cloud-firestore to use Firestore persistence."
+            ) from exc
 
         self._client = firestore.Client(project=settings.google_cloud_project)
         self._collection = self._client.collection(settings.firestore_collection)
@@ -70,7 +72,10 @@ class FirestoreWorkflowRepository(WorkflowRepository):
         return WorkflowRecord.model_validate(snapshot.to_dict())
 
     def list(self) -> list[WorkflowRecord]:
-        records = [WorkflowRecord.model_validate(snapshot.to_dict()) for snapshot in self._collection.stream()]
+        records = [
+            WorkflowRecord.model_validate(snapshot.to_dict())
+            for snapshot in self._collection.stream()
+        ]
         return sorted(records, key=lambda record: record.created_at, reverse=True)
 
     def clear(self) -> None:

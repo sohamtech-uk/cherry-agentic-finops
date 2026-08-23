@@ -33,9 +33,7 @@ def _days_between(left: date | None, right: date | None) -> int | None:
 def _variance(invoice_total: Decimal, transaction_amount: Decimal) -> Decimal:
     if invoice_total == 0:
         return Decimal("100")
-    return (abs(transaction_amount - invoice_total) / invoice_total * 100).quantize(
-        Decimal("0.01")
-    )
+    return (abs(transaction_amount - invoice_total) / invoice_total * 100).quantize(Decimal("0.01"))
 
 
 def score_transaction(

@@ -53,7 +53,7 @@ def build_evidence_pack(workflow: WorkflowRecord) -> bytes:
         f"Audit hash chain valid: {workflow.audit_chain_valid}\n\n"
         "Verify each file against manifest.json and inspect audit-trail.json for the append-only "
         "decision history.\n"
-    ).encode("utf-8")
+    ).encode()
 
     output = io.BytesIO()
     with zipfile.ZipFile(output, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:

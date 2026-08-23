@@ -62,7 +62,9 @@ async def security_headers(request, call_next):  # type: ignore[no-untyped-def]
 
 @app.exception_handler(WorkflowNotFound)
 async def workflow_not_found_handler(_, exc: WorkflowNotFound) -> JSONResponse:
-    return JSONResponse(status_code=404, content={"detail": f"Workflow {exc.args[0]} was not found."})
+    return JSONResponse(
+        status_code=404, content={"detail": f"Workflow {exc.args[0]} was not found."}
+    )
 
 
 @app.exception_handler(InvalidWorkflowAction)
@@ -165,16 +167,12 @@ async def create_workflow(
 
 
 @app.post("/api/workflows/{workflow_id}/approve", tags=["workflows"])
-async def approve_workflow(
-    workflow_id: str, request: ApprovalRequest
-) -> dict[str, object]:
+async def approve_workflow(workflow_id: str, request: ApprovalRequest) -> dict[str, object]:
     return engine.approve(workflow_id, request).model_dump(mode="json")
 
 
 @app.post("/api/workflows/{workflow_id}/reject", tags=["workflows"])
-async def reject_workflow(
-    workflow_id: str, request: RejectionRequest
-) -> dict[str, object]:
+async def reject_workflow(workflow_id: str, request: RejectionRequest) -> dict[str, object]:
     return engine.reject(workflow_id, request).model_dump(mode="json")
 
 
