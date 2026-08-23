@@ -9,7 +9,7 @@ permissions:
 
 env:
   REGION: europe-west1
-  SERVICE: cherry-agent
+  SERVICE: cherry-finops
   REPOSITORY: cherry-agent
 
 jobs:
@@ -59,6 +59,8 @@ jobs:
             CHERRY_PUBSUB_TOPIC=finance-workflow-events
           flags: >-
             --allow-unauthenticated
+            --ingress=all
+            --default-url
             --service-account=cherry-agent-runtime@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
             --memory=1Gi
             --cpu=1
@@ -66,4 +68,6 @@ jobs:
             --max-instances=5
 
       - name: Smoke test
-        run: curl --fail --retry 8 --retry-delay 5 "${{ steps.deploy.outputs.url }}/healthz"
+        run: |
+          curl --fail --retry 8 --retry-delay 5 "${{ steps.deploy.outputs.url }}/"
+          curl --fail --retry 8 --retry-delay 5 "${{ steps.deploy.outputs.url }}/api/config"
