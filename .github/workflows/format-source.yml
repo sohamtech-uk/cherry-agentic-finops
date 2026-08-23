@@ -34,8 +34,13 @@ jobs:
           pip install -e '.[dev]'
 
       - name: Apply Ruff fixes and formatting
+        shell: bash
         run: |
-          ruff check --fix .
+          set -euo pipefail
+          # Ruff's first pass can apply safe fixes while still returning non-zero for
+          # formatting-only findings such as E501. Continue into the formatter, then
+          # enforce a clean check after formatting.
+          ruff check --fix . || true
           ruff format .
           ruff check .
           ruff format --check .
