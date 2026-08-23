@@ -105,6 +105,8 @@ gcloud run deploy "${SERVICE}" \
   --region="${REGION}" \
   --platform=managed \
   --allow-unauthenticated \
+  --ingress=all \
+  --default-url \
   --service-account="${RUNTIME_EMAIL}" \
   --memory=1Gi \
   --cpu=1 \
@@ -130,6 +132,7 @@ else
   echo "WARNING: Cloud Run deployment completed but /healthz did not return HTTP 2xx yet." >&2
   echo "Check the service directly and inspect logs before changing DNS:" >&2
   echo "  curl -i ${DETERMINISTIC_URL}/healthz" >&2
+  echo "  gcloud run services describe ${SERVICE} --region=${REGION} --format='yaml(metadata.annotations,status.url)'" >&2
   echo "  gcloud run services logs read ${SERVICE} --region=${REGION} --limit=50" >&2
 fi
 
