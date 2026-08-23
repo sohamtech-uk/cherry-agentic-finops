@@ -6,6 +6,8 @@ on:
     paths:
       - ".bootstrap/project.tar.gz.b64"
       - ".github/workflows/bootstrap-source.yml"
+  issues:
+    types: [opened]
   workflow_dispatch:
 
 permissions:
@@ -13,6 +15,10 @@ permissions:
 
 jobs:
   bootstrap:
+    if: >-
+      github.event_name != 'issues' ||
+      (github.event.issue.title == '[bootstrap-source]' &&
+       github.event.issue.user.login == 'sohamtechuk')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -62,5 +68,3 @@ jobs:
           fi
           git commit -m "Add Cherry Agent implementation"
           git push origin HEAD:main
-
-# This comment deliberately triggers the bootstrap after the workflow exists on main.
