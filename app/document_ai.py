@@ -34,7 +34,8 @@ class GeminiDocumentExtractor:
     async def extract(self, content: bytes, mime_type: str, filename: str) -> DocumentExtraction:
         if not self._settings.google_ready:
             raise GeminiUnavailable(
-                "Gemini is not configured. Set GOOGLE_CLOUD_PROJECT for Vertex AI or GOOGLE_API_KEY."
+                "Gemini is not configured. Set GOOGLE_CLOUD_PROJECT for Vertex AI "
+                "or GOOGLE_API_KEY."
             )
         if not content:
             raise ValueError("The uploaded document is empty.")
@@ -54,8 +55,8 @@ class GeminiDocumentExtractor:
                 contents=[
                     types.Part.from_text(
                         text=(
-                            f"Extract the finance data from {filename!r}. Return only the structured "
-                            "response required by the schema."
+                            f"Extract the finance data from {filename!r}. Return only "
+                            "the structured response required by the schema."
                         )
                     ),
                     types.Part.from_bytes(data=content, mime_type=mime_type),
