@@ -1,0 +1,47 @@
+name: Dispatch source formatting
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  actions: write
+  issues: write
+  contents: read
+
+jobs:
+  dispatch:
+    if: >-
+      github.event.issue.title == '[dispatch-format-source]' &&
+      github.event.issue.user.login == 'sohamtechuk'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch formatter
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'format-source.yml',
+              ref: 'main'
+            });
+
+            await new Promise(resolve => setTimeout(resolve, 7000));
+            const runs = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'format-source.yml',
+              event: 'workflow_dispatch',
+              per_page: 5
+            });
+            const run = runs.data.workflow_runs[0];
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: run
+                ? `Source formatting dispatched: ${run.html_url} (status: ${run.status}).`
+                : 'Source formatting dispatched; GitHub has not indexed the run yet.'
+            });
