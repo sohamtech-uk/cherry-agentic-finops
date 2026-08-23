@@ -10,3 +10,4 @@ infra
 artifacts
 tests
 *.md
+!README.md
