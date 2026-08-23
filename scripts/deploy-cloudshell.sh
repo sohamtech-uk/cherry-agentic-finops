@@ -4,7 +4,7 @@ set -Eeuo pipefail
 PROJECT_ID="${1:-${GOOGLE_CLOUD_PROJECT:-}}"
 REGION="${2:-europe-west1}"
 DOMAIN="${3:-finops.cherrymoney.co.uk}"
-SERVICE="cherry-agent"
+SERVICE="cherry-finops"
 REPOSITORY="cherry-agent"
 RUNTIME_SA="cherry-agent-runtime"
 MODEL="${CHERRY_GEMINI_MODEL:-gemini-3.7-flash}"
@@ -114,26 +114,23 @@ gcloud run deploy "${SERVICE}" \
   --max-instances=5 \
   --set-env-vars="CHERRY_ENVIRONMENT=production,CHERRY_PUBLIC_BASE_URL=https://${DOMAIN},CHERRY_PERSISTENCE_BACKEND=firestore,CHERRY_GEMINI_MODEL=${MODEL},GOOGLE_GENAI_USE_VERTEXAI=true,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=global,CHERRY_EVIDENCE_BUCKET=${BUCKET},CHERRY_PUBSUB_TOPIC=${TOPIC}"
 
-PROJECT_NUMBER="$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')"
-DETERMINISTIC_URL="https://${SERVICE}-${PROJECT_NUMBER}.${REGION}.run.app"
-LEGACY_URL="$(gcloud run services describe "${SERVICE}" --region="${REGION}" --format='value(status.url)')"
-SERVICE_URL="${DETERMINISTIC_URL}"
+gcloud run services add-iam-policy-binding "${SERVICE}" \
+  --region="${REGION}" \
+  --member="allUsers" \
+  --role="roles/run.invoker" \
+  --quiet >/dev/null
 
-echo "Cloud Run deterministic URL: ${DETERMINISTIC_URL}"
-if curl --fail --silent --show-error "${DETERMINISTIC_URL}/healthz"; then
+SERVICE_URL="$(gcloud run services describe "${SERVICE}" --region="${REGION}" --format='value(status.url)')"
+echo "Cloud Run URL: ${SERVICE_URL}"
+if curl --fail --silent --show-error "${SERVICE_URL}/healthz"; then
   echo
   echo "Health check passed."
-elif [[ -n "${LEGACY_URL}" && "${LEGACY_URL}" != "${DETERMINISTIC_URL}" ]] && curl --fail --silent --show-error "${LEGACY_URL}/healthz"; then
-  SERVICE_URL="${LEGACY_URL}"
-  echo
-  echo "Health check passed on alternate Cloud Run URL: ${LEGACY_URL}"
 else
   echo
-  echo "WARNING: Cloud Run deployment completed but /healthz did not return HTTP 2xx yet." >&2
-  echo "Check the service directly and inspect logs before changing DNS:" >&2
-  echo "  curl -i ${DETERMINISTIC_URL}/healthz" >&2
-  echo "  gcloud run services describe ${SERVICE} --region=${REGION} --format='yaml(metadata.annotations,status.url)'" >&2
-  echo "  gcloud run services logs read ${SERVICE} --region=${REGION} --limit=50" >&2
+  echo "WARNING: Cloud Run deployment completed but /healthz did not return HTTP 2xx." >&2
+  echo "Try the homepage and public config before changing DNS:" >&2
+  echo "  curl -i ${SERVICE_URL}/" >&2
+  echo "  curl -i ${SERVICE_URL}/api/config" >&2
 fi
 
 BASE_DOMAIN="${DOMAIN#*.}"
