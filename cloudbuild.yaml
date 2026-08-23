@@ -1,7 +1,7 @@
 substitutions:
   _REGION: europe-west1
   _REPOSITORY: cherry-agent
-  _SERVICE: cherry-agent
+  _SERVICE: cherry-finops
   _MODEL: gemini-3.7-flash
 
 steps:
@@ -34,6 +34,8 @@ steps:
       - --region=${_REGION}
       - --platform=managed
       - --allow-unauthenticated
+      - --ingress=all
+      - --default-url
       - --service-account=cherry-agent-runtime@${PROJECT_ID}.iam.gserviceaccount.com
       - --memory=1Gi
       - --cpu=1
