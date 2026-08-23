@@ -112,9 +112,26 @@ gcloud run deploy "${SERVICE}" \
   --max-instances=5 \
   --set-env-vars="CHERRY_ENVIRONMENT=production,CHERRY_PUBLIC_BASE_URL=https://${DOMAIN},CHERRY_PERSISTENCE_BACKEND=firestore,CHERRY_GEMINI_MODEL=${MODEL},GOOGLE_GENAI_USE_VERTEXAI=true,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=global,CHERRY_EVIDENCE_BUCKET=${BUCKET},CHERRY_PUBSUB_TOPIC=${TOPIC}"
 
-SERVICE_URL="$(gcloud run services describe "${SERVICE}" --region="${REGION}" --format='value(status.url)')"
-echo "Cloud Run URL: ${SERVICE_URL}"
-curl --fail --silent --show-error "${SERVICE_URL}/healthz" && echo
+PROJECT_NUMBER="$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')"
+DETERMINISTIC_URL="https://${SERVICE}-${PROJECT_NUMBER}.${REGION}.run.app"
+LEGACY_URL="$(gcloud run services describe "${SERVICE}" --region="${REGION}" --format='value(status.url)')"
+SERVICE_URL="${DETERMINISTIC_URL}"
+
+echo "Cloud Run deterministic URL: ${DETERMINISTIC_URL}"
+if curl --fail --silent --show-error "${DETERMINISTIC_URL}/healthz"; then
+  echo
+  echo "Health check passed."
+elif [[ -n "${LEGACY_URL}" && "${LEGACY_URL}" != "${DETERMINISTIC_URL}" ]] && curl --fail --silent --show-error "${LEGACY_URL}/healthz"; then
+  SERVICE_URL="${LEGACY_URL}"
+  echo
+  echo "Health check passed on alternate Cloud Run URL: ${LEGACY_URL}"
+else
+  echo
+  echo "WARNING: Cloud Run deployment completed but /healthz did not return HTTP 2xx yet." >&2
+  echo "Check the service directly and inspect logs before changing DNS:" >&2
+  echo "  curl -i ${DETERMINISTIC_URL}/healthz" >&2
+  echo "  gcloud run services logs read ${SERVICE} --region=${REGION} --limit=50" >&2
+fi
 
 BASE_DOMAIN="${DOMAIN#*.}"
 if gcloud domains list-user-verified --format='value(id)' 2>/dev/null | grep -qx "${BASE_DOMAIN}"; then
@@ -135,7 +152,7 @@ else
   cat <<MESSAGE
 
 The Cloud Run service is live, but ${BASE_DOMAIN} is not verified for this Google account.
-Complete domain verification, then rerun this script or run:
+Complete domain verification, then run:
 
   gcloud domains verify ${BASE_DOMAIN}
   gcloud beta run domain-mappings create --service=${SERVICE} --domain=${DOMAIN} --region=${REGION}
@@ -147,4 +164,5 @@ MESSAGE
 fi
 
 echo
-echo "Deployment complete. Managed TLS can take from several minutes up to 24 hours after DNS is correct."
+echo "Deployment complete. Cloud Run URL: ${SERVICE_URL}"
+echo "Managed TLS can take from several minutes up to 24 hours after DNS is correct."
