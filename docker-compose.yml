@@ -1,0 +1,11 @@
+services:
+  cherry-agent:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      PORT: 8080
+      CHERRY_ENVIRONMENT: local
+      CHERRY_PERSISTENCE_BACKEND: memory

@@ -1,0 +1,8 @@
+project_id                = "your-google-cloud-project-id"
+region                    = "europe-west1"
+container_image           = "europe-west1-docker.pkg.dev/your-google-cloud-project-id/cherry-agent/cherry-agent:latest"
+gemini_model              = "gemini-3.7-flash"
+domain                    = "finops.cherrymoney.co.uk"
+enable_domain_mapping     = false
+create_firestore_database = false
+public_access              = true

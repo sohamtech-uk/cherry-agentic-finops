@@ -1,74 +1,89 @@
+<p align="center">
+  <img src="docs/images/hero.jpg" alt="Cherry Agent autonomous finance operations" width="920">
+</p>
+
 # Cherry Agent — Autonomous Finance Ops
+
+[![CI](https://github.com/sohamtech-uk/cherry-agentic-finops/actions/workflows/ci.yml/badge.svg)](https://github.com/sohamtech-uk/cherry-agentic-finops/actions/workflows/ci.yml)
 
 Cherry Agent turns bills, receipts and bank-feed events into governed finance workflows:
 
-**extract → categorise → reconcile → approve when needed → produce audit evidence**
+**understand → categorise → reconcile → approve when needed → create audit evidence**
 
-It is a new hackathon implementation built with **Gemini**, **Google Agent Development Kit
-(ADK)**, **FastAPI** and **Google Cloud**. The demo works locally without credentials using
-explicitly labelled synthetic data; real uploads use Gemini when Google credentials are set.
+It is a new hackathon implementation for **Google All Things Agentic**, built with **Gemini 3.5
+Flash**, **Google Agent Development Kit (ADK)**, **FastAPI** and **Google Cloud**. The application
+works locally with explicitly labelled synthetic scenarios. Real PDF/image uploads use Gemini when
+Vertex AI credentials are available.
 
-## Why this is agentic
+## The winning demonstration
 
-A financial event starts the workflow. Cherry Agent calls tools, ranks evidence, applies control
-policies, pauses for human judgment when required, resumes after approval and creates a durable
-audit record. The model does not decide its own financial authority.
+| Scenario | What the judges see | Outcome |
+|---|---|---|
+| Autonomous | Exact amount, date, supplier, reference and currency; value remains below policy threshold | Automatically reconciled |
+| Approval | Strong evidence, but a £12,500 transaction crosses the configured financial threshold | Paused for an identified human |
+| Exception | Supplier/reference match but bank amount differs materially from the evidence | Automation stops and requests evidence |
 
-Three built-in scenarios make the safety boundary visible:
-
-| Scenario | Outcome |
-|---|---|
-| Autonomous | Exact low-value match is auto-reconciled |
-| Approval | Exact high-value match pauses for a human |
-| Exception | Material amount mismatch requests evidence |
+The distinction matters: **Gemini understands context, while deterministic controls grant or deny
+financial authority.** Cherry Agent never initiates a payment.
 
 ## Architecture
 
+<p align="center">
+  <img src="docs/images/architecture.jpg" alt="Cherry Agent Google Cloud architecture" width="920">
+</p>
+
 ```mermaid
 flowchart LR
-  I[Invoice / receipt] --> G[Gemini extraction]
-  B[Bank transactions] --> M[Deterministic matching]
-  G --> C[Categorisation]
+  D[Bill / receipt] --> G[Gemini document extraction]
+  B[Bank-feed event] --> M[Deterministic candidate scoring]
+  G --> C[Category and VAT suggestion]
   C --> M
   M --> R[Risk policy]
-  R --> A[Auto-reconcile]
-  R --> H[Human approval]
-  R --> E[Exception queue]
-  A --> U[Hash-chained audit trail]
+  R -->|High confidence + bounded value| A[Auto-reconcile]
+  R -->|High value / uncertainty| H[Human approval]
+  R -->|Material mismatch| E[Evidence exception]
+  A --> U[SHA-256 audit chain]
   H --> U
   E --> U
-  U --> Z[Evidence ZIP]
-  ADK[Google ADK agent] --> M
+  U --> Z[Evidence ZIP + Cloud Storage]
+  ADK[Google ADK orchestrator] --> M
   ADK --> H
 ```
 
-The existing Cherry Money codebase already contains invoices, expenses, receipt scanning,
-open-banking data and rule-based matching. This repository intentionally implements the
-hackathon agent as a separate service with a narrow optional connector rather than copying the
-Laravel monolith. See [PREEXISTING_CODE.md](PREEXISTING_CODE.md).
+Google Cloud services:
+
+- **Cloud Run** — public application and API
+- **Vertex AI / Gemini 3.7 Flash** — multimodal document understanding and agent reasoning
+- **Firestore** — durable workflow state
+- **Pub/Sub** — event-driven workflow notifications
+- **Cloud Storage** — versioned audit evidence packs
+- **Artifact Registry + Cloud Build** — container delivery
 
 ## Run locally
+
+Python 3.11 or later is required.
 
 ```bash
 git clone git@github.com:sohamtech-uk/cherry-agentic-finops.git
 cd cherry-agentic-finops
 
-python3.11 -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 cp .env.example .env
 
 uvicorn app.api:app --reload --port 8080
 ```
 
-Open <http://localhost:8080> and run the three scenarios.
+Open <http://localhost:8080>.
 
-Tests and linting:
+Run quality checks:
 
 ```bash
 ruff check .
 ruff format --check .
 pytest
+node --check app/static/app.js
 ```
 
 Docker:
@@ -80,93 +95,96 @@ docker compose up --build
 
 ## Run the Google ADK agent
 
-ADK discovers `app/agent.py`, which exports `root_agent`.
+ADK discovers the application under `agents/cherry_finops`.
 
 ```bash
-# Gemini Developer API
-export GOOGLE_API_KEY=your-key
-
-# Or Vertex AI
+# Vertex AI
 export GOOGLE_GENAI_USE_VERTEXAI=true
-export GOOGLE_CLOUD_PROJECT=your-project
+export GOOGLE_CLOUD_PROJECT=your-project-id
 export GOOGLE_CLOUD_LOCATION=global
+export CHERRY_GEMINI_MODEL=gemini-3.7-flash
 
-adk web
-# or, with Google's lifecycle CLI:
-agents-cli playground
+adk web agents
 ```
 
-Example prompts:
+Useful prompts:
 
-- `Run the autonomous finance scenario and explain why it was safe.`
-- `Run the approval scenario and tell me which control stopped automation.`
-- `Inspect workflow wf_... and summarise its audit evidence.`
+- `Run the autonomous finance scenario and explain why automation was permitted.`
+- `Run the approval scenario. Which deterministic control stopped the workflow?`
+- `List the open month-end finance exceptions.`
+- `Approve workflow wf_... as Srinivasan after I explicitly confirm.`
 
-The model is configurable through `CHERRY_GEMINI_MODEL` and defaults to
-`gemini-3.6-flash`. Confirm that this model is enabled in the hackathon project before deployment.
+The control specialist is instructed never to infer approval. An identified human must explicitly
+approve a specific workflow.
 
-## Upload a real invoice or receipt
-
-The API accepts a PDF/image plus bank candidates:
+## Process a real document
 
 ```bash
 curl -X POST http://localhost:8080/api/workflows \
   -F 'document=@invoice.pdf;type=application/pdf' \
-  -F 'transactions_json=[{"booking_date":"2026-08-22","amount":2450,"currency":"GBP","description":"OFFICE SOLUTIONS INV-98214","merchant_name":"Office Solutions Co.","reference":"INV-98214"}]'
+  -F 'transactions_json=[{"transaction_id":"bank-001","booking_date":"2026-08-22","amount":2450,"currency":"GBP","direction":"debit","description":"OFFICE SOLUTIONS INV-98214","merchant_name":"Office Solutions Co.","reference":"INV-98214"}]'
 ```
 
-With Google credentials configured, Gemini produces structured invoice data. Without credentials,
-the local demo uses a clearly marked fallback only when `CHERRY_ALLOW_DEMO_FALLBACK=true`.
+With Google credentials configured, Gemini returns schema-validated finance data. Without Google
+credentials, the real-upload endpoint returns a clear `503`; it does not disguise synthetic data as
+an actual extraction.
 
-## Human-governed controls
+## Evidence and safety controls
 
-The deterministic risk policy blocks silent automation when it sees:
-
-- a currency mismatch;
-- an already-reconciled bank transaction;
-- an amount variance above 2%;
-- a value above the configured approval threshold;
-- a match below the configured confidence threshold.
-
-The service reconciles accounting records only. It does **not** initiate or authorise payments.
-
-## Evidence pack
-
-Every state transition is appended to a SHA-256 hash chain. The evidence endpoint generates a ZIP
-containing a manifest, extracted invoice, ranked bank candidates, risk decision and audit trail:
+Every material transition is appended to a SHA-256 hash chain. The evidence endpoint produces a ZIP
+with the extracted document data, ranked candidates, policy decision, complete workflow and audit
+trail:
 
 ```text
 GET /api/workflows/{workflow_id}/evidence
 ```
 
-## Deploy to Google Cloud
+Silent automation is blocked by:
 
-The Terraform stack under `infra/terraform` provisions the hackathon baseline:
+- currency mismatch;
+- an already-reconciled bank transaction;
+- an amount variance above the configured tolerance;
+- insufficient reconciliation evidence;
+- low document-extraction confidence;
+- a transaction above the explicit approval threshold.
 
-- Cloud Run
-- Artifact Registry
-- Vertex AI API access
-- Firestore database
-- Cloud Storage evidence bucket
-- Pub/Sub topic
-- dedicated runtime service account and least-privilege IAM
+The evidence pack is an operational record, not an external audit opinion or tax advice.
 
-Build and deploy with Cloud Build:
+## Deploy to the selected Google Cloud account
 
-```bash
-gcloud builds submit --config cloudbuild.yaml \
-  --substitutions=_REGION=europe-west2,_REPOSITORY=cherry-agent,_SERVICE=cherry-agent
-```
-
-Or use Terraform after publishing the image:
+The target is **`https://finops.cherrymoney.co.uk`**. The simplest first deployment is through the
+Cloud Shell of the Google account that owns the project:
 
 ```bash
-cd infra/terraform
-terraform init
-terraform apply \
-  -var="project_id=YOUR_PROJECT" \
-  -var="container_image=europe-west2-docker.pkg.dev/YOUR_PROJECT/cherry-agent/cherry-agent:TAG"
+git clone https://github.com/sohamtech-uk/cherry-agentic-finops.git
+cd cherry-agentic-finops
+bash scripts/deploy-cloudshell.sh YOUR_PROJECT_ID
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
-[docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
+The script enables APIs, creates the runtime identity, Artifact Registry, Firestore, Pub/Sub and the
+evidence bucket, builds the container and deploys Cloud Run in `europe-west1`. If domain ownership
+has already been verified, it creates the domain mapping and prints the exact DNS records.
+
+**DNS access is required for the final hostname. FTP credentials cannot add or change DNS records.**
+See [docs/DEPLOY_GCP.md](docs/DEPLOY_GCP.md).
+
+## Repository map
+
+```text
+app/                         FastAPI API, workflow engine and browser UI
+agents/cherry_finops/        Google ADK multi-agent application
+infra/terraform/             Reproducible Google Cloud infrastructure
+scripts/deploy-cloudshell.sh One-command first deployment from Cloud Shell
+tests/                       Matching, policy, audit, workflow and API tests
+docs/                        Architecture, deployment and demo script
+```
+
+## Relationship to Cherry Money
+
+This is a new hackathon service. It does not copy the Cherry Money Laravel monolith or Terraform
+repository. Those repositories informed the domain model and integration boundary. The exact source
+revisions and reuse disclosure are in [PREEXISTING_CODE.md](PREEXISTING_CODE.md).
+
+## Licence
+
+Apache-2.0. Copyright 2026 Soham London CIC.

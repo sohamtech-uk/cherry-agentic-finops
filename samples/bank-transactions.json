@@ -1,0 +1,12 @@
+[
+  {
+    "transaction_id": "sandbox-001",
+    "booking_date": "2026-08-22",
+    "amount": 2450,
+    "currency": "GBP",
+    "direction": "debit",
+    "description": "OFFICE SOLUTIONS INV-98214",
+    "merchant_name": "Office Solutions Co.",
+    "reference": "INV-98214"
+  }
+]
