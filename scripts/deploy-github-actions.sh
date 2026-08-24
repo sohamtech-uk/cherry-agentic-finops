@@ -221,7 +221,7 @@ curl --fail --silent --show-error \
   --retry 12 \
   --retry-delay 5 \
   --retry-all-errors \
-  "${service_url}/healthz"
+  "${service_url}/health"
 
 if ! gcloud compute network-endpoint-groups describe "${SERVERLESS_NEG}" \
   --project="${PROJECT_ID}" \

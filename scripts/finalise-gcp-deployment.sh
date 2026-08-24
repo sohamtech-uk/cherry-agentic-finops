@@ -119,7 +119,7 @@ write_env SERVICE_URL "${service_url}"
 health_ok=false
 health_url=""
 for attempt in $(seq 1 24); do
-  for candidate in "${service_url}/healthz" "${canonical_url}/healthz"; do
+  for candidate in "${service_url}/health" "${canonical_url}/health"; do
     http_code="$(curl --silent --show-error \
       --output /tmp/cherry-agent-health.json \
       --write-out '%{http_code}' \
@@ -137,7 +137,7 @@ for attempt in $(seq 1 24); do
 done
 
 if [[ "${health_ok}" != "true" ]]; then
-  echo "Cloud Run became ready but did not expose /healthz publicly." >&2
+  echo "Cloud Run became ready but did not expose /health publicly." >&2
   if [[ -f /tmp/cherry-agent-health.json ]]; then
     cat /tmp/cherry-agent-health.json >&2 || true
   fi
@@ -304,7 +304,7 @@ if [[ "${DNS_MANUAL}" == "false" && "${certificate_status}" == "ACTIVE" ]]; then
     --retry 8 \
     --retry-delay 10 \
     --retry-all-errors \
-    "https://${DOMAIN}/healthz" >/tmp/cherry-agent-domain-health.json; then
+    "https://${DOMAIN}/health" >/tmp/cherry-agent-domain-health.json; then
     status="live"
     cat /tmp/cherry-agent-domain-health.json
   fi

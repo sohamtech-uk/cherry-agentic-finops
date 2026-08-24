@@ -32,7 +32,7 @@ The script:
 - creates the default Firestore Native database when needed;
 - builds and pushes the container;
 - deploys a public Cloud Run service in `europe-west1`;
-- verifies `/healthz`;
+- verifies `/health`;
 - creates the domain mapping when `cherrymoney.co.uk` is already verified;
 - prints the exact DNS records to add.
 

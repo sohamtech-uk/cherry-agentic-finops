@@ -46,7 +46,7 @@ Show the architecture section or repository:
 - Pub/Sub events
 - Cloud Storage evidence
 
-Open `/healthz` and the Cloud Run service page so the Google Cloud backend is visible.
+Open `/health` and the Cloud Run service page so the Google Cloud backend is visible.
 
 ## 3:45–4:00 — Close
 

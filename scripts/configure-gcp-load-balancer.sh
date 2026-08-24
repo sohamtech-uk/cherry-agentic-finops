@@ -223,7 +223,7 @@ for attempt in $(seq 1 30); do
     --write-out '%{http_code}' \
     --connect-timeout 10 \
     --max-time 30 \
-    "https://${DOMAIN}/healthz" || true)"
+    "https://${DOMAIN}/health" || true)"
   if [[ "${lb_health_status}" == "200" ]]; then
     break
   fi

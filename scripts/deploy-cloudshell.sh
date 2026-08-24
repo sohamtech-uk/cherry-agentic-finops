@@ -122,12 +122,12 @@ gcloud run services add-iam-policy-binding "${SERVICE}" \
 
 SERVICE_URL="$(gcloud run services describe "${SERVICE}" --region="${REGION}" --format='value(status.url)')"
 echo "Cloud Run URL: ${SERVICE_URL}"
-if curl --fail --silent --show-error "${SERVICE_URL}/healthz"; then
+if curl --fail --silent --show-error "${SERVICE_URL}/health"; then
   echo
   echo "Health check passed."
 else
   echo
-  echo "WARNING: Cloud Run deployment completed but /healthz did not return HTTP 2xx." >&2
+  echo "WARNING: Cloud Run deployment completed but /health did not return HTTP 2xx." >&2
   echo "Try the homepage and public config before changing DNS:" >&2
   echo "  curl -i ${SERVICE_URL}/" >&2
   echo "  curl -i ${SERVICE_URL}/api/config" >&2
