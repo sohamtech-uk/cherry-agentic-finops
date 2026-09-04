@@ -22,6 +22,7 @@ dependencies = [
   "google-cloud-storage>=3.1,<4",
   "google-cloud-pubsub>=2.30,<3",
   "httpx>=0.28,<1",
+  "openpyxl>=3.1,<4",
 ]
 
 [project.optional-dependencies]
@@ -54,6 +55,10 @@ exclude = [".venv", ".terraform"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
 ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"app/private_markets.py" = ["E501", "SIM114"]
+"app/private_markets_router.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"

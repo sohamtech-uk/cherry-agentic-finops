@@ -1,0 +1,23 @@
+{
+  "document_type": "capital_call",
+  "fund_name": "Cedar Peak Growth Fund III LP",
+  "investor_name": "Oakfield Pension Trust",
+  "lp_reference": "LP-001",
+  "notice_id": "NCGFIII-CALL-2026-03",
+  "issue_date": "2026-08-28",
+  "due_date": "2026-09-06",
+  "currency": "GBP",
+  "total_commitment": 5000000,
+  "called_before_current": 2750000,
+  "current_call": 1250000,
+  "remaining_after_current": 1000000,
+  "beneficiary": "Cedar Peak Growth Fund III LP",
+  "bank_name": "Harbour Demo Bank plc",
+  "sort_code": "99-99-99",
+  "account_last4": "9437",
+  "payment_reference": "NCGFIII-CALL-2026-03 / LP-001",
+  "purpose": "Portfolio acquisition funding and management fee / fund expenses",
+  "confidence": 100,
+  "source": "fixture",
+  "warnings": []
+}

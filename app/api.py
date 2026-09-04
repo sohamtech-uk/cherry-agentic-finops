@@ -15,6 +15,7 @@ from app.config import get_settings
 from app.container import get_engine
 from app.document_ai import GeminiDocumentExtractor, GeminiUnavailable
 from app.models import ApprovalRequest, BankTransaction, RejectionRequest
+from app.private_markets_router import router as private_markets_router
 from app.workflow import InvalidWorkflowAction, WorkflowNotFound
 
 logging.basicConfig(
@@ -47,6 +48,7 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+app.include_router(private_markets_router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 

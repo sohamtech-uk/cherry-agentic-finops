@@ -1,4 +1,4 @@
-.PHONY: install run test lint format docker adk
+.PHONY: install run test lint format docker adk ylookup-fixtures
 
 install:
 	python -m pip install -e ".[dev]"
@@ -22,3 +22,6 @@ docker:
 
 adk:
 	adk web agents
+
+ylookup-fixtures:
+	python scripts/generate_ylookup_fixtures.py
