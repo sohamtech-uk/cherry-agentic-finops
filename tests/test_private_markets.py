@@ -95,9 +95,7 @@ def test_fixture_case_flags_changed_bank_and_short_receipt() -> None:
         source="fixture",
     )
 
-    analysis = analyse_private_markets_case(
-        call, dataset, cash, as_of_date=date(2026, 9, 5)
-    )
+    analysis = analyse_private_markets_case(call, dataset, cash, as_of_date=date(2026, 9, 5))
 
     assert analysis.action == PrivateMarketsAction.REQUIRE_APPROVAL
     assert analysis.expected_amount == 1_250_000
