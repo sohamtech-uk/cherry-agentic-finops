@@ -230,9 +230,7 @@ class GeminiCapitalCallExtractor:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
 
-    async def extract(
-        self, content: bytes, mime_type: str, filename: str
-    ) -> CapitalCallExtraction:
+    async def extract(self, content: bytes, mime_type: str, filename: str) -> CapitalCallExtraction:
         if not self._settings.google_ready:
             raise GeminiPrivateMarketsUnavailable(
                 "Gemini is not configured. Set GOOGLE_CLOUD_PROJECT for Vertex AI or GOOGLE_API_KEY."
@@ -474,9 +472,7 @@ def analyse_private_markets_case(
             )
 
         calculated_remaining = money(
-            commitment.total_commitment
-            - commitment.called_before_current
-            - commitment.current_call
+            commitment.total_commitment - commitment.called_before_current - commitment.current_call
         )
         if (
             commitment.remaining_after_current is not None
