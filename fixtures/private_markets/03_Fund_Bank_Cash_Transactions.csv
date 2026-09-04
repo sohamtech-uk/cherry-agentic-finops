@@ -1,0 +1,4 @@
+transaction_id,booking_date,direction,amount_gbp,currency,counterparty,reference,description,status
+TXN-2026-0904-001,2026-09-04,CREDIT,875000.00,GBP,Northbridge Family Office,NCGFIII-CALL-2026-03 / LP-002,Capital contribution - Northbridge,BOOKED
+TXN-2026-0904-002,2026-09-04,CREDIT,1000000.00,GBP,Horizon Community Foundation,NCGFIII-CALL-2026-03 / LP-004,Capital contribution - Horizon,BOOKED
+TXN-2026-0905-003,2026-09-05,CREDIT,1249500.00,GBP,Oakfield Pension Trust,NCGFIII-CALL-2026-03 / LP-001,Capital contribution - Oakfield,BOOKED
