@@ -56,6 +56,10 @@ exclude = [".venv", ".terraform"]
 select = ["E", "F", "I", "B", "UP", "SIM"]
 ignore = ["B008"]
 
+[tool.ruff.lint.per-file-ignores]
+"app/private_markets.py" = ["E501", "SIM114"]
+"app/private_markets_router.py" = ["E501"]
+
 [tool.mypy]
 python_version = "3.11"
 warn_return_any = true
