@@ -45,7 +45,9 @@ async def analyse_private_markets(
     ],
     capital_call: Annotated[
         UploadFile | None,
-        File(description="Capital-call/distribution PDF or image. Optional with capital_call_json."),
+        File(
+            description="Capital-call/distribution PDF or image. Optional with capital_call_json."
+        ),
     ] = None,
     capital_call_json: Annotated[
         str | None,
@@ -82,7 +84,9 @@ async def analyse_private_markets(
             payload.setdefault("source", "manual")
             call = CapitalCallExtraction.model_validate(payload)
         except (json.JSONDecodeError, ValidationError, ValueError) as exc:
-            raise HTTPException(status_code=422, detail=f"Invalid capital_call_json: {exc}") from exc
+            raise HTTPException(
+                status_code=422, detail=f"Invalid capital_call_json: {exc}"
+            ) from exc
     else:
         if capital_call is None:
             raise HTTPException(
