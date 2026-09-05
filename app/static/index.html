@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Cherry FundOps reconciles capital calls across notices, commitment workbooks and optional fund cash evidence.">
-  <title>Cherry FundOps — Capital call control room</title>
+  <meta name="description" content="Cherry FundOps reconciles private-markets evidence across PDFs, fund workbooks and optional cash data.">
+  <title>Cherry FundOps — Private markets control room</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2216%22 fill=%22%23bdf28d%22/><text x=%2232%22 y=%2243%22 text-anchor=%22middle%22 font-size=%2236%22 font-family=%22Arial%22 font-weight=%22700%22 fill=%22%23123c32%22>C</text></svg>">
   <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/ylookup.css">
 </head>
 <body>
   <header class="topbar">
@@ -20,9 +21,9 @@
       <div class="hero-copy">
         <p class="eyebrow">Ylookup × Encode · Private markets track</p>
         <h1>Close capital calls<br><em>before they become fund risk.</em></h1>
-        <p class="hero-lead">One control room reads the notice, checks the LP ledger, matches fund cash when available and routes every exception to the right owner—with evidence attached.</p>
+        <p class="hero-lead">One control room understands private-markets evidence, checks ledgers and working files, matches cash when available and routes exceptions to the right owner—with evidence attached.</p>
         <div class="hero-actions"><button class="button primary" data-scenario="exception">Run live control check <span>→</span></button><a class="button secondary" href="#workflow">See the workflow</a></div>
-        <div class="proof-row"><span><b>3</b> evidence types supported</span><span><b>0</b> payment permissions</span><span><b>&lt;5s</b> to triage</span></div>
+        <div class="proof-row"><span><b>3</b> sponsor workflows understood</span><span><b>0</b> payment permissions</span><span><b>1</b> governed review workspace</span></div>
       </div>
       <div class="hero-terminal" role="group" aria-label="Example control result">
         <div class="terminal-bar"><span></span><span></span><span></span><small>CASE CPGF-2026-03-LP001</small></div>
@@ -33,7 +34,7 @@
       </div>
     </section>
 
-    <section class="source-strip" aria-label="Evidence flow"><span>Capital call PDF(s)</span><i>+</i><span>LP commitment Excel(s)</span><i>+</i><span>Optional fund cash JSON</span><i>→</i><strong>Governed case batch</strong></section>
+    <section class="source-strip" aria-label="Evidence flow"><span>PDF document batch</span><i>+</i><span>Fund Excel workbooks</span><i>+</i><span>Optional cash JSON</span><i>→</i><strong>Auto-routed governed workflows</strong></section>
 
     <section class="control-room" id="control-room">
       <div class="section-head">
@@ -75,19 +76,20 @@
 
     <section class="workflow-section" id="workflow">
       <div class="section-head compact"><div><p class="eyebrow">Designed for fund operations</p><h2>From fragmented evidence to controlled close.</h2></div></div>
-      <div class="workflow-grid"><article><b>01</b><span>Understand</span><h3>Read every notice</h3><p>Gemini converts each capital-call PDF into schema-validated fund data with confidence and warnings.</p></article><article><b>02</b><span>Reconcile</span><h3>Cross-check the books</h3><p>Deterministic rules compare the merged Excel commitment evidence and, when supplied, the JSON cash feed.</p></article><article><b>03</b><span>Control</span><h3>Stop silent risk</h3><p>Changed banking details, ledger breaks, missing cash evidence and weak evidence block automation by design.</p></article><article><b>04</b><span>Enrich</span><h3>Use Agent Studio</h3><p>The FundOps Agent Studio microservice reviews, reconciles and prioritises exceptions without taking over Cherry's financial control decision.</p></article></div>
+      <div class="workflow-grid"><article><b>01</b><span>Understand</span><h3>Auto-detect the workflow</h3><p>Cherry distinguishes capital-call controls, bank-statement working files and investor-level GL migration evidence instead of forcing every workbook into one schema.</p></article><article><b>02</b><span>Reconcile</span><h3>Cross-check the books</h3><p>Deterministic rules analyse the native workbook contract and optional cash feed, preserving deliberate unmatched rows as exceptions.</p></article><article><b>03</b><span>Control</span><h3>Stop silent risk</h3><p>Mapping gaps, unresolved counterparties, changed banking details and weak evidence are surfaced rather than silently filled.</p></article><article><b>04</b><span>Enrich</span><h3>Use AI where it helps</h3><p>Gemini and Agent Studio can enrich document understanding while Cherry retains the financial control boundary.</p></article></div>
     </section>
 
     <section class="upload-section" id="upload">
-      <div class="upload-copy"><p class="eyebrow">Bring your own evidence</p><h2>PDFs + Excel workbooks → a review-ready case batch.</h2><p>Cherry extracts every selected PDF and merges supported Excel commitment/control workbooks. Add JSON cash transactions when available for cash reconciliation; without JSON, Cherry still analyses the document and ledger evidence and marks cash-dependent controls as needing evidence.</p><ul><li>One or more PDF capital-call notices</li><li>One or more XLSX commitment/control workbooks</li><li>Optional UTF-8 JSON cash/bank export</li><li>Protected deployments require the demo token supplied by the team</li></ul></div>
-      <form class="upload-card" id="upload-form"><label><span>Capital call notices · PDF(s)</span><input id="capital-call-input" type="file" accept="application/pdf,.pdf" multiple required><small id="capital-call-count">Select one or more PDFs</small></label><label><span>LP commitments &amp; controls · Excel workbook(s)</span><input id="commitments-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple required><small id="commitments-count">Select one or more workbooks</small></label><label><span>Fund cash transactions · JSON <small>(optional)</small></span><input id="cash-input" type="file" accept=".json,application/json"><small>Leave blank to analyse PDF + Excel only</small></label><label><span>Control date</span><input id="as-of-input" type="date" value="2026-09-05"></label><label><span>Demo upload token <small>(protected deployment only)</small></span><input id="upload-token" type="password" autocomplete="off" placeholder="Not stored in the browser"></label><button class="button primary" type="submit">Analyse selected evidence <span>→</span></button><p class="form-message" id="upload-message">Every PDF becomes its own governed case. Cash evidence is optional and can be added when available.</p><label id="batch-case-picker" class="hidden"><span>Processed cases</span><select id="batch-case-select" aria-label="Choose processed case to review"></select></label></form>
+      <div class="upload-copy"><p class="eyebrow">Bring your own evidence</p><h2>PDFs + fund workbooks → automatically routed analysis.</h2><p>Cherry first checks whether your files match the Ylookup sponsor datasets. Bank-statement working files and investor-level GLs are analysed in their native workflows; capital-call workbooks continue through the governed reconciliation flow. JSON cash evidence is optional.</p><ul><li>PDF capital-call notices or bank statements</li><li>XLSX LP commitments, bank-statement working files, investor GLs or loader samples</li><li>Optional UTF-8 JSON cash/bank export for capital-call cash reconciliation</li><li>Protected deployments require the demo token supplied by the team</li></ul></div>
+      <form class="upload-card" id="upload-form"><label><span>Documents · PDF(s)</span><input id="capital-call-input" type="file" accept="application/pdf,.pdf" multiple required><small id="capital-call-count">Select one or more PDFs</small></label><label><span>Fund workbooks · Excel workbook(s)</span><input id="commitments-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple required><small id="commitments-count">LP commitments, bank working files, investor GLs and loader samples are supported</small></label><label><span>Fund cash transactions · JSON <small>(optional)</small></span><input id="cash-input" type="file" accept=".json,application/json"><small>Leave blank when the sponsor workflow does not use a JSON cash feed</small></label><label><span>Control date</span><input id="as-of-input" type="date" value="2026-09-05"></label><label><span>Demo upload token <small>(protected deployment only)</small></span><input id="upload-token" type="password" autocomplete="off" placeholder="Not stored in the browser"></label><button class="button primary" type="submit">Analyse selected evidence <span>→</span></button><p class="form-message" id="upload-message">Cherry will auto-detect the workbook contract before applying workflow-specific controls.</p><label id="batch-case-picker" class="hidden"><span>Processed cases</span><select id="batch-case-select" aria-label="Choose processed case to review"></select></label></form>
+      <div id="dataset-results" class="dataset-results hidden" aria-live="polite"></div>
     </section>
 
-    <section class="boundary"><div><span>Decision boundary</span><h2>AI interprets evidence.<br>Controls decide what can proceed.</h2></div><p>Cherry FundOps is the control authority. Agent Studio enriches the case but cannot initiate payments, bypass controls or independently approve changed bank instructions.</p></section>
+    <section class="boundary"><div><span>Decision boundary</span><h2>AI interprets evidence.<br>Controls decide what can proceed.</h2></div><p>Cherry FundOps is the control authority. AI enrichment cannot initiate payments, bypass controls or independently approve changed bank instructions.</p></section>
   </main>
 
-  <footer><a class="brand" href="#top"><span class="brand-mark">C</span><span>Cherry <strong>FundOps</strong></span></a><p>Built for Rebuild Private Markets · Ylookup × Encode</p><p>PDF(s) + Excel(s) + optional JSON · No payment initiation</p></footer>
-  <div class="toast" id="toast" role="status" aria-live="polite"></div><div class="loading hidden" id="loading"><div class="loader"></div><strong>Reconciling the evidence batch</strong><span>PDFs → Excel workbooks → optional JSON → controls → Agent Studio</span></div>
+  <footer><a class="brand" href="#top"><span class="brand-mark">C</span><span>Cherry <strong>FundOps</strong></span></a><p>Built for Rebuild Private Markets · Ylookup × Encode</p><p>Native sponsor datasets + governed controls · No payment initiation</p></footer>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div><div class="loading hidden" id="loading"><div class="loader"></div><strong>Analysing the evidence batch</strong><span>Detect workflow → validate → reconcile → surface exceptions</span></div>
   <script src="/static/app.js" defer></script>
 </body>
 </html>

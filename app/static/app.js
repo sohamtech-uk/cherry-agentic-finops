@@ -20,7 +20,7 @@ function toast(message, error = false) {
 async function api(path, options = {}) {
   const response = await fetch(path, options); let body;
   try { body = await response.json(); } catch { body = {}; }
-  if (!response.ok) throw new Error(body.detail || `${response.status} ${response.statusText}`);
+  if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : body.detail?.message || `${response.status} ${response.statusText}`);
   return body;
 }
 function actionCopy(action) { return { auto_reconcile: ["Ready to reconcile", "good"], require_approval: ["Independent approval", "warning"], request_evidence: ["Hold · evidence required", "danger"] }[action] || [titleise(action), "warning"]; }
@@ -69,7 +69,44 @@ function updateFileCounts() {
   const pdfCount = $("#capital-call-input")?.files.length || 0;
   const excelCount = $("#commitments-input")?.files.length || 0;
   if ($("#capital-call-count")) $("#capital-call-count").textContent = pdfCount ? `${pdfCount} PDF${pdfCount === 1 ? "" : "s"} selected` : "Select one or more PDFs";
-  if ($("#commitments-count")) $("#commitments-count").textContent = excelCount ? `${excelCount} workbook${excelCount === 1 ? "" : "s"} selected` : "Select one or more workbooks";
+  if ($("#commitments-count")) $("#commitments-count").textContent = excelCount ? `${excelCount} workbook${excelCount === 1 ? "" : "s"} selected` : "LP commitments, bank working files, investor GLs and loader samples are supported";
+}
+
+function workflowStatus(status) {
+  return { ready: "Ready", source_profiled: "Source profiled", ready_for_mapping: "Ready for mapping", needs_loader_sample: "Needs loader sample", review_required: "Review required" }[status] || titleise(status);
+}
+function renderDatasetResults(result) {
+  const container = $("#dataset-results");
+  const profiles = result.workbook_profiles || [];
+  const workflows = result.workflows || [];
+  const profileHtml = profiles.map((profile) => `<span class="dataset-chip"><b>${escapeHtml(titleise(profile.kind))}</b>${escapeHtml(profile.file_name)}</span>`).join("");
+  const workflowHtml = workflows.map((workflow) => {
+    if (workflow.workflow === "bank_statements_to_journal_entries") {
+      const exceptions = (workflow.sample_exceptions || []).map((item) => `<div class="dataset-exception"><b>Row ${escapeHtml(item.row)}</b><span>${escapeHtml((item.reasons || []).join(" · "))}</span><p>${escapeHtml(item.narrative || "")}</p></div>`).join("");
+      return `<article class="dataset-workflow"><div class="dataset-head"><div><small>SPONSOR WORKFLOW 01</small><h3>${escapeHtml(workflow.title)}</h3><p>${escapeHtml(workflow.message)}</p></div><b class="dataset-status review">${escapeHtml(workflowStatus(workflow.status))}</b></div><div class="dataset-metrics"><div><span>Statement rows</span><strong>${escapeHtml(workflow.total_transactions)}</strong></div><div><span>Journal lines</span><strong>${escapeHtml(workflow.journal_lines)}</strong><small>${workflow.journal_line_count_matches ? "2 lines per statement row ✓" : `Expected ${escapeHtml(workflow.journal_expected_lines)}`}</small></div><div><span>Counterparty gaps</span><strong>${escapeHtml(workflow.unmatched_counterparties)}</strong></div><div><span>Project gaps</span><strong>${escapeHtml(workflow.project_code_gaps)}</strong></div><div><span>Position gaps</span><strong>${escapeHtml(workflow.position_gaps)}</strong></div><div><span>Explicit Review rows</span><strong>${escapeHtml(workflow.review_rows)}</strong></div></div><div class="dataset-proof"><span><b>${escapeHtml(workflow.pdf_count)}</b> bank-statement PDFs supplied</span><span><b>${escapeHtml(workflow.matched_statement_files)}</b> filenames matched to account map</span><span><b>${escapeHtml(workflow.review_queue_rows)}</b> rows need attention</span></div>${exceptions ? `<div class="dataset-exceptions"><h4>Sample exception queue</h4>${exceptions}</div>` : ""}</article>`;
+    }
+    if (workflow.workflow === "investor_gl_to_loader") {
+      return `<article class="dataset-workflow"><div class="dataset-head"><div><small>SPONSOR WORKFLOW 02</small><h3>${escapeHtml(workflow.title)}</h3><p>${escapeHtml(workflow.message)}</p></div><b class="dataset-status">${escapeHtml(workflowStatus(workflow.status))}</b></div><div class="dataset-metrics"><div><span>GL rows</span><strong>${Number(workflow.row_count || 0).toLocaleString("en-GB")}</strong></div><div><span>Columns</span><strong>${escapeHtml(workflow.column_count)}</strong></div><div><span>Legal entities</span><strong>${escapeHtml(workflow.legal_entity_count)}</strong></div><div><span>Investors</span><strong>${escapeHtml(workflow.investor_count)}</strong></div><div><span>Deals</span><strong>${escapeHtml(workflow.deal_count)}</strong></div><div><span>GL accounts</span><strong>${escapeHtml(workflow.gl_account_count)}</strong></div></div><div class="dataset-proof"><span>Loader sample ${workflow.loader_sample_supplied ? "supplied ✓" : "not supplied"}</span><span><b>${escapeHtml(workflow.transaction_type_count)}</b> transaction types</span><span><b>${escapeHtml(workflow.transaction_currency_count)}</b> transaction currencies</span></div></article>`;
+    }
+    if (workflow.workflow === "loader_target_contract") {
+      return `<article class="dataset-workflow compact"><div class="dataset-head"><div><small>TARGET CONTRACT</small><h3>${escapeHtml(workflow.title)}</h3><p>${escapeHtml(workflow.workbook)}</p></div><b class="dataset-status">${escapeHtml(workflowStatus(workflow.status))}</b></div><div class="dataset-proof"><span><b>${escapeHtml(workflow.target_column_count)}</b> target columns</span><span>Required IDs ${workflow.required_target_fields_present ? "present ✓" : "need review"}</span></div></article>`;
+    }
+    return "";
+  }).join("");
+  container.innerHTML = `<div class="dataset-title"><p class="eyebrow">Auto-detected sponsor evidence</p><h2>Native Ylookup workflows, not a forced LP schema.</h2><p>${escapeHtml(result.message || "")}</p></div><div class="dataset-chips">${profileHtml}</div>${workflowHtml}`;
+  container.classList.remove("hidden");
+  renderBatchPicker([]);
+}
+async function tryYlookupDataset(pdfFiles, excelFiles, headers) {
+  const form = new FormData();
+  pdfFiles.forEach((file) => form.append("documents", file));
+  excelFiles.forEach((file) => form.append("workbooks", file));
+  const response = await fetch("/api/ylookup/analyse", { method: "POST", body: form, headers });
+  let body = {};
+  try { body = await response.json(); } catch { body = {}; }
+  if (response.ok) return body;
+  if (response.status === 422 && body.detail?.code === "not_ylookup_dataset") return null;
+  throw new Error(typeof body.detail === "string" ? body.detail : body.detail?.message || `${response.status} ${response.statusText}`);
 }
 async function runScenario(scenario, shouldScroll = true) {
   loading(true); $$('[data-scenario]').forEach((button) => button.classList.toggle("active", button.dataset.scenario === scenario));
@@ -90,26 +127,37 @@ async function uploadEvidence(event) {
     toast("Select at least one PDF and one Excel workbook.", true);
     return;
   }
-  const form = new FormData();
-  pdfFiles.forEach((file) => form.append("capital_call", file));
-  excelFiles.forEach((file) => form.append("commitments", file));
-  if (jsonFile) form.append("fund_json", jsonFile);
-  if ($("#as-of-input").value) form.append("as_of_date", $("#as-of-input").value);
   const token = $("#upload-token")?.value.trim();
   const headers = token ? { "X-Cherry-Demo-Token": token } : {};
-  const cashMessage = jsonFile ? " with JSON cash evidence" : " without cash JSON";
-  $("#upload-message").textContent = `Processing ${pdfFiles.length} PDF${pdfFiles.length === 1 ? "" : "s"} and ${excelFiles.length} Excel workbook${excelFiles.length === 1 ? "" : "s"}${cashMessage}…`;
+  $("#upload-message").textContent = `Detecting workflow for ${pdfFiles.length} PDF${pdfFiles.length === 1 ? "" : "s"} and ${excelFiles.length} workbook${excelFiles.length === 1 ? "" : "s"}…`;
+  $("#dataset-results")?.classList.add("hidden");
   loading(true);
   try {
+    const ylookupResult = await tryYlookupDataset(pdfFiles, excelFiles, headers);
+    if (ylookupResult) {
+      renderDatasetResults(ylookupResult);
+      $("#upload-message").textContent = `Sponsor dataset detected: ${ylookupResult.workflows?.length || 0} workflow${(ylookupResult.workflows?.length || 0) === 1 ? "" : "s"} analysed without requiring an LP_Commitments sheet.`;
+      $("#dataset-results").scrollIntoView({ behavior: "smooth", block: "start" });
+      toast("Ylookup sponsor evidence analysed in its native workflow.");
+      return;
+    }
+
+    const form = new FormData();
+    pdfFiles.forEach((file) => form.append("capital_call", file));
+    excelFiles.forEach((file) => form.append("commitments", file));
+    if (jsonFile) form.append("fund_json", jsonFile);
+    if ($("#as-of-input").value) form.append("as_of_date", $("#as-of-input").value);
+    const cashMessage = jsonFile ? " with JSON cash evidence" : " without cash JSON";
+    $("#upload-message").textContent = `Capital-call workflow detected. Processing ${pdfFiles.length} PDF${pdfFiles.length === 1 ? "" : "s"} and ${excelFiles.length} workbook${excelFiles.length === 1 ? "" : "s"}${cashMessage}…`;
     const result = await api("/api/private-markets/analyse-integrated", { method: "POST", body: form, headers });
     const cases = Array.isArray(result.cases) && result.cases.length ? result.cases : [result];
     renderBatchPicker(cases);
     renderCase({ ...cases[0], synthetic: false, transactions: [] });
     const batch = result.batch || { pdf_count: pdfFiles.length, excel_count: excelFiles.length, case_count: cases.length, json_count: jsonFile ? 1 : 0 };
     const cashSummary = batch.json_count ? "cash evidence included" : "cash evidence pending";
-    $("#upload-message").textContent = `Batch ${result.batch_id || result.case_id}: ${batch.case_count} governed case${batch.case_count === 1 ? "" : "s"} from ${batch.pdf_count} PDF${batch.pdf_count === 1 ? "" : "s"} + ${batch.excel_count} Excel workbook${batch.excel_count === 1 ? "" : "s"}; ${cashSummary}.`;
+    $("#upload-message").textContent = `Batch ${result.batch_id || result.case_id}: ${batch.case_count} governed case${batch.case_count === 1 ? "" : "s"}; ${cashSummary}.`;
     $("#control-room").scrollIntoView({ behavior: "smooth" });
-    toast(`${batch.case_count} case${batch.case_count === 1 ? "" : "s"} analysed · ${cashSummary}.`);
+    toast(`${batch.case_count} capital-call case${batch.case_count === 1 ? "" : "s"} analysed · ${cashSummary}.`);
   } catch (error) {
     $("#upload-message").textContent = error.message;
     renderBatchPicker([]);
