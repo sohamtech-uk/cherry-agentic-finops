@@ -53,6 +53,80 @@ flowchart LR
 **Control boundary:** Agent Studio enriches the case but does not grant financial authority. Cherry's
 deterministic controls remain authoritative, and neither service initiates a payment.
 
+## Contract Agent for NAV quality control
+
+The contract specialist turns LPA and side-letter evidence into cited, effective-dated investor
+rules that deterministic NAV checks can consume. Its constrained tool surface is:
+
+```text
+search_lpa()
+search_side_letter()
+extract_clause()
+get_effective_date()
+get_investor_rule()
+```
+
+The service preserves document SHA-256 hashes, section references and PDF page numbers. It applies
+investor-specific side-letter terms ahead of the LPA only when the term is active and unambiguous.
+Missing dates, conflicting clauses and terms that cannot be structured are returned as
+`review_required`; they are never guessed.
+
+The judge-facing Contract Agent demo is a context-derived extension grounded in Ylookup Call 1.
+The sponsor pack did not contain an LPA or side letter, so the checked-in documents, parties and
+figures are prominently labelled synthetic and kept outside sponsor-native metrics.
+
+```text
+Cedar Pension Trust commitment                GBP 20,000,000
+Quarterly management fee @ 0.50%                 GBP 100,000
+Base investment contribution                   GBP 1,000,000
+Side-letter expected total                     GBP 1,000,000
+Administrator total                            GBP 1,100,000
+Potential overcall                               GBP 100,000
+```
+
+Orchard Institutional LP has no side-letter override and passes at GBP 1,100,000 under the LPA
+default. This proves that the Cedar exception is not applied across the investor population.
+
+Run the synthetic, cited demonstration:
+
+```text
+POST /api/contracts/demo/side-letter-fee
+```
+
+```mermaid
+flowchart LR
+  L[LPA] --> X[Contract extraction]
+  S[Side letter] --> X
+  I[Investor identity] --> R[Deterministic rule resolver]
+  X --> R
+  R --> C[Deterministic fee controls]
+  A[Administrator calculation] --> C
+  C --> P[Pass]
+  C --> H[Human review]
+  H --> E[Source-linked evidence + owned work]
+```
+
+The NAV Quality Controller can consume rules resolved from uploaded contract evidence by setting
+`use_contract_documents=true` on `POST /api/nav-quality/review`. It refuses to auto-apply a rule
+without an exact investor match, explicit override language, an effective date, and a complete
+document/page/section/hash locator.
+
+Production-style contract endpoints are protected by the same `X-Cherry-Demo-Token` policy as
+private-markets uploads:
+
+```text
+POST /api/contracts/documents
+POST /api/contracts/search/lpa
+POST /api/contracts/search/side-letter
+GET  /api/contracts/documents/{document_id}/clauses/{section_reference}
+GET  /api/contracts/documents/{document_id}/effective-date
+POST /api/contracts/investor-rules/resolve
+POST /api/contracts/nav-checks/investor-capital
+```
+
+Parsed contract evidence is held in ephemeral memory for the hackathon deployment and is removed by
+`POST /api/session/clear-memory`. Raw upload bytes are not retained.
+
 ## FundOps Agent Studio microservice
 
 Sunil's `fundops-agent-studio` backend is kept as a separate service instead of copying it into this
@@ -183,7 +257,8 @@ Multipart inputs:
 | --- | --- | --- |
 | `nav_summary` | yes | administrator's reported NAV summary `.json` (balance sheet, NAV bridge, investor capital) |
 | `source_ledger` | no | investor-level GL export `.xlsx`, to independently recompute the balance sheet, NAV and investor capital |
-| `side_letter_rules` | no | structured side-letter terms `.json` (e.g. management fee offsets called capital) |
+| `side_letter_rules` | no | structured side-letter terms `.json`; incomplete source locators route to review |
+| `use_contract_documents` | no | resolve investor terms from documents already ingested through `/api/contracts` |
 
 Every check is plain `Decimal` arithmetic, never an LLM: does the balance sheet foot to equity, does
 the NAV bridge (opening + contributions + investment movement + income − expenses − distributions)
@@ -191,7 +266,9 @@ foot to the reported closing NAV, does an independent recalculation from the sou
 the reported NAV, does each investor's capital account agree with the ledger (and any side-letter
 term that applies to it)? The response is a recommended action
 (`ready_to_submit` / `needs_review` / `return_to_administrator`) plus findings, work items and
-SHA-256 evidence hashes for every input — it never posts a correcting entry or amends the NAV itself.
+SHA-256 evidence hashes for every input — including resolved contract rules when selected — and it
+never posts a correcting entry or amends the NAV itself. Production deployments protect this upload
+with the same `X-Cherry-Demo-Token` policy as the other private-markets evidence routes.
 
 This ships as a standalone endpoint (see `/api/docs`); it is not yet wired into the shared
 auto-detect upload form described above.
@@ -259,6 +336,9 @@ app/private_markets_router.py                legacy/demo and Cherry Money routes
 app/private_markets_integration_router.py    PDF + Excel + JSON orchestration
 app/nav_quality.py                           NAV Quality Controller schemas, GL parser and checks
 app/nav_quality_router.py                    NAV Quality Controller endpoint
+app/contracts.py                             contract evidence, precedence and NAV rule checks
+app/contract_tools.py                        constrained contract specialist tools
+app/contract_router.py                       contract ingestion, search and NAV APIs
 app/fundops_studio.py                        Agent Studio microservice client
 app/static/                                  judge-facing control-room UI
 fixtures/private_markets/                    synthetic backup data

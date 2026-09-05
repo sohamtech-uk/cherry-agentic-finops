@@ -25,6 +25,63 @@ async function api(path, options = {}) {
 }
 function actionCopy(action) { return { auto_reconcile: ["Ready to reconcile", "good"], require_approval: ["Independent approval", "warning"], request_evidence: ["Hold · evidence required", "danger"] }[action] || [titleise(action), "warning"]; }
 
+function contractSourceLabel(rule) {
+  const source = rule?.source || {};
+  return `${source.file_name || "Document"} · §${source.section_reference || "—"} · page ${source.page_number || "—"}`;
+}
+function renderContractDemo(payload) {
+  const analysis = payload.analysis || {};
+  const calculations = analysis.calculation_results || [];
+  const cedar = calculations.find((item) => item.investor_name === "Cedar Pension Trust");
+  const orchard = calculations.find((item) => item.investor_name === "Orchard Institutional LP");
+  const lpaRule = (payload.rules || []).find((rule) => rule.scope === "fund_default");
+  const sideRule = (payload.rules || []).find((rule) => rule.scope === "investor_specific");
+  const finding = (analysis.findings || []).find((item) => item.code === "SIDE_LETTER_FEE_OVERRIDE_NOT_APPLIED");
+  const workItem = (analysis.work_items || [])[0];
+  if (!cedar || !orchard || !lpaRule || !sideRule || !finding || !workItem) throw new Error("Contract demo response is incomplete.");
+
+  $("#contract-decision-title").textContent = titleise(analysis.decision);
+  $("#contract-overcall").textContent = money(analysis.potential_overcall, cedar.currency);
+  $("#contract-context-source").textContent = payload.context_source;
+  $("#contract-lpa-rule").textContent = lpaRule.value;
+  $("#contract-lpa-source").textContent = contractSourceLabel(lpaRule);
+  $("#contract-side-rule").textContent = sideRule.value;
+  $("#contract-side-source").textContent = contractSourceLabel(sideRule);
+  $("#contract-commitment").textContent = money(cedar.commitment, cedar.currency);
+  $("#contract-fee").textContent = money(cedar.calculated_management_fee, cedar.currency);
+  $("#contract-base").textContent = money(cedar.base_investment_contribution, cedar.currency);
+  $("#contract-expected").textContent = money(cedar.expected_total_cash_payable, cedar.currency);
+  $("#contract-observed").textContent = money(cedar.observed_total_cash_payable, cedar.currency);
+  $("#contract-variance").textContent = money(cedar.variance, cedar.currency);
+  $("#contract-component-total").textContent = money(cedar.expected_total_cash_payable, cedar.currency);
+  $("#contract-net-investment").textContent = money(cedar.expected_investment_component, cedar.currency);
+  $("#contract-fee-component").textContent = money(cedar.expected_fee_component, cedar.currency);
+  $("#contract-finding-code").textContent = finding.code;
+  $("#contract-finding-title").textContent = finding.title;
+  $("#contract-finding-detail").textContent = finding.detail;
+  $("#contract-work-owner").textContent = `OWNER · ${workItem.owner}`;
+  $("#contract-work-title").textContent = workItem.title;
+  $("#contract-work-instruction").textContent = workItem.instruction;
+  $("#contract-standard-investor").textContent = orchard.investor_name;
+  $("#contract-standard-expected").textContent = money(orchard.expected_total_cash_payable, orchard.currency);
+  $("#contract-standard-observed").textContent = money(orchard.observed_total_cash_payable, orchard.currency);
+  $("#contract-evidence-hash").textContent = payload.evidence.fixture_manifest_sha256;
+  $("#contract-results").classList.remove("hidden");
+}
+async function runContractDemo() {
+  loading(true);
+  try {
+    const payload = await api("/api/contracts/demo/side-letter-fee", { method: "POST" });
+    renderContractDemo(payload);
+    $("#contract-results").scrollIntoView({ behavior: "smooth", block: "start" });
+    toast(`Contract control stopped a ${money(payload.analysis.potential_overcall)} potential overcall.`);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    loading(false);
+  }
+}
+
 function renderFindings(findings) {
   $("#finding-count").textContent = `${findings.length} controls`;
   $("#finding-list").innerHTML = findings.map((finding) => `<div class="finding ${escapeHtml(finding.severity)}"><span class="finding-icon">${finding.severity === "pass" ? "✓" : finding.severity === "high" ? "!" : "·"}</span><div><strong>${escapeHtml(finding.title)}</strong><p>${escapeHtml(finding.detail)}</p>${finding.expected || finding.observed ? `<small>${finding.expected ? `Expected ${escapeHtml(finding.expected)}` : ""}${finding.expected && finding.observed ? " · " : ""}${finding.observed ? `Observed ${escapeHtml(finding.observed)}` : ""}</small>` : ""}</div></div>`).join("");
@@ -90,7 +147,7 @@ function renderDatasetResults(result) {
       return `<article class="dataset-workflow"><div class="dataset-head"><div><small>SPONSOR WORKFLOW 02</small><h3>${escapeHtml(workflow.title)}</h3><p>${escapeHtml(workflow.message)}</p></div><b class="dataset-status">${escapeHtml(workflowStatus(workflow.status))}</b></div><div class="dataset-metrics"><div><span>GL rows</span><strong>${Number(workflow.row_count || 0).toLocaleString("en-GB")}</strong></div><div><span>Columns</span><strong>${escapeHtml(workflow.column_count)}</strong></div><div><span>Legal entities</span><strong>${escapeHtml(workflow.legal_entity_count)}</strong></div><div><span>Investors</span><strong>${escapeHtml(workflow.investor_count)}</strong></div><div><span>Deals</span><strong>${escapeHtml(workflow.deal_count)}</strong></div><div><span>GL accounts</span><strong>${escapeHtml(workflow.gl_account_count)}</strong></div></div><div class="dataset-proof"><span>Loader sample ${workflow.loader_sample_supplied ? "supplied ✓" : "not supplied"}</span><span><b>${escapeHtml(workflow.transaction_type_count)}</b> transaction types</span><span><b>${escapeHtml(workflow.transaction_currency_count)}</b> transaction currencies</span></div></article>`;
     }
     if (workflow.workflow === "loader_target_contract") {
-      return `<article class="dataset-workflow compact"><div class="dataset-head"><div><small>TARGET CONTRACT</small><h3>${escapeHtml(workflow.title)}</h3><p>${escapeHtml(workflow.workbook)}</p></div><b class="dataset-status">${escapeHtml(workflowStatus(workflow.status))}</b></div><div class="dataset-proof"><span><b>${escapeHtml(workflow.target_column_count)}</b> target columns</span><span>Required IDs ${workflow.required_target_fields_present ? "present ✓" : "need review"}</span></div></article>`;
+      return `<article class="dataset-workflow compact"><div class="dataset-head"><div><small>TARGET LOADER SCHEMA</small><h3>${escapeHtml(workflow.title)}</h3><p>${escapeHtml(workflow.workbook)}</p></div><b class="dataset-status">${escapeHtml(workflowStatus(workflow.status))}</b></div><div class="dataset-proof"><span><b>${escapeHtml(workflow.target_column_count)}</b> target columns</span><span>Required IDs ${workflow.required_target_fields_present ? "present ✓" : "need review"}</span></div></article>`;
     }
     return "";
   }).join("");
@@ -203,6 +260,7 @@ async function uploadEvidence(event) {
 }
 function bindEvents() {
   $$('[data-scenario]').forEach((button) => button.addEventListener("click", () => runScenario(button.dataset.scenario)));
+  $("#run-contract-demo").addEventListener("click", runContractDemo);
   $("#download-review").addEventListener("click", downloadReview);
   $("#upload-form").addEventListener("submit", uploadEvidence);
   $("#clear-upload-memory").addEventListener("click", clearUploadedMemory);

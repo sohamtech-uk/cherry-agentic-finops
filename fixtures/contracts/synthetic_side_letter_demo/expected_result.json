@@ -1,0 +1,19 @@
+{
+  "synthetic": true,
+  "decision": "review_required",
+  "standard_investor": {
+    "investor_name": "Orchard Institutional LP",
+    "expected_total_cash_payable": "1100000.00",
+    "observed_total_cash_payable": "1100000.00",
+    "variance": "0.00",
+    "status": "pass"
+  },
+  "side_letter_investor": {
+    "investor_name": "Cedar Pension Trust",
+    "expected_total_cash_payable": "1000000.00",
+    "observed_total_cash_payable": "1100000.00",
+    "variance": "100000.00",
+    "status": "review_required",
+    "finding_code": "SIDE_LETTER_FEE_OVERRIDE_NOT_APPLIED"
+  }
+}

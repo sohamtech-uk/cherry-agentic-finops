@@ -106,6 +106,22 @@ def _clean_summary(**overrides: object) -> AdministratorNAVSummary:
     return AdministratorNAVSummary.model_validate(payload)
 
 
+def _source_backed_rule(investor: str = "Investor A") -> SideLetterRule:
+    return SideLetterRule(
+        investor=investor,
+        rule="management_fee_offsets_called_capital",
+        source="Side Letter §4.2, page 1",
+        document_id="CTR-DEMO123",
+        document_name="side-letter.pdf",
+        section_reference="4.2",
+        page_number=1,
+        source_excerpt="The management fee shall reduce called capital pound-for-pound.",
+        source_sha256="a" * 64,
+        effective_date=date(2026, 1, 1),
+        explicit_override=True,
+    )
+
+
 # --- GL workbook parsing -------------------------------------------------------------------------
 
 
@@ -334,13 +350,7 @@ def test_review_nav_quality_side_letter_rule_correctly_applied() -> None:
             {"investor": "Investor B", "reported_capital": 1_850_000},
         ]
     )
-    rules = [
-        SideLetterRule(
-            investor="Investor A",
-            rule="management_fee_offsets_called_capital",
-            source="Side Letter §4.2",
-        )
-    ]
+    rules = [_source_backed_rule()]
     report = review_nav_quality(summary, ledger=ledger, side_letter_rules=rules)
 
     codes = {finding.code for finding in report.findings}
@@ -362,13 +372,7 @@ def test_review_nav_quality_side_letter_rule_violation() -> None:
             {"investor": "Investor B", "reported_capital": 1_850_000},
         ]
     )
-    rules = [
-        SideLetterRule(
-            investor="Investor A",
-            rule="management_fee_offsets_called_capital",
-            source="Side Letter §4.2",
-        )
-    ]
+    rules = [_source_backed_rule()]
     report = review_nav_quality(summary, ledger=ledger, side_letter_rules=rules)
 
     codes = {finding.code for finding in report.findings}
@@ -385,13 +389,85 @@ def test_review_nav_quality_warns_when_management_fee_missing_for_rule() -> None
             {"investor": "Investor B", "reported_capital": 1_850_000},
         ]
     )
-    rules = [SideLetterRule(investor="Investor A", rule="management_fee_offsets_called_capital")]
+    rules = [_source_backed_rule()]
     report = review_nav_quality(summary, side_letter_rules=rules)
 
     codes = {finding.code for finding in report.findings}
     assert "side_letter.missing_management_fee" in codes
     assert report.action == NAVAction.NEEDS_REVIEW
     assert any(item.code == "obtain_management_fee" for item in report.work_items)
+
+
+def test_review_nav_quality_does_not_apply_rule_without_source_locator() -> None:
+    summary = _clean_summary(
+        investor_capital=[
+            {
+                "investor": "Investor A",
+                "reported_capital": 3_000_000,
+                "management_fee": 125_000,
+            }
+        ]
+    )
+    rules = [
+        SideLetterRule(
+            investor="Investor A",
+            rule="management_fee_offsets_called_capital",
+            source="Side Letter §4.2",
+            effective_date=date(2026, 1, 1),
+            explicit_override=True,
+        )
+    ]
+
+    report = review_nav_quality(summary, side_letter_rules=rules)
+
+    assert report.action == NAVAction.NEEDS_REVIEW
+    assert any(finding.code == "side_letter.evidence_incomplete" for finding in report.findings)
+    assert not any(finding.code == "side_letter.rule_applied" for finding in report.findings)
+
+
+def test_review_nav_quality_does_not_apply_future_rule() -> None:
+    summary = _clean_summary(
+        investor_capital=[
+            {
+                "investor": "Investor A",
+                "reported_capital": 3_000_000,
+                "management_fee": 125_000,
+            }
+        ]
+    )
+    rule = _source_backed_rule()
+    rule.effective_date = date(2027, 1, 1)
+
+    report = review_nav_quality(summary, side_letter_rules=[rule])
+
+    assert report.action == NAVAction.NEEDS_REVIEW
+    finding = next(
+        item for item in report.findings if item.code == "side_letter.evidence_incomplete"
+    )
+    assert "not yet effective" in finding.detail
+
+
+def test_review_nav_quality_routes_duplicate_investor_rules_to_review() -> None:
+    summary = _clean_summary(
+        investor_capital=[
+            {
+                "investor": "Investor A",
+                "reported_capital": 3_000_000,
+                "management_fee": 125_000,
+            }
+        ]
+    )
+
+    report = review_nav_quality(
+        summary,
+        side_letter_rules=[_source_backed_rule(), _source_backed_rule()],
+    )
+
+    assert report.action == NAVAction.NEEDS_REVIEW
+    finding = next(
+        item for item in report.findings if item.code == "side_letter.evidence_incomplete"
+    )
+    assert "Multiple investor-specific rules" in finding.detail
 
 
 # --- router -----------------------------------------------------------------------------------
@@ -406,6 +482,7 @@ def test_nav_quality_health_declares_the_contract() -> None:
         "nav_summary": True,
         "source_ledger": False,
         "side_letter_rules": False,
+        "use_contract_documents": False,
     }
     assert "balance_sheet_footing" in body["checks"]
 
@@ -470,7 +547,15 @@ def test_review_endpoint_accepts_summary_and_ledger_and_rules() -> None:
             {
                 "investor": "Investor A",
                 "rule": "management_fee_offsets_called_capital",
-                "source": "Side Letter §4.2",
+                "source": "Side Letter §4.2, page 1",
+                "document_id": "CTR-DEMO123",
+                "document_name": "side-letter.pdf",
+                "section_reference": "4.2",
+                "page_number": 1,
+                "source_excerpt": "The fee shall reduce called capital pound-for-pound.",
+                "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "effective_date": "2026-01-01",
+                "explicit_override": True,
             }
         ]
     ).encode()

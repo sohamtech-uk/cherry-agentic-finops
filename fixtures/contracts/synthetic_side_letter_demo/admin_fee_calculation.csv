@@ -1,0 +1,3 @@
+investor_id,investor_name,calculation_date,base_investment_contribution,management_fee,total_cash_payable,currency
+INV-001,Orchard Institutional LP,2026-09-05,1000000.00,100000.00,1100000.00,GBP
+INV-002,Cedar Pension Trust,2026-09-05,1000000.00,100000.00,1100000.00,GBP

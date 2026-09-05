@@ -26,7 +26,7 @@ import json
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from openpyxl import load_workbook
 from pydantic import BaseModel, Field, field_validator
@@ -292,6 +292,45 @@ class SideLetterRule(BaseModel):
     investor: str
     rule: str
     source: str | None = None
+    document_id: str | None = None
+    document_name: str | None = None
+    section_reference: str | None = None
+    page_number: int | None = Field(default=None, ge=1)
+    source_excerpt: str | None = Field(default=None, max_length=1_000)
+    source_sha256: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    effective_date: date | None = None
+    explicit_override: bool = False
+    resolution_status: Literal["found", "review_required", "conflict"] = "found"
+    resolution_explanation: str | None = None
+
+    def evidence_issue(self, as_of: date) -> str | None:
+        if self.resolution_status != "found":
+            return self.resolution_explanation or (
+                "The investor-specific contract rule is unresolved."
+            )
+        if not self.explicit_override:
+            return "The source does not contain an explicit override of the LPA default."
+        if self.effective_date is None:
+            return "The side-letter rule has no effective date."
+        if self.effective_date > as_of:
+            return "The side-letter rule is not yet effective for this reporting date."
+        if not all(
+            (
+                self.document_id,
+                self.document_name,
+                self.section_reference,
+                self.page_number,
+                self.source_excerpt,
+                self.source_sha256,
+            )
+        ):
+            return "The side-letter rule does not have a complete document source locator."
+        return None
 
 
 _REQUIRED_SUMMARY_FIELDS = (
@@ -369,6 +408,16 @@ def parse_side_letter_rules(content: bytes) -> list[SideLetterRule]:
             investor=_text(row.get("investor")),
             rule=_text(row.get("rule")),
             source=_text(row.get("source")) or None,
+            document_id=_text(row.get("document_id")) or None,
+            document_name=_text(row.get("document_name")) or None,
+            section_reference=_text(row.get("section_reference")) or None,
+            page_number=row.get("page_number"),
+            source_excerpt=_text(row.get("source_excerpt")) or None,
+            source_sha256=_text(row.get("source_sha256")) or None,
+            effective_date=row.get("effective_date"),
+            explicit_override=bool(row.get("explicit_override", False)),
+            resolution_status=_text(row.get("resolution_status")) or "found",
+            resolution_explanation=_text(row.get("resolution_explanation")) or None,
         )
         for row in rows
     ]
@@ -421,10 +470,17 @@ class NAVReviewReport(BaseModel):
 
 
 def _side_letter_lookup(rules: list[SideLetterRule], investor: str) -> SideLetterRule | None:
-    for rule in rules:
-        if rule.investor.casefold() == investor.casefold():
-            return rule
-    return None
+    matches = [rule for rule in rules if rule.investor.casefold() == investor.casefold()]
+    if len(matches) <= 1:
+        return matches[0] if matches else None
+    return matches[0].model_copy(
+        update={
+            "resolution_status": "conflict",
+            "resolution_explanation": (
+                "Multiple investor-specific rules match this investor; precedence must be reviewed."
+            ),
+        }
+    )
 
 
 def review_nav_quality(
@@ -578,7 +634,31 @@ def review_nav_quality(
             side_letter_rule=rule.rule if rule else None,
         )
 
-        if rule is not None and rule.rule == "management_fee_offsets_called_capital":
+        evidence_issue = rule.evidence_issue(summary.period_end) if rule is not None else None
+        if rule is not None and evidence_issue:
+            findings.append(
+                NAVFinding(
+                    code="side_letter.evidence_incomplete",
+                    severity=FindingSeverity.WARNING,
+                    title=f"{line.investor}: contract evidence requires review",
+                    detail=(
+                        f"The investor-specific rule was not applied automatically. {evidence_issue}"
+                    ),
+                )
+            )
+        elif rule is not None and rule.rule != "management_fee_offsets_called_capital":
+            findings.append(
+                NAVFinding(
+                    code="side_letter.rule_unsupported",
+                    severity=FindingSeverity.WARNING,
+                    title=f"{line.investor}: unsupported side-letter rule",
+                    detail=(
+                        "The source-backed rule uses calculation semantics that this NAV control "
+                        "does not support, so it requires human review."
+                    ),
+                )
+            )
+        elif rule is not None:
             if line.management_fee is None:
                 findings.append(
                     NAVFinding(
@@ -712,6 +792,19 @@ def review_nav_quality(
                 owner="Investor relations",
                 title="Obtain the missing management fee figure",
                 instruction="Request the investor's management fee so the side-letter rule can be checked.",
+            )
+        )
+    if warning_codes & {"side_letter.evidence_incomplete", "side_letter.rule_unsupported"}:
+        work_items.append(
+            NAVWorkItem(
+                code="review_contract_evidence",
+                priority=WorkItemPriority.HIGH,
+                owner="Fund controller",
+                title="Review investor-specific contract evidence",
+                instruction=(
+                    "Confirm the investor identity, explicit override, effective date and exact "
+                    "document locator before applying the term to the NAV calculation."
+                ),
             )
         )
 

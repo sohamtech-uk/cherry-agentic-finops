@@ -10,6 +10,13 @@ from app.agent_tools import (
     run_finance_scenario,
 )
 from app.config import get_settings
+from app.contract_tools import (
+    extract_clause,
+    get_effective_date,
+    get_investor_rule,
+    search_lpa,
+    search_side_letter,
+)
 
 settings = get_settings()
 
@@ -50,6 +57,30 @@ opinion or tax advice.
     tools=[inspect_workflow, list_open_finance_exceptions],
 )
 
+contract_specialist = Agent(
+    name="contract_specialist",
+    model=settings.gemini_model,
+    description=(
+        "Retrieves LPA and side-letter evidence and resolves effective investor-specific rules."
+    ),
+    instruction="""
+You are the private-markets contract specialist supporting NAV quality control. Search the LPA and
+the relevant investor side letter before stating a contractual rule. Use extract_clause for the
+complete provision and get_effective_date before applying a term to a reporting period. Use
+get_investor_rule when a deterministic structured rule is required. Cite the document, section and
+page returned by the tools. If sources conflict, lack an effective date or cannot be structured,
+require human review. Never invent a clause, silently resolve a conflict, calculate official NAV,
+modify source documents or approve a financial statement.
+""".strip(),
+    tools=[
+        search_lpa,
+        search_side_letter,
+        extract_clause,
+        get_effective_date,
+        get_investor_rule,
+    ],
+)
+
 root_agent = Agent(
     name="cherry_finops",
     model=settings.gemini_model,
@@ -66,5 +97,10 @@ Never fabricate financial records, initiate payments, provide tax advice, or inf
 Routine high-confidence reconciliation can be automated only when the deterministic policy says so.
 """.strip(),
     tools=[run_finance_scenario, inspect_workflow, list_open_finance_exceptions],
-    sub_agents=[reconciliation_specialist, control_specialist, evidence_specialist],
+    sub_agents=[
+        reconciliation_specialist,
+        control_specialist,
+        evidence_specialist,
+        contract_specialist,
+    ],
 )
