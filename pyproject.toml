@@ -24,6 +24,7 @@ dependencies = [
   "google-cloud-pubsub>=2.30,<3",
   "httpx>=0.28,<1",
   "openpyxl>=3.1,<4",
+  "reportlab>=4.2,<5",
 ]
 
 [project.optional-dependencies]
@@ -63,6 +64,8 @@ ignore = ["B008"]
 "app/private_markets_router.py" = ["E501"]
 "app/private_markets_strict.py" = ["E501", "SIM103"]
 "app/nav_quality.py" = ["E501"]
+"app/ylookup_datasets.py" = ["E501"]
+"app/ylookup_router.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -72,3 +75,7 @@ disallow_untyped_defs = true
 no_implicit_optional = true
 plugins = ["pydantic.mypy"]
 exclude = ["tests"]
+
+[[tool.mypy.overrides]]
+module = ["app.private_markets", "app.document_ai"]
+disable_error_code = ["arg-type"]

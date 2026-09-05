@@ -1,4 +1,4 @@
-const state = { case: null, config: null, batchCases: [] };
+const state = { case: null, config: null, batchCases: [], datasetResult: null };
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
@@ -76,15 +76,38 @@ function updateFileCounts() {
 function workflowStatus(status) {
   return { ready: "Ready", source_profiled: "Source profiled", ready_for_mapping: "Ready for mapping", needs_loader_sample: "Needs loader sample", review_required: "Review required" }[status] || titleise(status);
 }
+function detailValue(label, value) {
+  if (!value) return "";
+  return `<div><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>`;
+}
+function renderReconciliationGuidance(guidance) {
+  return (guidance || []).map((section) => `<section class="reconciliation-guidance"><div class="guidance-head"><strong>${escapeHtml(section.reason || "Reconciliation review")}</strong><span>${escapeHtml(section.owner || "Fund operations")}</span></div><ol>${(section.steps || []).map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol><div class="guidance-proof"><p><b>Evidence required</b>${escapeHtml(section.evidence_required || "Supporting evidence for the selected resolution.")}</p><p><b>Completion check</b>${escapeHtml(section.completion_check || "Rerun controls and confirm the exception is cleared.")}</p></div></section>`).join("");
+}
+function renderException(item) {
+  const reasons = (item.reasons || []).join(" · ");
+  const context = [
+    detailValue("Account", item.account_name),
+    detailValue("Account number", item.account_number),
+    detailValue("Currency", item.currency),
+    detailValue("Legal entity", item.legal_entity),
+    detailValue("Matched counterparty", item.matched_counterparty),
+    detailValue("Project code", item.matched_project_code),
+    detailValue("Resolved position", item.resolved_position),
+    detailValue("Classification", item.classification),
+  ].join("");
+  return `<details class="dataset-exception"><summary><span class="exception-row">Row ${escapeHtml(item.row)}</span><span class="exception-reason">${escapeHtml(reasons)}</span><span class="exception-narrative">${escapeHtml(item.narrative || "")}</span><span class="exception-open-label">How to reconcile ↓</span></summary><div class="exception-detail"><div class="exception-context"><h5>Source context</h5><div class="exception-context-grid">${context || "<p>No additional mapped context is available.</p>"}</div></div><div class="exception-resolution"><h5>Reconciliation path</h5>${renderReconciliationGuidance(item.reconciliation_guidance)}</div></div></details>`;
+}
 function renderDatasetResults(result) {
+  state.datasetResult = result;
   const container = $("#dataset-results");
   const profiles = result.workbook_profiles || [];
   const workflows = result.workflows || [];
   const profileHtml = profiles.map((profile) => `<span class="dataset-chip"><b>${escapeHtml(titleise(profile.kind))}</b>${escapeHtml(profile.file_name)}</span>`).join("");
   const workflowHtml = workflows.map((workflow) => {
     if (workflow.workflow === "bank_statements_to_journal_entries") {
-      const exceptions = (workflow.sample_exceptions || []).map((item) => `<div class="dataset-exception"><b>Row ${escapeHtml(item.row)}</b><span>${escapeHtml((item.reasons || []).join(" · "))}</span><p>${escapeHtml(item.narrative || "")}</p></div>`).join("");
-      return `<article class="dataset-workflow"><div class="dataset-head"><div><small>SPONSOR WORKFLOW 01</small><h3>${escapeHtml(workflow.title)}</h3><p>${escapeHtml(workflow.message)}</p></div><b class="dataset-status review">${escapeHtml(workflowStatus(workflow.status))}</b></div><div class="dataset-metrics"><div><span>Statement rows</span><strong>${escapeHtml(workflow.total_transactions)}</strong></div><div><span>Journal lines</span><strong>${escapeHtml(workflow.journal_lines)}</strong><small>${workflow.journal_line_count_matches ? "2 lines per statement row ✓" : `Expected ${escapeHtml(workflow.journal_expected_lines)}`}</small></div><div><span>Counterparty gaps</span><strong>${escapeHtml(workflow.unmatched_counterparties)}</strong></div><div><span>Project gaps</span><strong>${escapeHtml(workflow.project_code_gaps)}</strong></div><div><span>Position gaps</span><strong>${escapeHtml(workflow.position_gaps)}</strong></div><div><span>Explicit Review rows</span><strong>${escapeHtml(workflow.review_rows)}</strong></div></div><div class="dataset-proof"><span><b>${escapeHtml(workflow.pdf_count)}</b> bank-statement PDFs supplied</span><span><b>${escapeHtml(workflow.matched_statement_files)}</b> filenames matched to account map</span><span><b>${escapeHtml(workflow.review_queue_rows)}</b> rows need attention</span></div>${exceptions ? `<div class="dataset-exceptions"><h4>Sample exception queue</h4>${exceptions}</div>` : ""}</article>`;
+      const exceptionItems = workflow.exceptions || workflow.sample_exceptions || [];
+      const exceptions = exceptionItems.map(renderException).join("");
+      return `<article class="dataset-workflow"><div class="dataset-head"><div><small>SPONSOR WORKFLOW 01</small><h3>${escapeHtml(workflow.title)}</h3><p>${escapeHtml(workflow.message)}</p></div><b class="dataset-status review">${escapeHtml(workflowStatus(workflow.status))}</b></div><div class="dataset-metrics"><div><span>Statement rows</span><strong>${escapeHtml(workflow.total_transactions)}</strong></div><div><span>Journal lines</span><strong>${escapeHtml(workflow.journal_lines)}</strong><small>${workflow.journal_line_count_matches ? "2 lines per statement row ✓" : `Expected ${escapeHtml(workflow.journal_expected_lines)}`}</small></div><div><span>Counterparty gaps</span><strong>${escapeHtml(workflow.unmatched_counterparties)}</strong></div><div><span>Project gaps</span><strong>${escapeHtml(workflow.project_code_gaps)}</strong></div><div><span>Position gaps</span><strong>${escapeHtml(workflow.position_gaps)}</strong></div><div><span>Explicit Review rows</span><strong>${escapeHtml(workflow.review_rows)}</strong></div></div><div class="dataset-proof"><span><b>${escapeHtml(workflow.pdf_count)}</b> bank-statement PDFs supplied</span><span><b>${escapeHtml(workflow.matched_statement_files)}</b> filenames matched to account map</span><span><b>${escapeHtml(workflow.review_queue_rows)}</b> rows need attention</span></div>${exceptions ? `<div class="dataset-exceptions"><div class="exception-list-head"><div><h4>Exception review queue</h4><p>Click any exception to see source context, reconciliation steps and required evidence.</p></div><b>${escapeHtml(exceptionItems.length)} exceptions</b></div><div class="exception-scroll">${exceptions}</div></div>` : ""}</article>`;
     }
     if (workflow.workflow === "investor_gl_to_loader") {
       return `<article class="dataset-workflow"><div class="dataset-head"><div><small>SPONSOR WORKFLOW 02</small><h3>${escapeHtml(workflow.title)}</h3><p>${escapeHtml(workflow.message)}</p></div><b class="dataset-status">${escapeHtml(workflowStatus(workflow.status))}</b></div><div class="dataset-metrics"><div><span>GL rows</span><strong>${Number(workflow.row_count || 0).toLocaleString("en-GB")}</strong></div><div><span>Columns</span><strong>${escapeHtml(workflow.column_count)}</strong></div><div><span>Legal entities</span><strong>${escapeHtml(workflow.legal_entity_count)}</strong></div><div><span>Investors</span><strong>${escapeHtml(workflow.investor_count)}</strong></div><div><span>Deals</span><strong>${escapeHtml(workflow.deal_count)}</strong></div><div><span>GL accounts</span><strong>${escapeHtml(workflow.gl_account_count)}</strong></div></div><div class="dataset-proof"><span>Loader sample ${workflow.loader_sample_supplied ? "supplied ✓" : "not supplied"}</span><span><b>${escapeHtml(workflow.transaction_type_count)}</b> transaction types</span><span><b>${escapeHtml(workflow.transaction_currency_count)}</b> transaction currencies</span></div></article>`;
@@ -94,8 +117,10 @@ function renderDatasetResults(result) {
     }
     return "";
   }).join("");
-  container.innerHTML = `<div class="dataset-title"><p class="eyebrow">Auto-detected sponsor evidence</p><h2>Native Ylookup workflows, not a forced LP schema.</h2><p>${escapeHtml(result.message || "")}</p></div><div class="dataset-chips">${profileHtml}</div>${workflowHtml}`;
+  const reportActions = `<div class="dataset-report-actions"><span>Download review pack</span><button type="button" data-ylookup-report="pdf">PDF report ↓</button><button type="button" data-ylookup-report="xlsx">Excel report ↓</button></div>`;
+  container.innerHTML = `<div class="dataset-title"><div><p class="eyebrow">Auto-detected sponsor evidence</p><h2>Native Ylookup workflows, not a forced LP schema.</h2><p>${escapeHtml(result.message || "")}</p></div>${reportActions}</div><div class="dataset-chips">${profileHtml}</div>${workflowHtml}`;
   container.classList.remove("hidden");
+  $$('[data-ylookup-report]').forEach((button) => button.addEventListener("click", () => downloadDatasetReport(button.dataset.ylookupReport)));
   renderBatchPicker([]);
 }
 async function tryYlookupDataset(pdfFiles, excelFiles, headers) {
@@ -108,6 +133,29 @@ async function tryYlookupDataset(pdfFiles, excelFiles, headers) {
   if (response.ok) return body;
   if (response.status === 422 && body.detail?.code === "not_ylookup_dataset") return null;
   throw new Error(typeof body.detail === "string" ? body.detail : body.detail?.message || `${response.status} ${response.statusText}`);
+}
+async function downloadDatasetReport(format) {
+  if (!state.datasetResult) { toast("Run a sponsor dataset analysis before downloading a report.", true); return; }
+  const token = $("#upload-token")?.value.trim();
+  const headers = { "Content-Type": "application/json", ...(token ? { "X-Cherry-Demo-Token": token } : {}) };
+  loading(true);
+  try {
+    const response = await fetch(`/api/ylookup/report/${format}`, { method: "POST", headers, body: JSON.stringify(state.datasetResult) });
+    if (!response.ok) {
+      let body = {}; try { body = await response.json(); } catch { body = {}; }
+      throw new Error(typeof body.detail === "string" ? body.detail : body.detail?.message || `Report download failed (${response.status}).`);
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename="?([^";]+)"?/i);
+    const filename = match?.[1] || `cherry-fundops-ylookup-review.${format}`;
+    const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = filename; link.click(); URL.revokeObjectURL(link.href);
+    toast(`${format.toUpperCase()} review report downloaded.`);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    loading(false);
+  }
 }
 async function runScenario(scenario, shouldScroll = true) {
   loading(true); $$('[data-scenario]').forEach((button) => button.classList.toggle("active", button.dataset.scenario === scenario));
@@ -122,6 +170,7 @@ function downloadReview() {
 function resetEvidenceWorkspace() {
   state.case = null;
   state.batchCases = [];
+  state.datasetResult = null;
   renderBatchPicker([]);
   $("#upload-form")?.reset();
   updateFileCounts();
@@ -177,6 +226,7 @@ async function uploadEvidence(event) {
       return;
     }
 
+    state.datasetResult = null;
     const form = new FormData();
     pdfFiles.forEach((file) => form.append("capital_call", file));
     excelFiles.forEach((file) => form.append("commitments", file));
