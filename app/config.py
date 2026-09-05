@@ -60,6 +60,19 @@ class Settings(BaseSettings):
         default=None, validation_alias="CHERRY_MONEY_API_TOKEN"
     )
 
+    fundops_studio_api_url: str | None = Field(
+        default=None, validation_alias="FUNDOPS_STUDIO_API_URL"
+    )
+    fundops_studio_audience: str | None = Field(
+        default=None, validation_alias="FUNDOPS_STUDIO_AUDIENCE"
+    )
+    fundops_studio_api_token: SecretStr | None = Field(
+        default=None, validation_alias="FUNDOPS_STUDIO_API_TOKEN"
+    )
+    fundops_studio_timeout_seconds: float = Field(
+        default=25.0, ge=1, le=120, validation_alias="FUNDOPS_STUDIO_TIMEOUT_SECONDS"
+    )
+
     @property
     def google_ready(self) -> bool:
         if self.google_api_key and self.google_api_key.get_secret_value().strip():
