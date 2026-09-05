@@ -83,9 +83,10 @@ async def fund_manager_health() -> dict[str, Any]:
         ],
         "partially_implemented_stages": {
             "control_adapters": (
-                "The agent can select every recognised control. Existing deterministic adapters "
-                "execute when available; unsupported controls remain adapter_pending rather than "
-                "being treated as passed."
+                "The agent can select every recognised control, including bank-statement-to-cash "
+                "and bank-statement working-file pairs. Existing deterministic adapters execute "
+                "when available; unsupported controls remain adapter_pending rather than being "
+                "treated as passed."
             ),
             "human_decision": (
                 "The agent recommends a human action and exposes whether a decision is required; "

@@ -1,8 +1,58 @@
 from __future__ import annotations
 
+import io
 import json
 
+from openpyxl import Workbook
+from reportlab.pdfgen import canvas
+
 from app.fund_manager_orchestrator import CONTROL_CATALOGUE, run_analysis
+
+
+def _pdf_bytes(*lines: str) -> bytes:
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer)
+    for index, line in enumerate(lines):
+        pdf.drawString(100, 750 - index * 20, line)
+    pdf.save()
+    return buffer.getvalue()
+
+
+def _bank_statement_working_file() -> bytes:
+    workbook = Workbook()
+    staging = workbook.active
+    staging.title = "Staging Sheet"
+    staging.append(
+        [
+            "Account Name",
+            "Account Number",
+            "Narrative",
+            "Currency",
+            "Matched Project Code",
+            "Matched Sender/Beneficiary",
+            "Classification",
+            "Resolved Position",
+            "Matched Legal Entity",
+            "Related Party Match",
+        ]
+    )
+    staging.append(
+        ["Operating Account", "4319", "Wire in", "USD", "PC-1", "", "Cash", "POS-1", "Fund LP", ""]
+    )
+    diu = workbook.create_sheet("DIU ")
+    diu.append(["Batch", "Debit", "Credit"])
+    diu.append(["B1", 100, None])
+    diu.append(["B1", None, 100])
+    master = workbook.create_sheet("Deal & Position Master List")
+    master.append(["Position"])
+    master.append(["POS-1"])
+    account_map = workbook.create_sheet("Account Map")
+    account_map.append(["Bank Account"])
+    account_map.append(["Operating Account 4319"])
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
 
 _CURRENT_STATEMENT = b"""Subsequent Events
 No subsequent events occurred after 2026-06-30.
@@ -148,3 +198,75 @@ def test_position_pair_runs_control_generates_exception_and_investigation() -> N
     assert len(result["issues"][0]["evidence"]) == 2
     assert result["investigations"][0]["human_decision_required"] is True
     assert result["recommended_human_action"] == "assign_and_monitor"
+
+
+def test_bank_statement_cash_reconciliation_runs_and_flags_a_mismatch() -> None:
+    bank_pdf = _pdf_bytes(
+        "Statement of Account",
+        "Sort Code 12-34-56",
+        "IBAN: GB29NWBK60161331926819",
+        "Currency: GBP",
+        "Closing Balance: GBP 12,345.67",
+        "Statement Date: 2026-06-30",
+    )
+    cash_json = json.dumps(
+        {
+            "cash_balances": [
+                {
+                    "fund": "F1",
+                    "account": "GB29NWBK60161331926819",
+                    "currency": "GBP",
+                    "balance": 12000.00,
+                }
+            ]
+        }
+    ).encode()
+
+    result = run_analysis(
+        [
+            ("internal_cash.json", cash_json, "application/json"),
+            ("chase_statement.pdf", bank_pdf, "application/pdf"),
+        ]
+    )
+
+    bank_plan = next(
+        entry for entry in result["control_plan"] if entry["control_id"] == "CTRL-BANK-001"
+    )
+    assert bank_plan["status"] == "executed"
+    bank_run = next(run for run in result["control_runs"] if run["control_id"] == "CTRL-BANK-001")
+    assert bank_run["tool_name"] == "reconcile_cash"
+    assert bank_run["status"] == "completed"
+    issue_codes = {issue["code"] for issue in result["issues"]}
+    assert "cash.balance_mismatch" in issue_codes
+
+
+def test_bank_statement_alone_reports_missing_cash_transactions_companion() -> None:
+    bank_pdf = _pdf_bytes(
+        "Statement of Account",
+        "IBAN: GB29NWBK60161331926819",
+        "Closing Balance: GBP 100.00",
+    )
+
+    result = run_analysis([("chase_statement.pdf", bank_pdf, "application/pdf")])
+
+    bank_plan = next(
+        entry for entry in result["control_plan"] if entry["control_id"] == "CTRL-BANK-001"
+    )
+    assert bank_plan["status"] == "needs_evidence"
+    assert "cash_transactions" in bank_plan["missing_evidence"]
+
+
+def test_bank_statement_working_file_runs_without_a_paired_pdf() -> None:
+    result = run_analysis(
+        [("bank_working_file.xlsx", _bank_statement_working_file(), "application/xlsx")]
+    )
+
+    plan = next(
+        entry for entry in result["control_plan"] if entry["control_id"] == "CTRL-BANK-WORK-001"
+    )
+    assert plan["status"] == "executed"
+    run = next(run for run in result["control_runs"] if run["control_id"] == "CTRL-BANK-WORK-001")
+    assert run["tool_name"] == "analyse_bank_statement_workbook"
+    assert run["status"] == "completed"
+    issue_codes = {issue["code"] for issue in result["issues"]}
+    assert "bank_workflow.counterparty_unresolved" in issue_codes

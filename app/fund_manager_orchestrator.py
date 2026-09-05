@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from pydantic import ValidationError
 
+from app.bank_statement_tools import extract_bank_statement_balances
 from app.exception_investigation import investigate_exception
 from app.fund_manager_classification import (
     ClassifiedSource,
@@ -29,7 +30,11 @@ from app.fund_reconciliation import (
 )
 from app.private_markets import FindingSeverity
 from app.statement_tools import compare_dates, compare_periods
-from app.ylookup_datasets import analyse_investor_gl_workbook, analyse_loader_sample
+from app.ylookup_datasets import (
+    analyse_bank_statement_workbook,
+    analyse_investor_gl_workbook,
+    analyse_loader_sample,
+)
 
 PlanStatus = Literal["ready", "executed", "needs_evidence", "manual_review", "failed"]
 
@@ -116,6 +121,33 @@ def _pair(
     return None
 
 
+def _pair_cross_type(
+    by_type: dict[str, list[EvidenceItem]], evidence_types: tuple[str, ...], roles: tuple[str, str]
+) -> tuple[list[EvidenceItem], dict[str, str], float, str] | None:
+    """Pair one source from each of two distinct required evidence types. Unlike same-type
+    pairing there is no filename ambiguity to resolve: the evidence type itself fixes the
+    comparison role (e.g. a bank statement is always the external side of a cash reconciliation),
+    so this only needs at least one source of each type to be present."""
+
+    first = by_type.get(evidence_types[0], [])
+    second = by_type.get(evidence_types[1], [])
+    if not first or not second:
+        return None
+    confidence = 0.95 if len(first) == 1 and len(second) == 1 else 0.7
+    reason = (
+        "Each required evidence type was matched to its fixed comparison role."
+        if confidence == 0.95
+        else "Multiple sources matched a required evidence type; the first uploaded source of "
+        "each type was used and disclosed for human verification."
+    )
+    return (
+        [first[0], second[0]],
+        {first[0].source["id"]: roles[0], second[0].source["id"]: roles[1]},
+        confidence,
+        reason,
+    )
+
+
 def _statement_executor(
     items: list[EvidenceItem], plan: ControlPlanEntry
 ) -> tuple[dict[str, Any], list[ExceptionItem]]:
@@ -176,6 +208,76 @@ def _reconciliation_executor(
         return result.model_dump(mode="json"), result.to_exceptions()
 
     return execute
+
+
+def _bank_cash_executor(
+    items: list[EvidenceItem], plan: ControlPlanEntry
+) -> tuple[dict[str, Any], list[ExceptionItem]]:
+    """Reconcile a real bank statement's extracted closing balance against an internal
+    cash-balance export, reusing app.fund_reconciliation.reconcile_cash unchanged -- the statement
+    is just a differently-sourced "external" side of the same comparison CTRL-CASH-001 runs."""
+
+    by_role = {plan.source_roles[item.source["id"]]: item for item in items}
+    external_item, internal_item = by_role["external"], by_role["internal"]
+    external_balances = extract_bank_statement_balances(
+        external_item.content, external_item.source["filename"]
+    )
+    internal_balances = parse_cash_balances(internal_item.content)
+    result = reconcile_cash(internal_balances, external_balances)
+    return result.model_dump(mode="json"), result.to_exceptions()
+
+
+def _bank_workbook_executor(
+    items: list[EvidenceItem], plan: ControlPlanEntry
+) -> tuple[dict[str, Any], list[ExceptionItem]]:
+    """Run the organiser's bank-statements-to-journal-entries working file through the existing
+    app.ylookup_datasets.analyse_bank_statement_workbook adapter and translate its review queue
+    into the common ExceptionItem shape. Any bank statement PDFs uploaded alongside the workbook
+    are passed through for the workbook's own filename-based cross-check; none are required for
+    the workbook analysis to run."""
+
+    workbook_item = next(
+        item for item in items if item.source["detected_type"] == "bank_statement_working_file"
+    )
+    pdf_items = [item for item in items if item.source["detected_type"] == "bank_statement"]
+    result = analyse_bank_statement_workbook(
+        workbook_item.content,
+        workbook_item.source["filename"],
+        [item.source["filename"] for item in pdf_items],
+    )
+
+    exceptions = [
+        ExceptionItem(
+            category="data_quality",
+            code=(
+                "bank_workflow."
+                + "_".join(reason.casefold().replace(" ", "_") for reason in row["reasons"])
+            ),
+            key=row["exception_id"],
+            title=f"{row['account_name'] or workbook_item.source['filename']}: "
+            f"{', '.join(row['reasons'])}",
+            detail=row["narrative"] or "No narrative available for this staging row.",
+            severity=FindingSeverity.WARNING,
+        )
+        for row in result["exceptions"]
+    ]
+    if not result["journal_line_count_matches"]:
+        exceptions.append(
+            ExceptionItem(
+                category="data_quality",
+                code="bank_workflow.journal_line_count_mismatch",
+                key="journal-line-count",
+                title=f"{workbook_item.source['filename']}: journal line count does not match "
+                "expected postings",
+                detail=(
+                    f"Expected {result['journal_expected_lines']} DIU journal line(s) (2 per "
+                    f"transaction across {result['total_transactions']} transaction(s)) but "
+                    f"found {result['journal_lines']}."
+                ),
+                severity=FindingSeverity.WARNING,
+            )
+        )
+    return result, exceptions
 
 
 def _single_source_executor(
@@ -239,6 +341,8 @@ CONTROL_CATALOGUE: tuple[ControlDefinition, ...] = (
         "Bank statement to journal-entry reconciliation",
         "bank_statement_working_file",
         ("bank_statement_working_file", "bank_statement"),
+        tool_name="analyse_bank_statement_workbook",
+        executor=_bank_workbook_executor,
     ),
     ControlDefinition(
         "CTRL-LOAD-001",
@@ -275,6 +379,9 @@ CONTROL_CATALOGUE: tuple[ControlDefinition, ...] = (
         "Bank statement cash reconciliation",
         "bank_statement",
         ("bank_statement", "cash_transactions"),
+        required_roles=("external", "internal"),
+        tool_name="reconcile_cash",
+        executor=_bank_cash_executor,
     ),
     ControlDefinition(
         "CTRL-STMT-001",
@@ -341,28 +448,7 @@ class ControlPlanningAgent:
             if not candidates:
                 continue
 
-            if definition.executor is not None and definition.required_roles is None:
-                selected = [candidates[0]]
-                plans.append(
-                    ControlPlanEntry(
-                        definition.control_id,
-                        definition.version,
-                        definition.name,
-                        [selected[0].source["id"]],
-                        {},
-                        list(definition.required_evidence),
-                        "ready",
-                        (
-                            "A recognised source is sufficient for this deterministic "
-                            "single-source control."
-                        ),
-                        1.0,
-                        tool_name=definition.tool_name,
-                    )
-                )
-                continue
-
-            if definition.executor is None or definition.required_roles is None:
+            if definition.executor is None:
                 missing_types = [
                     evidence_type
                     for evidence_type in definition.required_evidence
@@ -387,7 +473,41 @@ class ControlPlanningAgent:
                 )
                 continue
 
-            paired = _pair(candidates, definition.required_roles)
+            if definition.required_roles is None:
+                # A registered adapter that consumes every source of its required evidence
+                # type(s) directly (e.g. a working-file analyser) rather than a two-sided
+                # comparison -- no role pairing to resolve, so this is ready whenever the primary
+                # evidence type is present at all.
+                auxiliary = [
+                    item
+                    for evidence_type in definition.required_evidence
+                    if evidence_type != definition.source_type
+                    for item in by_type.get(evidence_type, [])
+                ]
+                selected = candidates + auxiliary
+                plans.append(
+                    ControlPlanEntry(
+                        definition.control_id,
+                        definition.version,
+                        definition.name,
+                        [item.source["id"] for item in selected],
+                        {},
+                        list(definition.required_evidence),
+                        "ready",
+                        "The registered adapter consumes every source of its required evidence "
+                        "types directly; no comparison-side pairing is needed.",
+                        0.9,
+                        tool_name=definition.tool_name,
+                    )
+                )
+                continue
+
+            heterogeneous = len(set(definition.required_evidence)) > 1
+            paired = (
+                _pair_cross_type(by_type, definition.required_evidence, definition.required_roles)
+                if heterogeneous
+                else _pair(candidates, definition.required_roles)
+            )
             if paired:
                 selected, roles, confidence, reason = paired
                 plans.append(
@@ -405,11 +525,18 @@ class ControlPlanningAgent:
                     )
                 )
             else:
-                missing = (
-                    [definition.required_roles[1]]
-                    if len(candidates) == 1
-                    else ["a clearly labelled comparison pair"]
-                )
+                if heterogeneous:
+                    missing = [
+                        evidence_type
+                        for evidence_type in definition.required_evidence
+                        if not by_type.get(evidence_type)
+                    ] or ["a clearly labelled comparison pair"]
+                else:
+                    missing = (
+                        [definition.required_roles[1]]
+                        if len(candidates) == 1
+                        else ["a clearly labelled comparison pair"]
+                    )
                 plans.append(
                     ControlPlanEntry(
                         definition.control_id,
