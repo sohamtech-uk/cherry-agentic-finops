@@ -68,7 +68,7 @@ jobs:
             CHERRY_EVIDENCE_BUCKET=${{ vars.GCP_PROJECT_ID }}-cherry-finops-evidence
             CHERRY_PUBSUB_TOPIC=finance-workflow-events
           flags: >-
-            --allow-unauthenticated
+            --no-invoker-iam-check
             --ingress=all
             --default-url
             --service-account=cherry-agent-runtime@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
@@ -77,14 +77,12 @@ jobs:
             --min-instances=0
             --max-instances=5
 
-      - name: Ensure public Cloud Run invoker
+      - name: Verify public access mode
         run: |
-          gcloud run services add-iam-policy-binding "${SERVICE}" \
+          gcloud run services describe "${SERVICE}" \
             --project="${{ vars.GCP_PROJECT_ID }}" \
             --region="${REGION}" \
-            --member="allUsers" \
-            --role="roles/run.invoker" \
-            --quiet
+            --format='value(metadata.annotations.run.googleapis.com/invoker-iam-disabled)'
 
       - name: Smoke test
         run: |
