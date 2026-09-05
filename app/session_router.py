@@ -8,6 +8,7 @@ from fastapi import APIRouter, Header, HTTPException
 
 from app.config import get_settings
 from app.container import get_engine
+from app.contracts import get_contract_repository
 
 settings = get_settings()
 router = APIRouter(prefix="/api/session", tags=["session"])
@@ -57,13 +58,15 @@ async def clear_memory(
     engine = get_engine()
     cleared_workflow_records = len(engine.list())
     engine.repository.clear()
+    cleared_contract_documents = get_contract_repository().clear()
     return {
         "status": "cleared",
         "persistence_backend": settings.persistence_backend,
         "cleared_workflow_records": cleared_workflow_records,
+        "cleared_contract_documents": cleared_contract_documents,
         "raw_uploads_retained": False,
         "message": (
-            "Ephemeral server workflow memory was cleared. Raw private-markets PDF/XLSX uploads "
-            "are request-scoped and are not retained by these upload endpoints."
+            "Ephemeral workflow and parsed contract memory were cleared. Raw private-markets "
+            "uploads are not retained by the evidence-analysis endpoints."
         ),
     }

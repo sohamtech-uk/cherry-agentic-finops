@@ -7,12 +7,13 @@
   <title>Cherry FundOps — Private markets control room</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2216%22 fill=%22%23bdf28d%22/><text x=%2232%22 y=%2243%22 text-anchor=%22middle%22 font-size=%2236%22 font-family=%22Arial%22 font-weight=%22700%22 fill=%22%23123c32%22>C</text></svg>">
   <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/contract.css">
   <link rel="stylesheet" href="/static/ylookup.css">
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="#top" aria-label="Cherry FundOps home"><span class="brand-mark" aria-hidden="true">C</span><span>Cherry <strong>FundOps</strong></span></a>
-    <nav aria-label="Primary navigation"><a href="#control-room">Control room</a><a href="#workflow">Workflow</a><a href="#upload">Analyse files</a><a href="/api/docs" target="_blank" rel="noreferrer">API</a></nav>
+    <nav aria-label="Primary navigation"><a href="#control-room">Control room</a><a href="#contracts">Contract controls</a><a href="#workflow">Workflow</a><a href="#upload">Analyse files</a><a href="/api/docs" target="_blank" rel="noreferrer">API</a></nav>
     <div class="environment" id="cloud-state"><i></i><span>Checking environment</span></div>
   </header>
 
@@ -23,7 +24,7 @@
         <h1>Close capital calls<br><em>before they become fund risk.</em></h1>
         <p class="hero-lead">One control room understands private-markets evidence, checks ledgers and working files, matches cash when available and routes exceptions to the right owner—with evidence attached.</p>
         <div class="hero-actions"><button class="button primary" data-scenario="exception">Run live control check <span>→</span></button><a class="button secondary" href="#workflow">See the workflow</a></div>
-        <div class="proof-row"><span><b>3</b> sponsor workflows understood</span><span><b>0</b> payment permissions</span><span><b>1</b> governed review workspace</span></div>
+        <div class="proof-row"><span><b>2</b> sponsor-native data workflows</span><span><b>1</b> call-grounded synthetic control</span><span><b>0</b> payment permissions</span></div>
       </div>
       <div class="hero-terminal" role="group" aria-label="Example control result">
         <div class="terminal-bar"><span></span><span></span><span></span><small>CASE CPGF-2026-03-LP001</small></div>
@@ -69,6 +70,73 @@
             <div class="commitment-total"><span>Total commitment</span><strong id="total-commitment">—</strong></div><div class="commitment-bar"><i id="called-bar"></i><i id="current-bar"></i></div>
             <div class="bar-legend"><span><i class="called"></i>Called before <b id="called-before">—</b></span><span><i class="current"></i>Current call <b id="current-call">—</b></span><span><i class="remaining"></i>Remaining <b id="remaining-call">—</b></span></div>
             <div class="evidence-summary"><span>Matched cash evidence</span><strong id="matched-transactions">No matching transaction</strong></div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="contract-section" id="contracts">
+      <div class="contract-intro">
+        <div>
+          <p class="eyebrow">Context-derived demo · Synthetic evidence</p>
+          <h2>Contract Agent</h2>
+          <p class="contract-subtitle">Governing documents → investor-specific rules → deterministic checks → review-ready evidence</p>
+        </div>
+        <div class="contract-disclosure">
+          <strong>SYNTHETIC HACKATHON DEMO — NOT A REAL CONTRACT</strong>
+          <p>Grounded in the side-letter fee problem described in Ylookup Call 1. The sponsor pack did not contain an LPA or side letter, so this isolated demo uses invented documents and parties.</p>
+          <button class="button primary" id="run-contract-demo" type="button">Run side-letter demo <span>→</span></button>
+        </div>
+      </div>
+
+      <div class="contract-results hidden" id="contract-results" aria-live="polite">
+        <header class="contract-decision">
+          <div><span>Contract-informed control decision</span><h3 id="contract-decision-title">Review required</h3><p id="contract-decision-subtitle">Cedar Pension Trust · Management fee / capital-call treatment</p></div>
+          <div><small>Potential overcall</small><strong id="contract-overcall">—</strong></div>
+        </header>
+
+        <div class="contract-provenance"><span>CONTEXT-DERIVED DEMO</span><span id="contract-context-source">Ylookup Call 1</span><span>Sponsor-native metrics excluded</span></div>
+
+        <div class="contract-story">
+          <article class="contract-panel rule-panel">
+            <div class="panel-kicker">01 · Governing rule stack</div>
+            <div class="rule-card">
+              <div><small>Fund default</small><b>LPA default</b></div>
+              <strong id="contract-lpa-rule">—</strong>
+              <p id="contract-lpa-source">—</p>
+            </div>
+            <div class="rule-arrow">↓ overridden for Cedar ↓</div>
+            <div class="rule-card override">
+              <div><small>Investor-specific</small><b>Side-letter override</b></div>
+              <strong id="contract-side-rule">—</strong>
+              <p id="contract-side-source">—</p>
+            </div>
+          </article>
+
+          <article class="contract-panel calculation-panel">
+            <div class="panel-kicker">02 · Deterministic calculation bridge</div>
+            <div class="calculation-rows">
+              <p><span>Commitment</span><strong id="contract-commitment">—</strong></p>
+              <p><span>Quarterly fee @ 0.50%</span><strong id="contract-fee">—</strong></p>
+              <p><span>Base contribution</span><strong id="contract-base">—</strong></p>
+              <p class="calculation-break"><span>Expected under side letter</span><strong id="contract-expected">—</strong></p>
+              <p><span>Administrator supplied</span><strong id="contract-observed">—</strong></p>
+              <p class="calculation-variance"><span>Variance / potential overcall</span><strong id="contract-variance">—</strong></p>
+            </div>
+            <div class="component-bridge"><span>Expected total</span><strong id="contract-component-total">—</strong><small><b id="contract-net-investment">—</b> net investment + <b id="contract-fee-component">—</b> management fee</small></div>
+          </article>
+
+          <article class="contract-panel finding-panel">
+            <div class="panel-kicker">03 · Finding &amp; owned action</div>
+            <div class="contract-finding"><span>High</span><div><code id="contract-finding-code">—</code><h4 id="contract-finding-title">—</h4><p id="contract-finding-detail">—</p></div></div>
+            <div class="contract-work-item"><small id="contract-work-owner">OWNER · —</small><strong id="contract-work-title">—</strong><p id="contract-work-instruction">—</p></div>
+          </article>
+
+          <article class="contract-panel comparison-panel">
+            <div class="panel-kicker">04 · Specificity check</div>
+            <div class="comparison-pass"><span>✓</span><div><h4 id="contract-standard-investor">Orchard Institutional LP</h4><p>No active side-letter override · LPA default applied</p></div><b>Pass</b></div>
+            <div class="comparison-values"><span>Expected <b id="contract-standard-expected">—</b></span><span>Observed <b id="contract-standard-observed">—</b></span></div>
+            <div class="contract-evidence"><small>Evidence manifest</small><code id="contract-evidence-hash">—</code><p>Source sections and SHA-256 identities retained. No legal advice. No payment initiation.</p></div>
           </article>
         </div>
       </div>

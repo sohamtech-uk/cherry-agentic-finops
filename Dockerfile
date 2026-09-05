@@ -11,6 +11,7 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY app ./app
 COPY agents ./agents
+COPY fixtures ./fixtures
 RUN python -m pip install --upgrade pip && python -m pip install .
 
 USER cherry
