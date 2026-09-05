@@ -21,6 +21,7 @@ the first occurrence.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 from datetime import date
@@ -34,6 +35,16 @@ from pydantic import BaseModel, Field, field_validator
 from app.private_markets import FindingSeverity, WorkItemPriority, money
 
 REQUIRED_GL_SHEET = "Investor-Level GL"
+
+# Matches app.nav_reconciliation.DEFAULT_TOLERANCE. The two modules check overlapping ground (a
+# quick isolated-figure check here vs. a full NAV-pack review there) and must agree on what counts
+# as a rounding-only difference, or the same figures could pass one and fail the other.
+_TOLERANCE = Decimal("0.01")
+
+
+def _within_tolerance(difference: Decimal) -> bool:
+    return abs(difference) <= _TOLERANCE
+
 
 # Fixed column positions in the real "Investor-Level GL" export. Two column pairs repeat their
 # header text ("Static Date" for period start/end, "GL Date" twice), so a header-name lookup would
@@ -77,6 +88,7 @@ class NAVFinding(BaseModel):
     detail: str
     expected: str | None = None
     observed: str | None = None
+    investor: str | None = None
 
 
 class NAVWorkItem(BaseModel):
@@ -150,7 +162,14 @@ class NAVSourceLedger(BaseModel):
 def parse_investor_level_gl_workbook(content: bytes) -> NAVSourceLedger:
     if not content:
         raise ValueError("The source ledger workbook is empty.")
-    workbook = load_workbook(io.BytesIO(content), data_only=True, read_only=True)
+    try:
+        workbook = load_workbook(io.BytesIO(content), data_only=True, read_only=True)
+    except Exception as exc:
+        # openpyxl raises a variety of exception types for a corrupt or non-XLSX file
+        # (zipfile.BadZipFile, openpyxl's own InvalidFileException, KeyError, ...); normalise all
+        # of them to ValueError so callers' single ValueError/ValidationError handler catches this
+        # the same way it catches every other parse failure in this module.
+        raise ValueError(f"The source ledger workbook could not be opened: {exc}") from exc
     if REQUIRED_GL_SHEET not in workbook.sheetnames:
         raise ValueError(f"Workbook must contain an {REQUIRED_GL_SHEET!r} sheet.")
 
@@ -497,7 +516,7 @@ def review_nav_quality(
     # --- Check 1: balance sheet <-> equity -----------------------------------------------------
     footed_equity = money(summary.total_assets - summary.total_liabilities)
     footing_difference = money(summary.reported_equity - footed_equity)
-    if footing_difference == 0:
+    if _within_tolerance(footing_difference):
         findings.append(
             NAVFinding(
                 code="balance_sheet.footing_valid",
@@ -531,7 +550,7 @@ def review_nav_quality(
         )
         assets_diff = money(summary.total_assets - ledger_assets)
         liabilities_diff = money(summary.total_liabilities - ledger_liabilities)
-        if assets_diff == 0 and liabilities_diff == 0:
+        if _within_tolerance(assets_diff) and _within_tolerance(liabilities_diff):
             findings.append(
                 NAVFinding(
                     code="balance_sheet.matches_ledger",
@@ -566,7 +585,7 @@ def review_nav_quality(
         - summary.distributions
     )
     bridge_difference = money(summary.closing_nav - bridge_calculated_closing)
-    if bridge_difference == 0:
+    if _within_tolerance(bridge_difference):
         findings.append(
             NAVFinding(
                 code="nav_bridge.foots",
@@ -591,7 +610,7 @@ def review_nav_quality(
     if ledger is not None:
         ledger_closing_nav = ledger.capital_balance(summary.legal_entity, as_of=summary.period_end)
         recalculation_difference = money(summary.closing_nav - ledger_closing_nav)
-        if recalculation_difference == 0:
+        if _within_tolerance(recalculation_difference):
             findings.append(
                 NAVFinding(
                     code="nav.independent_recalculation_valid",
@@ -644,6 +663,7 @@ def review_nav_quality(
                     detail=(
                         f"The investor-specific rule was not applied automatically. {evidence_issue}"
                     ),
+                    investor=line.investor,
                 )
             )
         elif rule is not None and rule.rule != "management_fee_offsets_called_capital":
@@ -656,6 +676,7 @@ def review_nav_quality(
                         "The source-backed rule uses calculation semantics that this NAV control "
                         "does not support, so it requires human review."
                     ),
+                    investor=line.investor,
                 )
             )
         elif rule is not None:
@@ -669,6 +690,7 @@ def review_nav_quality(
                             f"Side Letter ({rule.source or 'on file'}) requires the management fee to "
                             "offset called capital, but no management fee was supplied for this investor."
                         ),
+                        investor=line.investor,
                     )
                 )
             else:
@@ -676,7 +698,7 @@ def review_nav_quality(
                 rule_adjusted_expected = money(baseline - line.management_fee)
                 check.rule_adjusted_expected = rule_adjusted_expected
                 rule_difference = money(line.reported_capital - rule_adjusted_expected)
-                if rule_difference == 0:
+                if _within_tolerance(rule_difference):
                     findings.append(
                         NAVFinding(
                             code="side_letter.rule_applied",
@@ -686,6 +708,7 @@ def review_nav_quality(
                                 f"Management fee correctly offsets called capital per "
                                 f"{rule.source or 'the side letter'}."
                             ),
+                            investor=line.investor,
                         )
                     )
                 else:
@@ -701,17 +724,19 @@ def review_nav_quality(
                             ),
                             expected=str(rule_adjusted_expected),
                             observed=str(line.reported_capital),
+                            investor=line.investor,
                         )
                     )
         elif ledger_capital is not None:
             capital_difference = money(line.reported_capital - ledger_capital)
-            if capital_difference == 0:
+            if _within_tolerance(capital_difference):
                 findings.append(
                     NAVFinding(
                         code="investor_capital.matches_ledger",
                         severity=FindingSeverity.PASS,
                         title=f"{line.investor}: capital account matches the ledger",
                         detail="Reported investor capital matches the independently derived ledger balance.",
+                        investor=line.investor,
                     )
                 )
             else:
@@ -726,6 +751,7 @@ def review_nav_quality(
                         ),
                         expected=str(ledger_capital),
                         observed=str(line.reported_capital),
+                        investor=line.investor,
                     )
                 )
         investor_checks.append(check)
@@ -852,3 +878,25 @@ def review_nav_quality(
         exceptions_open=exceptions_open,
         controls_summary=controls_summary,
     )
+
+
+def sha256_hex(content: bytes) -> str:
+    """SHA-256 hex digest of a raw input, used to build tamper-evident evidence hashes.
+
+    Shared by the FastAPI endpoint and the ADK agent tool so a NAV review carries the same
+    audit-trail identity (a case id plus per-input hashes) however it was invoked.
+    """
+
+    return hashlib.sha256(content).hexdigest()
+
+
+def build_case_id(*hashes: str) -> str:
+    material = "|".join(hashes).encode("utf-8")
+    return f"NAV-{sha256_hex(material)[:12].upper()}"
+
+
+def report_hash(report: NAVReviewReport) -> str:
+    payload = json.dumps(
+        report.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return sha256_hex(payload)

@@ -3,12 +3,14 @@ from __future__ import annotations
 import io
 import json
 from datetime import date
+from decimal import Decimal
 
 import openpyxl
 import pytest
 from fastapi.testclient import TestClient
 
 from app.api import app
+from app.nav_exceptions import group_exceptions_by_root_cause
 from app.nav_quality import (
     AdministratorNAVSummary,
     NAVAction,
@@ -596,3 +598,180 @@ def test_review_endpoint_rejects_invalid_summary_json() -> None:
         files={"nav_summary": ("nav-summary.json", b"not json", "application/json")},
     )
     assert response.status_code == 422
+
+
+def test_review_endpoint_rejects_corrupt_source_ledger_with_422_not_500() -> None:
+    """Regression test: openpyxl raises zipfile.BadZipFile (not ValueError) for a corrupt or
+    non-XLSX file. parse_investor_level_gl_workbook must normalise that to ValueError so this
+    returns a clean 422 instead of an unhandled 500."""
+
+    summary_bytes = json.dumps(
+        {
+            "legal_entity": "Fund X",
+            "period_end": "2026-06-30",
+            "total_assets": 5_000_000,
+            "total_liabilities": 150_000,
+            "reported_equity": 4_850_000,
+            "opening_nav": 4_700_000,
+            "closing_nav": 4_850_000,
+        }
+    ).encode()
+
+    response = client.post(
+        "/api/nav-quality/review",
+        files={
+            "nav_summary": ("nav-summary.json", summary_bytes, "application/json"),
+            "source_ledger": (
+                "source-ledger.xlsx",
+                b"not a real xlsx file",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+        },
+    )
+
+    assert response.status_code == 422
+    assert "source ledger" in response.json()["detail"]
+
+
+def test_parse_investor_level_gl_workbook_rejects_corrupt_file_with_value_error() -> None:
+    with pytest.raises(ValueError, match="could not be opened"):
+        parse_investor_level_gl_workbook(b"not a real xlsx file")
+
+
+# --- tolerance -------------------------------------------------------------------------------
+
+
+def test_review_nav_quality_treats_one_cent_difference_as_a_pass() -> None:
+    """nav_reconciliation.py's quick checks tolerate a 1-cent rounding difference (DEFAULT_TOLERANCE
+    = "0.01"); review_nav_quality must apply the same tolerance so the two entry points to
+    conceptually the same check cannot disagree at the boundary."""
+
+    summary = _clean_summary(reported_equity=Decimal("4850000.01"))
+    report = review_nav_quality(summary)
+
+    codes = {finding.code for finding in report.findings}
+    assert "balance_sheet.footing_valid" in codes
+    assert "balance_sheet.footing_mismatch" not in codes
+    assert report.action == NAVAction.READY_TO_SUBMIT
+
+
+def test_review_nav_quality_still_flags_a_two_cent_difference() -> None:
+    summary = _clean_summary(reported_equity=Decimal("4850000.02"))
+    report = review_nav_quality(summary)
+
+    codes = {finding.code for finding in report.findings}
+    assert "balance_sheet.footing_mismatch" in codes
+
+
+# --- NAVFinding.investor ------------------------------------------------------------------------
+
+
+def test_investor_scoped_findings_carry_the_investor_field() -> None:
+    ledger = parse_investor_level_gl_workbook(_build_gl_workbook(FUND_X_ROWS))
+    summary = _clean_summary(
+        investor_capital=[
+            {"investor": "Investor A", "reported_capital": 2_500_000},
+            {"investor": "Investor B", "reported_capital": 1_850_000},
+        ]
+    )
+    report = review_nav_quality(summary, ledger=ledger)
+
+    mismatch = next(f for f in report.findings if f.code == "investor_capital.ledger_mismatch")
+    match = next(f for f in report.findings if f.code == "investor_capital.matches_ledger")
+    assert mismatch.investor == "Investor A"
+    assert match.investor == "Investor B"
+    # non-investor-scoped findings are untouched
+    footing = next(f for f in report.findings if f.code == "balance_sheet.footing_valid")
+    assert footing.investor is None
+
+
+# --- group_exceptions_by_root_cause ---------------------------------------------------------------
+
+
+def test_group_exceptions_by_root_cause_empty_when_report_is_clean() -> None:
+    report = review_nav_quality(_clean_summary())
+    assert group_exceptions_by_root_cause(report) == []
+
+
+def test_group_exceptions_by_root_cause_groups_balance_sheet_break() -> None:
+    summary = _clean_summary(reported_equity=4_800_000)
+    report = review_nav_quality(summary)
+
+    groups = group_exceptions_by_root_cause(report)
+
+    assert len(groups) == 1
+    group = groups[0]
+    assert group.category == "balance_sheet"
+    assert group.impact_amount == Decimal("50000.00")
+    assert group.related_finding_codes == ["balance_sheet.footing_mismatch"]
+
+
+def test_group_exceptions_by_root_cause_groups_nav_bridge_break() -> None:
+    summary = _clean_summary(closing_nav=4_900_000)
+    report = review_nav_quality(summary)
+
+    groups = group_exceptions_by_root_cause(report)
+
+    assert len(groups) == 1
+    assert groups[0].category == "nav_bridge"
+    assert groups[0].impact_amount == Decimal("50000.00")
+
+
+def test_group_exceptions_by_root_cause_groups_per_investor_and_ranks_by_impact() -> None:
+    ledger = parse_investor_level_gl_workbook(_build_gl_workbook(FUND_X_ROWS))
+    summary = _clean_summary(
+        reported_equity=4_800_000,  # balance-sheet break: impact 50,000
+        investor_capital=[
+            {"investor": "Investor A", "reported_capital": 2_000_000},  # impact 1,000,000
+            {"investor": "Investor B", "reported_capital": 1_800_000},  # impact 50,000
+        ],
+    )
+    report = review_nav_quality(summary, ledger=ledger)
+
+    groups = group_exceptions_by_root_cause(report)
+
+    assert [group.category for group in groups] == [
+        "investor_capital",
+        "balance_sheet",
+        "investor_capital",
+    ]
+    assert groups[0].investor == "Investor A"
+    assert groups[0].impact_amount == Decimal("1000000.00")
+    assert groups[-1].investor == "Investor B"
+    assert groups[-1].impact_amount == Decimal("50000.00")
+    assert all(group.severity == "high" for group in groups)
+
+
+def test_group_exceptions_by_root_cause_bundles_multiple_findings_for_one_investor() -> None:
+    summary = _clean_summary(
+        investor_capital=[
+            {
+                "investor": "Investor A",
+                "reported_capital": 3_000_000,  # forgot the management-fee offset
+                "management_fee": 125_000,
+            }
+        ]
+    )
+    rules = [_source_backed_rule()]
+    report = review_nav_quality(summary, side_letter_rules=rules)
+
+    groups = group_exceptions_by_root_cause(report)
+
+    assert len(groups) == 1
+    group = groups[0]
+    assert group.investor == "Investor A"
+    assert group.related_finding_codes == ["side_letter.rule_violation"]
+    assert group.recommended_owner == "Investor relations"
+
+
+def test_group_exceptions_by_root_cause_warning_only_group_stays_warning() -> None:
+    summary = _clean_summary(
+        investor_capital=[{"investor": "Investor A", "reported_capital": 3_000_000}]
+    )
+    rules = [_source_backed_rule()]
+    report = review_nav_quality(summary, side_letter_rules=rules)
+
+    groups = group_exceptions_by_root_cause(report)
+
+    assert len(groups) == 1
+    assert groups[0].severity == "warning"

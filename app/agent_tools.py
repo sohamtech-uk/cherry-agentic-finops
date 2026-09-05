@@ -3,13 +3,21 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
+from pydantic import ValidationError
+
+from app.config import get_settings
 from app.container import get_engine
 from app.models import ApprovalRequest, RejectionRequest
+from app.nav_exceptions import group_exceptions_by_root_cause
 from app.nav_quality import (
+    SideLetterRule,
+    build_case_id,
     parse_administrator_nav_summary,
     parse_investor_level_gl_workbook,
     parse_side_letter_rules,
+    report_hash,
     review_nav_quality,
+    sha256_hex,
 )
 from app.nav_reconciliation import validate_balance_sheet_equity as _validate_balance_sheet_equity
 from app.nav_reconciliation import validate_nav_bridge as _validate_nav_bridge
@@ -103,6 +111,22 @@ def _read_file_bytes(file_path: str) -> bytes:
     if not path.is_file():
         raise ValueError(f"File path {file_path!r} does not exist.")
     return path.read_bytes()
+
+
+def _read_input_file(file_path: str, *, kind: str, extension: str) -> bytes:
+    """Read a required or optional NAV-review input, applying the same size and extension checks
+    as the POST /api/nav-quality/review endpoint, so a bad path fails with a clear ValueError
+    instead of an unbounded read or a raw parser exception."""
+
+    content = _read_file_bytes(file_path)
+    max_bytes = get_settings().max_upload_mb * 1024 * 1024
+    if len(content) > max_bytes:
+        raise ValueError(
+            f"{kind} {file_path!r} exceeds the {get_settings().max_upload_mb} MB upload limit."
+        )
+    if not file_path.lower().endswith(extension):
+        raise ValueError(f"{kind} {file_path!r} must be a {extension} file.")
+    return content
 
 
 def identify_ylookup_workbook(workbook_path: str) -> dict[str, Any]:
@@ -300,9 +324,12 @@ def run_nav_quality_review(
 ) -> dict[str, Any]:
     """Run the full NAV Quality Controller review of an administrator's NAV pack: balance sheet
     footing, NAV bridge footing, independent NAV recalculation, investor capital reconciliation
-    and side-letter rule validation, in one deterministic pass. Returns findings, work items and
-    a recommended action (ready_to_submit / needs_review / return_to_administrator) — never a
-    correction; report what the tool found rather than recomputing any of it yourself.
+    and side-letter rule validation, in one deterministic pass. Returns a case_id, the review
+    (findings, work items and a recommended action — ready_to_submit / needs_review /
+    return_to_administrator), root_causes (the same findings grouped by underlying cause and
+    ranked by materiality — read this instead of the flat finding list when triaging), and
+    per-input evidence hashes. Never a correction; report what the tool found rather than
+    recomputing or regrouping any of it yourself.
 
     Use validate_balance_sheet_equity / validate_nav_bridge instead when you only have isolated
     figures rather than a full NAV summary and optional source ledger.
@@ -316,18 +343,65 @@ def run_nav_quality_review(
             a management-fee-offsets-called-capital rule for a named investor.
     """
 
-    summary = parse_administrator_nav_summary(_read_file_bytes(nav_summary_path))
-    ledger = (
-        parse_investor_level_gl_workbook(_read_file_bytes(source_ledger_path))
-        if source_ledger_path
-        else None
-    )
-    rules = (
-        parse_side_letter_rules(_read_file_bytes(side_letter_rules_path))
-        if side_letter_rules_path
-        else None
-    )
-    return review_nav_quality(summary, ledger, rules).model_dump(mode="json")
+    summary_content = _read_input_file(nav_summary_path, kind="NAV summary", extension=".json")
+    try:
+        summary = parse_administrator_nav_summary(summary_content)
+    except (ValueError, ValidationError) as exc:
+        raise ValueError(f"Invalid administrator NAV summary {nav_summary_path!r}: {exc}") from exc
+
+    source_ledger_path = (source_ledger_path or "").strip() or None
+    ledger = None
+    ledger_hash: str | None = None
+    if source_ledger_path is not None:
+        ledger_content = _read_input_file(
+            source_ledger_path, kind="Source ledger", extension=".xlsx"
+        )
+        try:
+            ledger = parse_investor_level_gl_workbook(ledger_content)
+        except (ValueError, ValidationError) as exc:
+            raise ValueError(f"Invalid source ledger {source_ledger_path!r}: {exc}") from exc
+        ledger_hash = sha256_hex(ledger_content)
+
+    side_letter_rules_path = (side_letter_rules_path or "").strip() or None
+    rules: list[SideLetterRule] = []
+    rules_hash: str | None = None
+    if side_letter_rules_path is not None:
+        rules_content = _read_input_file(
+            side_letter_rules_path, kind="Side-letter rules", extension=".json"
+        )
+        try:
+            rules = parse_side_letter_rules(rules_content)
+        except (ValueError, ValidationError) as exc:
+            raise ValueError(
+                f"Invalid side-letter rules {side_letter_rules_path!r}: {exc}"
+            ) from exc
+        rules_hash = sha256_hex(rules_content)
+
+    report = review_nav_quality(summary, ledger=ledger, side_letter_rules=rules)
+    root_causes = group_exceptions_by_root_cause(report)
+    summary_hash = sha256_hex(summary_content)
+    case_id = build_case_id(summary_hash, ledger_hash or "NO_LEDGER", rules_hash or "NO_RULES")
+
+    return {
+        "case_id": case_id,
+        "legal_entity": summary.legal_entity,
+        "ledger_supplied": ledger is not None,
+        "side_letter_rules_supplied": bool(rules),
+        "review": report.model_dump(mode="json"),
+        "root_causes": [group.model_dump(mode="json") for group in root_causes],
+        "evidence": {
+            "input_sha256": {
+                "nav_summary": summary_hash,
+                "source_ledger": ledger_hash,
+                "side_letter_rules": rules_hash,
+            },
+            "review_sha256": report_hash(report),
+        },
+        "financial_boundary": (
+            "This service reviews the NAV pack and recommends an action; it never posts a "
+            "correcting journal entry or amends the official NAV."
+        ),
+    }
 
 
 def read_document(document_path: str) -> dict[str, Any]:

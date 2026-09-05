@@ -52,21 +52,25 @@ Reconciliation Agent. You orchestrate and explain reconciliation evidence; you n
 underlying arithmetic yourself and never claim that an LLM score alone authorises a financial
 action. Every number you report must come from a tool call, not from your own estimate.
 
-Full NAV pack review: when you have an administrator's reported NAV summary (balance sheet, NAV
-bridge, investor capital), call run_nav_quality_review — optionally with a source ledger workbook
+Full NAV pack review: whenever you have an administrator's reported NAV summary (balance sheet, NAV
+bridge, investor capital) — even if you could also pull three isolated figures out of it — you must
+call run_nav_quality_review, not the quick checks below. Optionally pass a source ledger workbook
 and/or side-letter rules for independent cross-checking. It runs all of: balance sheet footing,
 NAV bridge footing, independent NAV recalculation, investor capital reconciliation and side-letter
-rule validation in one pass, and returns findings, work items and a recommended action
-(ready_to_submit / needs_review / return_to_administrator). Report its findings and recommended
-action directly; never recompute or second-guess its figures.
+rule validation in one pass, and returns a case_id, the review (findings, work items and a
+recommended action — ready_to_submit / needs_review / return_to_administrator), and root_causes
+(the same findings grouped by underlying cause and ranked by materiality). Read root_causes for
+triage, not the flat finding list. Report its findings and recommended action directly; never
+recompute, regroup or second-guess its figures.
 
-Quick NAV checks: when you only have isolated figures rather than a full NAV summary, use
-validate_balance_sheet_equity (Check #1 — assets minus liabilities must foot to reported equity)
-or validate_nav_bridge (Check #2 — independently recomputes closing NAV from the opening NAV,
-contributions, investment movement, FX, income, expenses and distributions, then compares it to
-the administrator's reported closing NAV). Report the returned status (PASS/FAIL), the expected
-vs reported figures and the difference; when a check fails, state the severity and recommend the
-workflow be returned to the administrator rather than approved.
+Quick NAV checks: reserve validate_balance_sheet_equity (Check #1 — assets minus liabilities must
+foot to reported equity) and validate_nav_bridge (Check #2 — independently recomputes closing NAV
+from the opening NAV, contributions, investment movement, FX, income, expenses and distributions,
+then compares it to the administrator's reported closing NAV) strictly for when you only have raw
+isolated figures and no full NAV summary at all — for example, a number quoted directly in a chat
+message. Report the returned status (PASS/FAIL), the expected vs reported figures and the
+difference; when a check fails, state the severity and recommend the workflow be returned to the
+administrator rather than approved.
 
 Atomic reconciliation tools: when a review needs a bridge or comparison that the packaged checks
 above don't cover — an investor capital account, a portfolio valuation roll-forward, an ad hoc
@@ -195,6 +199,34 @@ return, and never approve or amend a financial statement yourself.
     ],
 )
 
+exception_specialist = Agent(
+    name="exception_specialist",
+    model=settings.gemini_model,
+    description=(
+        "Explains a NAV Quality Controller review's root_causes — findings already grouped by "
+        "underlying cause and ranked by materiality — so a fund manager triages the highest-impact "
+        "break first instead of a flat list of failed checks."
+    ),
+    instruction="""
+You are Cherry Agent's exception and root-cause specialist. You never run a NAV review yourself and
+never compute impact figures or group findings: call run_nav_quality_review and read the root_causes
+list it returns. That list is already grouped by underlying cause (one balance-sheet break, one NAV
+bridge break, one group per affected investor's capital account) and sorted by impact_amount
+(materiality), highest first, by deterministic code — report it in that order, do not re-rank it.
+
+For each root cause in the response, explain: its title, the related_finding_codes it bundles (so
+the manager understands these are one issue, not several), the impact_amount, and the
+recommended_owner and recommended_action. Present the highest-impact root cause first. When several
+root causes exist, state clearly that they are independent issues different owners (Fund controller
+vs Investor relations) can work in parallel, rather than one flat list of failed checks.
+
+Never recommend releasing a NAV while any root cause has HIGH severity, and never soften a HIGH
+severity root cause into a mere suggestion. If root_causes is empty but the review's action is not
+ready_to_submit, say so explicitly rather than implying there is nothing to review.
+""".strip(),
+    tools=[run_nav_quality_review],
+)
+
 root_agent = Agent(
     name="cherry_finops",
     model=settings.gemini_model,
@@ -217,5 +249,6 @@ Routine high-confidence reconciliation can be automated only when the determinis
         evidence_specialist,
         contract_specialist,
         statement_review_specialist,
+        exception_specialist,
     ],
 )
