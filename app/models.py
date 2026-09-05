@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-TWOPLACES = Decimal("0.01")
-
-
-def money(value: Decimal | float | int | str) -> Decimal:
-    return Decimal(str(value)).quantize(TWOPLACES, rounding=ROUND_HALF_UP)
+from app.private_markets import TWOPLACES, money
 
 
 def utc_now() -> datetime:

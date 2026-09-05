@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -109,8 +110,12 @@ def test_run_nav_quality_review_clean_summary_is_ready_to_submit(tmp_path: Path)
 
     report = run_nav_quality_review(summary_path)
 
-    assert report["action"] == "ready_to_submit"
-    assert report["exceptions_open"] == 0
+    assert report["review"]["action"] == "ready_to_submit"
+    assert report["review"]["exceptions_open"] == 0
+    assert report["root_causes"] == []
+    assert report["case_id"].startswith("NAV-")
+    assert report["evidence"]["input_sha256"]["nav_summary"]
+    assert report["evidence"]["input_sha256"]["source_ledger"] is None
 
 
 def test_run_nav_quality_review_flags_balance_sheet_mismatch(tmp_path: Path) -> None:
@@ -118,10 +123,14 @@ def test_run_nav_quality_review_flags_balance_sheet_mismatch(tmp_path: Path) -> 
 
     report = run_nav_quality_review(summary_path)
 
-    assert report["action"] == "return_to_administrator"
+    assert report["review"]["action"] == "return_to_administrator"
     assert any(
-        finding["code"] == "balance_sheet.footing_mismatch" for finding in report["findings"]
+        finding["code"] == "balance_sheet.footing_mismatch"
+        for finding in report["review"]["findings"]
     )
+    assert len(report["root_causes"]) == 1
+    assert report["root_causes"][0]["category"] == "balance_sheet"
+    assert report["root_causes"][0]["impact_amount"] == "850000.00"
 
 
 def test_run_nav_quality_review_missing_path_raises() -> None:
@@ -194,3 +203,91 @@ def test_compare_dates_reads_local_files(tmp_path: Path) -> None:
 
     assert "2026-06-30" in result["dates_only_in_current"]
     assert "2026-05-17" in result["dates_only_in_prior"]
+
+
+def test_run_nav_quality_review_rejects_wrong_extension(tmp_path: Path) -> None:
+    bad_path = tmp_path / "nav-summary.txt"
+    bad_path.write_text("{}")
+
+    with pytest.raises(ValueError, match=r"must be a \.json file"):
+        run_nav_quality_review(str(bad_path))
+
+
+def test_run_nav_quality_review_wraps_invalid_summary_json(tmp_path: Path) -> None:
+    bad_path = tmp_path / "nav-summary.json"
+    bad_path.write_text("not json")
+
+    with pytest.raises(ValueError, match="Invalid administrator NAV summary"):
+        run_nav_quality_review(str(bad_path))
+
+
+def test_run_nav_quality_review_wraps_corrupt_source_ledger(tmp_path: Path) -> None:
+    summary_path = _write_nav_summary(tmp_path / "nav-summary.json")
+    ledger_path = tmp_path / "source-ledger.xlsx"
+    ledger_path.write_bytes(b"not a real xlsx file")
+
+    with pytest.raises(ValueError, match="Invalid source ledger"):
+        run_nav_quality_review(summary_path, str(ledger_path))
+
+
+def test_run_nav_quality_review_treats_blank_optional_paths_as_not_supplied(
+    tmp_path: Path,
+) -> None:
+    summary_path = _write_nav_summary(tmp_path / "nav-summary.json")
+
+    report = run_nav_quality_review(
+        summary_path, source_ledger_path="  ", side_letter_rules_path=""
+    )
+
+    assert report["ledger_supplied"] is False
+    assert report["side_letter_rules_supplied"] is False
+
+
+def test_run_nav_quality_review_with_ledger_produces_investor_root_cause(tmp_path: Path) -> None:
+    summary_path = _write_nav_summary(
+        tmp_path / "nav-summary.json",
+        investor_capital=[
+            {"investor": "Investor A", "reported_capital": 2_000_000},
+            {"investor": "Investor B", "reported_capital": 1_850_000},
+        ],
+    )
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Investor-Level GL"
+    header = [None] * 43
+    header[1] = "Static Date"
+    header[2] = "Static Date"
+    header[3] = "Legal Entity"
+    header[21] = "Account Type"
+    header[22] = "Trans Type"
+    header[23] = "GL Date"
+    header[24] = "GL Date"
+    header[30] = "Legal Entity Currency"
+    header[31] = "Amount (Entity Currency)"
+    header[35] = "Investor"
+    sheet.append(header)
+
+    def _row(account_type: str, amount: float, investor: str | None = None) -> list[object]:
+        row: list[object] = [None] * 43
+        row[1], row[2] = date(2026, 4, 1), date(2026, 6, 30)
+        row[3] = "Fund X"
+        row[21], row[22] = account_type, "Movement"
+        row[23], row[24] = date(2026, 5, 1), date(2026, 5, 1)
+        row[30], row[31], row[35] = "USD", amount, investor
+        return row
+
+    sheet.append(_row("Assets", 5_000_000))
+    sheet.append(_row("Liabilities", -150_000))
+    sheet.append(_row("Capital", -3_000_000, "Investor A"))
+    sheet.append(_row("Capital", -1_850_000, "Investor B"))
+    ledger_path = tmp_path / "source-ledger.xlsx"
+    workbook.save(ledger_path)
+
+    report = run_nav_quality_review(summary_path, str(ledger_path))
+
+    assert report["ledger_supplied"] is True
+    investor_groups = [g for g in report["root_causes"] if g["category"] == "investor_capital"]
+    assert any(
+        g["investor"] == "Investor A" and g["impact_amount"] == "1000000.00"
+        for g in investor_groups
+    )

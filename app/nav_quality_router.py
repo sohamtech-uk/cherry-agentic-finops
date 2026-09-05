@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import hmac
 import json
 import os
@@ -13,13 +12,16 @@ from pydantic import ValidationError
 
 from app.config import get_settings
 from app.contract_nav import resolve_contract_rules_for_nav
+from app.nav_exceptions import group_exceptions_by_root_cause
 from app.nav_quality import (
-    NAVReviewReport,
     SideLetterRule,
+    build_case_id,
     parse_administrator_nav_summary,
     parse_investor_level_gl_workbook,
     parse_side_letter_rules,
+    report_hash,
     review_nav_quality,
+    sha256_hex,
 )
 
 settings = get_settings()
@@ -41,25 +43,9 @@ def _require_real_data_access(token: str | None) -> None:
         raise HTTPException(status_code=401, detail="Valid private-markets demo token required.")
 
 
-def _sha256(content: bytes) -> str:
-    return hashlib.sha256(content).hexdigest()
-
-
 def _safe_file_name(value: str | None, fallback: str) -> str:
     candidate = Path(value or fallback).name.strip()
     return candidate if candidate not in {"", ".", ".."} else fallback
-
-
-def _case_id(*hashes: str) -> str:
-    material = "|".join(hashes).encode("utf-8")
-    return f"NAV-{_sha256(material)[:12].upper()}"
-
-
-def _report_hash(report: NAVReviewReport) -> str:
-    payload = json.dumps(
-        report.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
-    return _sha256(payload)
 
 
 @router.get("/health")
@@ -86,6 +72,7 @@ async def nav_quality_health() -> dict[str, Any]:
             "investor_capital_reconciliation",
             "side_letter_rule_validation",
         ],
+        "exception_grouping": "root_causes ranked by impact_amount (materiality), highest first",
         "financial_boundary": (
             "Decision support only; this service never posts a journal entry or amends the "
             "official NAV."
@@ -207,6 +194,7 @@ async def review_nav_pack(
         rules = resolve_contract_rules_for_nav(summary)
 
     report = review_nav_quality(summary, ledger=ledger, side_letter_rules=rules)
+    root_causes = group_exceptions_by_root_cause(report)
     contract_sources = [
         {
             "investor": rule.investor,
@@ -222,11 +210,11 @@ async def review_nav_pack(
         if rule.document_id or rule.resolution_status != "found"
     ]
 
-    summary_hash = _sha256(summary_content)
-    ledger_hash = _sha256(ledger_content) if ledger_content is not None else None
-    rules_hash = _sha256(rules_content) if rules_content is not None else None
+    summary_hash = sha256_hex(summary_content)
+    ledger_hash = sha256_hex(ledger_content) if ledger_content is not None else None
+    rules_hash = sha256_hex(rules_content) if rules_content is not None else None
     resolved_rules_hash = (
-        _sha256(
+        sha256_hex(
             json.dumps(
                 [rule.model_dump(mode="json") for rule in rules],
                 sort_keys=True,
@@ -236,7 +224,7 @@ async def review_nav_pack(
         if use_contract_documents
         else None
     )
-    case_id = _case_id(
+    case_id = build_case_id(
         summary_hash,
         ledger_hash or "NO_LEDGER",
         rules_hash or resolved_rules_hash or "NO_RULES",
@@ -262,6 +250,7 @@ async def review_nav_pack(
             else "none"
         ),
         "review": report.model_dump(mode="json"),
+        "root_causes": [group.model_dump(mode="json") for group in root_causes],
         "evidence": {
             "input_sha256": {
                 "nav_summary": summary_hash,
@@ -271,7 +260,7 @@ async def review_nav_pack(
             },
             "sources": sources,
             "contract_sources": contract_sources,
-            "review_sha256": _report_hash(report),
+            "review_sha256": report_hash(report),
             "generated_at": datetime.now(UTC).isoformat(),
         },
         "financial_boundary": (
