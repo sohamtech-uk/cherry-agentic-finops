@@ -13,10 +13,14 @@ from pydantic import ValidationError
 from app.config import get_settings
 from app.fundops_studio import FundOpsStudioConnector, FundOpsStudioUnavailable
 from app.private_markets import (
+    FindingSeverity,
+    FundCashTransaction,
     GeminiCapitalCallExtractor,
     GeminiPrivateMarketsUnavailable,
+    PrivateMarketsAction,
     PrivateMarketsAnalysis,
     PrivateMarketsDataset,
+    WorkItemPriority,
     parse_commitment_workbook,
 )
 from app.private_markets_io import parse_cash_json
@@ -80,6 +84,39 @@ def _merge_datasets(datasets: list[PrivateMarketsDataset]) -> PrivateMarketsData
         approved_bank_details=[
             item for dataset in datasets for item in dataset.approved_bank_details
         ],
+    )
+
+
+def _mark_cash_evidence_pending(analysis: PrivateMarketsAnalysis) -> None:
+    """Distinguish an omitted cash feed from a verified missing receipt."""
+
+    for finding in analysis.findings:
+        if finding.code != "cash.missing":
+            continue
+        finding.code = "cash.evidence_not_supplied"
+        finding.severity = FindingSeverity.WARNING
+        finding.title = "Cash evidence not supplied"
+        finding.detail = (
+            "PDF and Excel controls were completed without a cash/bank export. "
+            "Attach cash evidence later to complete receipt reconciliation."
+        )
+        finding.expected = None
+        finding.observed = None
+
+    for work_item in analysis.work_items:
+        if work_item.code != "resolve_cash_shortfall":
+            continue
+        work_item.code = "attach_cash_evidence"
+        work_item.priority = WorkItemPriority.NORMAL
+        work_item.title = "Attach fund cash evidence"
+        work_item.instruction = (
+            "Add a JSON cash/bank export when available. Document and ledger analysis is complete; "
+            "cash reconciliation remains pending."
+        )
+
+    analysis.action = PrivateMarketsAction.REQUEST_EVIDENCE
+    analysis.controls_summary = (
+        f"{analysis.controls_passed} controls passed; cash reconciliation is pending evidence."
     )
 
 
@@ -210,7 +247,7 @@ async def analyse_integrated_private_markets_case(
 
     json_file_name: str | None = None
     json_content: bytes | None = None
-    transactions = []
+    transactions: list[FundCashTransaction] = []
     if fund_json is not None:
         json_file_name = fund_json.filename or "fund-cash.json"
         json_content = await fund_json.read()
@@ -277,6 +314,9 @@ async def analyse_integrated_private_markets_case(
             transactions,
             as_of_date=parsed_as_of,
         )
+        if json_content is None:
+            _mark_cash_evidence_pending(analysis)
+
         pdf_hash = _sha256(pdf_content)
         case_id = _case_id(pdf_hash, excel_bundle_hash, json_hash)
         sources: list[dict[str, str | None]] = [
