@@ -58,7 +58,11 @@ def inspect_workbook(content: bytes, file_name: str) -> dict[str, Any]:
         stripped = {name.strip() for name in sheet_names}
         first_headers: list[str] = []
         if workbook.worksheets:
-            first_headers = [_text(value) for value in _first_row(workbook.worksheets[0]) if _text(value)]
+            first_headers = [
+                _text(value)
+                for value in _first_row(workbook.worksheets[0])
+                if _text(value)
+            ]
 
         kind = "supporting_workbook"
         purpose = "Supporting Excel evidence"
@@ -199,7 +203,6 @@ def analyse_bank_statement_workbook(
                         }
                     )
 
-        journal_headers = _first_row(diu)
         journal_lines = 0
         for row in diu.iter_rows(min_row=2, values_only=True):
             if any(value is not None and _text(value) for value in row):
