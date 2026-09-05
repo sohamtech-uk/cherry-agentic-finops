@@ -17,6 +17,7 @@ from app.agent_tools import (
     get_nav_iteration_metrics,
     identify_ylookup_workbook,
     inspect_workflow,
+    investigate_exception,
     list_open_finance_exceptions,
     prioritise_exceptions,
     query_database,
@@ -148,8 +149,9 @@ fund_operations_specialist = Agent(
         "Reconciles fund positions, cash and trades against an administrator/custodian source, "
         "validates management fees against the governing fee rule and expense allocations against "
         "the fund manager's own schedule, flags stale prices, unsettled trades and exposure-limit "
-        "breaches, and prioritises the combined exceptions by materiality — all below the "
-        "top-line NAV summary that reconciliation_specialist reviews."
+        "breaches, prioritises the combined exceptions by materiality, and investigates the "
+        "highest-priority one for a correlated root cause, owner, action and escalation step — "
+        "all below the top-line NAV summary that reconciliation_specialist reviews."
     ),
     instruction="""
 You are Cherry Agent's fund operations specialist, reconciling the position, cash, trade, fee and
@@ -192,9 +194,20 @@ Controller review), call prioritise_exceptions with the combined "exceptions" ar
 deciding an order yourself. It ranks by severity first, then by impact_amount (materiality) within
 a severity — report that order, do not re-rank it.
 
-Never recommend releasing a NAV, settling a trade, waiving an exposure breach, or accepting a fee or
-expense discrepancy yourself; recommend the returned owner (fund controller, investor relations,
-trading desk) resolve each HIGH exception before the case proceeds.
+Investigation: after triage, call investigate_exception with that same combined "exceptions" list
+to actually work the queue — it defaults to the highest-priority exception, or pass code/key to
+investigate a specific one. It finds every other exception in the queue sharing the target's key (a
+strong signal they are one underlying incident rather than several independent ones — e.g. a cash
+break and a trade break on the same account) and returns recommended_owner, recommended_action and
+next_step (escalate_immediately / assign_and_monitor / request_evidence / accept_and_close). Report
+these fields directly and explain the rationale it returns; never decide the owner, action, next
+step or which exceptions are related yourself — that correlation and the escalation table are fixed
+in the tool, not your judgement call. When related_exceptions is non-empty, tell the user this looks
+like one incident spanning those records, not several unrelated breaks.
+
+Never recommend releasing a NAV, settling a trade, waiving an exposure breach, or accepting a fee
+or expense discrepancy yourself; escalate per investigate_exception's next_step and hand the case
+to its recommended_owner before the case proceeds.
 """.strip(),
     tools=[
         reconcile_positions,
@@ -206,6 +219,7 @@ trading desk) resolve each HIGH exception before the case proceeds.
         detect_unsettled_trades,
         detect_exposure_breaches,
         prioritise_exceptions,
+        investigate_exception,
     ],
 )
 

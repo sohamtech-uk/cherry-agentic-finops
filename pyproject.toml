@@ -69,6 +69,8 @@ ignore = ["B008"]
 "app/ylookup_router.py" = ["E501"]
 "app/fund_reconciliation.py" = ["E501"]
 "tests/test_fund_reconciliation.py" = ["E501"]
+"app/exception_investigation.py" = ["E501"]
+"tests/test_exception_investigation.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"

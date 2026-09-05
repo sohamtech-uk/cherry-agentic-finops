@@ -19,6 +19,7 @@ from app.agent_tools import (
     get_nav_iteration_metrics,
     identify_ylookup_workbook,
     inspect_workflow,
+    investigate_exception,
     prioritise_exceptions,
     query_database,
     read_document,
@@ -507,6 +508,72 @@ def test_reconcile_expense_allocations_tool_wraps_invalid_json(tmp_path: Path) -
 
     with pytest.raises(ValueError, match="Invalid expected expense allocations"):
         reconcile_expense_allocations(str(bad_path), administrator_path)
+
+
+def test_investigate_exception_tool_defaults_to_highest_priority() -> None:
+    exceptions = [
+        {
+            "category": "trade",
+            "code": "trade.price_mismatch",
+            "key": "ACC1",
+            "title": "Trade break",
+            "detail": "Trade break detail.",
+            "severity": "high",
+            "impact_amount": "100.00",
+        },
+        {
+            "category": "cash",
+            "code": "cash.balance_mismatch",
+            "key": "ACC1",
+            "title": "Cash break",
+            "detail": "Cash break detail.",
+            "severity": "high",
+            "impact_amount": "500.00",
+        },
+    ]
+
+    result = investigate_exception(exceptions)
+
+    assert result["exception"]["code"] == "cash.balance_mismatch"
+    assert [item["code"] for item in result["related_exceptions"]] == ["trade.price_mismatch"]
+    assert result["recommended_owner"] == "Treasury / fund controller"
+    assert result["next_step"] == "escalate_immediately"
+
+
+def test_investigate_exception_tool_selects_by_code() -> None:
+    exceptions = [
+        {
+            "category": "stale_price",
+            "code": "stale_price.overdue",
+            "key": "SEC1",
+            "title": "Stale price",
+            "detail": "Stale price detail.",
+            "severity": "warning",
+            "impact_amount": "0",
+        }
+    ]
+
+    result = investigate_exception(exceptions, code="stale_price.overdue")
+
+    assert result["exception"]["code"] == "stale_price.overdue"
+    assert result["next_step"] == "request_evidence"
+
+
+def test_investigate_exception_tool_raises_when_code_not_found() -> None:
+    exceptions = [
+        {
+            "category": "cash",
+            "code": "cash.balance_mismatch",
+            "key": "ACC1",
+            "title": "Cash break",
+            "detail": "Cash break detail.",
+            "severity": "high",
+            "impact_amount": "500.00",
+        }
+    ]
+
+    with pytest.raises(ValueError, match="No exception with code"):
+        investigate_exception(exceptions, code="does.not.exist")
 
 
 def test_detect_unsettled_trades_tool_flags_an_overdue_trade(tmp_path: Path) -> None:
