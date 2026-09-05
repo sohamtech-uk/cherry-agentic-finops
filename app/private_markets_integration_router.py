@@ -95,7 +95,9 @@ async def _agent_studio_result(payload: dict[str, Any]) -> dict[str, Any]:
     except FundOpsStudioUnavailable:
         return {
             "status": "unavailable",
-            "message": "Cherry strict controls completed; Agent Studio was temporarily unavailable.",
+            "message": (
+                "Cherry strict controls completed; Agent Studio was temporarily unavailable."
+            ),
         }
 
 
@@ -183,9 +185,8 @@ async def analyse_integrated_private_markets_case(
                     f"PDF {file_name!r} exceeds the {settings.max_upload_mb} MB per-file limit."
                 ),
             )
-        if (upload.content_type or "").lower() != "application/pdf" and not file_name.lower().endswith(
-            ".pdf"
-        ):
+        is_pdf_content_type = (upload.content_type or "").lower() == "application/pdf"
+        if not is_pdf_content_type and not file_name.lower().endswith(".pdf"):
             raise HTTPException(status_code=415, detail=f"{file_name!r} must be a PDF document.")
         pdf_items.append((file_name, content))
 
@@ -196,7 +197,8 @@ async def analyse_integrated_private_markets_case(
             raise HTTPException(
                 status_code=413,
                 detail=(
-                    f"Excel file {file_name!r} exceeds the {settings.max_upload_mb} MB per-file limit."
+                    f"Excel file {file_name!r} exceeds the {settings.max_upload_mb} MB "
+                    "per-file limit."
                 ),
             )
         if not file_name.lower().endswith(".xlsx"):
