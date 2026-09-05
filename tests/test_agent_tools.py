@@ -12,6 +12,8 @@ from app.agent_tools import (
     compare_periods,
     find_entity,
     find_section,
+    get_nav_case_iterations,
+    get_nav_iteration_metrics,
     identify_ylookup_workbook,
     inspect_workflow,
     query_database,
@@ -21,6 +23,15 @@ from app.agent_tools import (
     run_finance_scenario,
     run_nav_quality_review,
 )
+from app.nav_review_history import get_nav_review_history_store
+
+
+def setup_function() -> None:
+    get_nav_review_history_store().clear()
+
+
+def teardown_function() -> None:
+    get_nav_review_history_store().clear()
 
 
 def _save_workbook(workbook: Workbook, path: Path) -> str:
@@ -116,6 +127,44 @@ def test_run_nav_quality_review_clean_summary_is_ready_to_submit(tmp_path: Path)
     assert report["case_id"].startswith("NAV-")
     assert report["evidence"]["input_sha256"]["nav_summary"]
     assert report["evidence"]["input_sha256"]["source_ledger"] is None
+    assert report["iteration"] == {"round_number": 1, "prior_rounds": 0}
+
+
+def test_run_nav_quality_review_records_a_new_round_each_call(tmp_path: Path) -> None:
+    summary_path = _write_nav_summary(tmp_path / "nav-summary.json")
+
+    first = run_nav_quality_review(summary_path)
+    second = run_nav_quality_review(summary_path)
+
+    assert first["iteration"]["round_number"] == 1
+    assert second["iteration"]["round_number"] == 2
+
+
+def test_get_nav_case_iterations_reports_recorded_rounds(tmp_path: Path) -> None:
+    summary_path = _write_nav_summary(tmp_path / "nav-summary.json")
+    run_nav_quality_review(summary_path)
+
+    result = get_nav_case_iterations("Fund X", "2026-06-30")
+
+    assert result["found"] is True
+    assert result["rounds_submitted"] == 1
+    assert result["closed"] is True
+
+
+def test_get_nav_case_iterations_reports_not_found_for_unknown_case() -> None:
+    result = get_nav_case_iterations("Unknown Fund", "2026-06-30")
+
+    assert result["found"] is False
+
+
+def test_get_nav_iteration_metrics_reflects_recorded_reviews(tmp_path: Path) -> None:
+    summary_path = _write_nav_summary(tmp_path / "nav-summary.json")
+    run_nav_quality_review(summary_path)
+
+    metrics = get_nav_iteration_metrics()
+
+    assert metrics["tracked_cases"] >= 1
+    assert metrics["closed_cases"] >= 1
 
 
 def test_run_nav_quality_review_flags_balance_sheet_mismatch(tmp_path: Path) -> None:

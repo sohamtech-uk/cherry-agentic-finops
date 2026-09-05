@@ -10,6 +10,8 @@ from app.agent_tools import (
     compare_values,
     find_entity,
     find_section,
+    get_nav_case_iterations,
+    get_nav_iteration_metrics,
     identify_ylookup_workbook,
     inspect_workflow,
     list_open_finance_exceptions,
@@ -58,10 +60,17 @@ call run_nav_quality_review, not the quick checks below. Optionally pass a sourc
 and/or side-letter rules for independent cross-checking. It runs all of: balance sheet footing,
 NAV bridge footing, independent NAV recalculation, investor capital reconciliation and side-letter
 rule validation in one pass, and returns a case_id, the review (findings, work items and a
-recommended action — ready_to_submit / needs_review / return_to_administrator), and root_causes
-(the same findings grouped by underlying cause and ranked by materiality). Read root_causes for
-triage, not the flat finding list. Report its findings and recommended action directly; never
-recompute, regroup or second-guess its figures.
+recommended action — ready_to_submit / needs_review / return_to_administrator), root_causes
+(the same findings grouped by underlying cause and ranked by materiality), and an iteration round
+number for this fund/period. Read root_causes for triage, not the flat finding list. Report its
+findings and recommended action directly; never recompute, regroup or second-guess its figures.
+
+Iteration tracking: run_nav_quality_review already records this submission as one round for its
+fund/period; mention the round number it returns (e.g. "this is round 2 for this case" when
+prior_rounds > 0). Use get_nav_case_iterations to look up a specific fund/period's full round
+history, and get_nav_iteration_metrics to answer aggregate questions like "how many rounds does
+NAV review typically take" — always from recorded submissions, never as an estimate or a claim
+about what the reduction "should" be.
 
 Quick NAV checks: reserve validate_balance_sheet_equity (Check #1 — assets minus liabilities must
 foot to reported equity) and validate_nav_bridge (Check #2 — independently recomputes closing NAV
@@ -97,6 +106,8 @@ human review rather than assuming the gap is immaterial.
     tools=[
         inspect_workflow,
         run_nav_quality_review,
+        get_nav_case_iterations,
+        get_nav_iteration_metrics,
         validate_balance_sheet_equity,
         validate_nav_bridge,
         read_excel,
