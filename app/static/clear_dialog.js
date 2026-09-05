@@ -355,6 +355,75 @@
     window.setTimeout(() => observer.disconnect(), 5000);
   }
 
+  function datasetToastCopy() {
+    const results = q("#dataset-results");
+    const text = results?.textContent || "";
+    if (text.includes("Bank statements") && text.includes("journal entries")) {
+      return "Bank statement workflow detected. Uploaded evidence analysed successfully.";
+    }
+    if (text.includes("Investor-level GL")) {
+      return "Investor GL workflow detected. Uploaded evidence analysed successfully.";
+    }
+    return "Private-markets evidence analysed in its detected workflow.";
+  }
+
+  function neutraliseDatasetUiCopy() {
+    const uploadDescription = q(".upload-copy > h2 + p");
+    if (uploadDescription && uploadDescription.textContent.includes("Ylookup sponsor datasets")) {
+      uploadDescription.textContent = "Cherry detects the structure of the files you upload and routes bank-statement working files, investor-level GLs and capital-call evidence to the appropriate governed workflow. JSON cash evidence is optional.";
+    }
+
+    const title = q("#dataset-results .dataset-title h2");
+    if (title && title.textContent.includes("Ylookup")) {
+      title.textContent = "Native private-markets workflows, matched to your evidence.";
+    }
+
+    const eyebrow = q("#dataset-results .dataset-title .eyebrow");
+    if (eyebrow && eyebrow.textContent.includes("sponsor")) {
+      eyebrow.textContent = "Auto-detected private-markets evidence";
+    }
+
+    document.querySelectorAll("#dataset-results .dataset-head small").forEach((label) => {
+      if (label.textContent.includes("SPONSOR WORKFLOW")) {
+        label.textContent = label.textContent.replace("SPONSOR WORKFLOW", "DETECTED WORKFLOW");
+      }
+    });
+
+    const uploadMessage = q("#upload-message");
+    if (uploadMessage && uploadMessage.textContent.startsWith("Sponsor dataset detected:")) {
+      uploadMessage.textContent = uploadMessage.textContent.replace(
+        "Sponsor dataset detected:",
+        "Private-markets dataset detected:",
+      );
+    }
+  }
+
+  function installProductNeutralDatasetUi() {
+    neutraliseDatasetUiCopy();
+
+    const results = q("#dataset-results");
+    if (results) {
+      const resultObserver = new MutationObserver(() => neutraliseDatasetUiCopy());
+      resultObserver.observe(results, { childList: true, subtree: true, characterData: true });
+    }
+
+    const uploadMessage = q("#upload-message");
+    if (uploadMessage) {
+      const messageObserver = new MutationObserver(() => neutraliseDatasetUiCopy());
+      messageObserver.observe(uploadMessage, { childList: true, subtree: true, characterData: true });
+    }
+
+    const toastNode = q("#toast");
+    if (toastNode) {
+      const toastObserver = new MutationObserver(() => {
+        if (toastNode.textContent.includes("Ylookup sponsor evidence analysed")) {
+          toastNode.textContent = datasetToastCopy();
+        }
+      });
+      toastObserver.observe(toastNode, { childList: true, subtree: true, characterData: true });
+    }
+  }
+
   function ensureDialog() {
     let dialog = document.getElementById(DIALOG_ID);
     if (dialog) return dialog;
@@ -445,5 +514,6 @@
     enhanceControlDate();
     bindCustomClearDialog();
     scheduleCapabilityLabels();
+    installProductNeutralDatasetUi();
   });
 })();
