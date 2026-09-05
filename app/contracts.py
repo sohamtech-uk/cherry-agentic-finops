@@ -251,9 +251,12 @@ def _find_effective_date(pages: list[tuple[int, str]]) -> tuple[date | None, str
     return None, None
 
 
-def _read_pages(content: bytes, mime_type: str, file_name: str) -> list[tuple[int, str]]:
+def read_document_pages(content: bytes, mime_type: str, file_name: str) -> list[tuple[int, str]]:
+    """Extract a document's text as (page_number, text) tuples. Shared by contract ingestion and
+    the statement-review tools; supports PDF, TXT and Markdown."""
+
     if not content:
-        raise ValueError("Contract document is empty.")
+        raise ValueError(f"Document {file_name!r} is empty.")
     is_pdf = mime_type == "application/pdf" or file_name.casefold().endswith(".pdf")
     if is_pdf:
         try:
@@ -262,16 +265,16 @@ def _read_pages(content: bytes, mime_type: str, file_name: str) -> list[tuple[in
                 (index, page.extract_text() or "") for index, page in enumerate(reader.pages, 1)
             ]
         except Exception as exc:
-            raise ValueError("The contract PDF could not be read.") from exc
+            raise ValueError(f"The PDF {file_name!r} could not be read.") from exc
         if not any(text.strip() for _, text in pages):
-            raise ValueError("The contract PDF contains no extractable text; OCR is required.")
+            raise ValueError(f"PDF {file_name!r} contains no extractable text; OCR is required.")
         return pages
     if mime_type.startswith("text/") or file_name.casefold().endswith((".txt", ".md")):
         try:
             return [(1, content.decode("utf-8-sig"))]
         except UnicodeDecodeError as exc:
-            raise ValueError("Text contract documents must use UTF-8 encoding.") from exc
-    raise ValueError("Contract documents must be PDF, TXT or Markdown files.")
+            raise ValueError(f"Text document {file_name!r} must use UTF-8 encoding.") from exc
+    raise ValueError(f"Document {file_name!r} must be PDF, TXT or Markdown.")
 
 
 def _split_clauses(document_id: str, pages: list[tuple[int, str]]) -> list[ContractClause]:
@@ -433,7 +436,7 @@ class ContractRepository:
             ]
         )
         document_id = f"CTR-{hashlib.sha256(identity.encode()).hexdigest()[:12].upper()}"
-        pages = _read_pages(content, mime_type, safe_file_name)
+        pages = read_document_pages(content, mime_type, safe_file_name)
         detected_date, date_source = _find_effective_date(pages)
         clauses = _split_clauses(document_id, pages)
         document = ContractDocument(

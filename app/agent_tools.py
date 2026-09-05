@@ -18,6 +18,11 @@ from app.reconciliation_tools import calculate_sum as _calculate_sum
 from app.reconciliation_tools import compare_values as _compare_values
 from app.reconciliation_tools import read_cell as _read_cell
 from app.reconciliation_tools import read_excel as _read_excel
+from app.statement_tools import compare_dates as _compare_dates
+from app.statement_tools import compare_periods as _compare_periods
+from app.statement_tools import find_entity as _find_entity
+from app.statement_tools import find_section as _find_section
+from app.statement_tools import read_document as _read_document
 from app.ylookup_datasets import (
     analyse_bank_statement_workbook,
     analyse_investor_gl_workbook,
@@ -323,3 +328,81 @@ def run_nav_quality_review(
         else None
     )
     return review_nav_quality(summary, ledger, rules).model_dump(mode="json")
+
+
+def read_document(document_path: str) -> dict[str, Any]:
+    """Extract a document's full text (PDF, TXT or Markdown), for ad hoc inspection.
+
+    Args:
+        document_path: Local path to the document.
+    """
+
+    path = Path(document_path)
+    return _read_document(_read_file_bytes(document_path), path.name)
+
+
+def find_section(document_path: str, heading: str) -> dict[str, Any]:
+    """Locate a named section by its heading and return the text from that heading up to the
+    next heading-like line. Not finding a match is evidence to investigate further, not proof
+    the section is absent — the heading may be phrased differently in this document.
+
+    Args:
+        document_path: Local path to the document.
+        heading: Section heading to search for, e.g. "Subsequent Events".
+    """
+
+    path = Path(document_path)
+    return _find_section(_read_file_bytes(document_path), path.name, heading)
+
+
+def find_entity(document_path: str, entity_name: str, context_chars: int = 160) -> dict[str, Any]:
+    """Find every mention of a named entity and return the surrounding text for each occurrence.
+
+    Args:
+        document_path: Local path to the document.
+        entity_name: Entity to search for, e.g. a portfolio company or investor name.
+        context_chars: Characters of surrounding context to include on each side of a match.
+    """
+
+    path = Path(document_path)
+    return _find_entity(_read_file_bytes(document_path), path.name, entity_name, context_chars)
+
+
+def compare_periods(current_document_path: str, prior_document_path: str) -> dict[str, Any]:
+    """Line-diff a current-period document against the prior period's, to surface exactly what
+    changed — and what stayed identical, which may be a stale carry-forward. This performs the
+    comparison deterministically; report what it found rather than eyeballing the two documents.
+
+    Args:
+        current_document_path: Local path to the current-period document.
+        prior_document_path: Local path to the prior-period document.
+    """
+
+    current_path = Path(current_document_path)
+    prior_path = Path(prior_document_path)
+    return _compare_periods(
+        _read_file_bytes(current_document_path),
+        current_path.name,
+        _read_file_bytes(prior_document_path),
+        prior_path.name,
+    )
+
+
+def compare_dates(current_document_path: str, prior_document_path: str) -> dict[str, Any]:
+    """Extract every date-like string from a current and a prior document and report which
+    dates are new, which disappeared, and which are identical in both — an unchanged date is a
+    candidate for a stale rolled-forward disclosure, not proof of one.
+
+    Args:
+        current_document_path: Local path to the current-period document.
+        prior_document_path: Local path to the prior-period document.
+    """
+
+    current_path = Path(current_document_path)
+    prior_path = Path(prior_document_path)
+    return _compare_dates(
+        _read_file_bytes(current_document_path),
+        current_path.name,
+        _read_file_bytes(prior_document_path),
+        prior_path.name,
+    )

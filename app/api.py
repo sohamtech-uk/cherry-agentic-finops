@@ -20,6 +20,7 @@ from app.nav_quality_router import router as nav_quality_router
 from app.private_markets_integration_router import router as private_markets_integration_router
 from app.private_markets_router import router as private_markets_router
 from app.session_router import router as session_router
+from app.statement_review_router import router as statement_review_router
 from app.workflow import InvalidWorkflowAction, WorkflowNotFound
 from app.ylookup_router import router as ylookup_router
 
@@ -59,6 +60,7 @@ app.include_router(ylookup_router)
 app.include_router(session_router)
 app.include_router(nav_quality_router)
 app.include_router(contract_router)
+app.include_router(statement_review_router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 

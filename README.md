@@ -273,6 +273,37 @@ with the same `X-Cherry-Demo-Token` policy as the other private-markets evidence
 This ships as a standalone endpoint (see `/api/docs`); it is not yet wired into the shared
 auto-detect upload form described above.
 
+## Statement Review Agent
+
+A deterministic reviewer for the "prior-period text and dates get mechanically rolled forward"
+failure mode from the sponsor call transcripts: catching stale disclosures, unmoved subsequent
+events and missing/changed entity references between two periods' financial statements.
+
+```text
+POST /api/statement-review/compare
+```
+
+Multipart inputs:
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `current_document` | yes | current-period financial statement (`.pdf`, `.txt` or `.md`) |
+| `prior_document` | no | prior-period financial statement, to diff against the current one |
+| `section_heading` | no | a section to locate in the current document, e.g. `Subsequent Events` |
+| `entity_name` | no | an entity to search for, e.g. a portfolio company name |
+
+Section/entity location and the period/date diff are plain text operations, never an LLM: a
+`section_heading`/`entity_name` match is heuristic (a miss means investigate further, not that the
+section or entity is absent), a `period_diff` reports exactly which lines changed since the prior
+document, and a `date_diff` reports which dates are new, dropped or identical across both periods
+— an unchanged date is a candidate for a stale rolled-forward disclosure, left for a human or agent
+to interpret. The response never amends a statement, and production deployments protect uploads
+with the same `X-Cherry-Demo-Token` policy as the other private-markets evidence routes.
+
+This ships as a standalone endpoint (see `/api/docs`) and as agent tools on
+`statement_review_specialist` (`app/statement_tools.py`), sharing the same PDF/TXT/Markdown reader
+as `/api/contracts`.
+
 ## Run locally
 
 Python 3.11+:
@@ -295,6 +326,7 @@ http://localhost:8080/api/docs
 http://localhost:8080/api/private-markets/health
 http://localhost:8080/api/private-markets/integration/health
 http://localhost:8080/api/nav-quality/health
+http://localhost:8080/api/statement-review/health
 ```
 
 Generate backup fixtures:
@@ -341,6 +373,8 @@ app/contract_tools.py                        constrained contract specialist too
 app/contract_router.py                       contract ingestion, search and NAV APIs
 app/nav_reconciliation.py                    quick ad hoc balance-sheet/NAV-bridge checks
 app/reconciliation_tools.py                  atomic agent tools (read/sum/compare/bridge)
+app/statement_tools.py                       statement-review primitives (section/entity/period/date diff)
+app/statement_review_router.py               statement-review endpoint
 agents/cherry_finops/agent.py                Google ADK agents (reconciliation_specialist and peers)
 app/fundops_studio.py                        Agent Studio microservice client
 app/static/                                  judge-facing control-room UI
