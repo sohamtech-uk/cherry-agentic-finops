@@ -284,7 +284,14 @@ block (`round_number`, `prior_rounds`).
 ```text
 GET /api/nav-quality/cases/{legal_entity}/{period_end}   -- one case's full round history
 GET /api/nav-quality/metrics                             -- rounds-to-close across every case
+GET /api/nav-quality/daily-health-check                  -- every case, ranked, with open root causes
 ```
+
+`daily-health-check` (`app/nav_health_check.py`) is the portfolio-level view: every reviewed
+fund/period classified `ready` or `attention_needed`, ranked by open critical root causes then
+round count, each carrying the root causes still open as of its latest round. It's built entirely
+from recorded rounds — nothing here re-runs a review. Running it daily is a deployment choice (a
+scheduler hitting the endpoint); this only answers correctly whenever it's called.
 
 In-memory only, matching `app.contracts.ContractRepository`'s scope: this is demo/session state,
 not a system of record.
@@ -386,6 +393,7 @@ app/nav_quality.py                           NAV Quality Controller schemas, GL 
 app/nav_quality_router.py                    NAV Quality Controller endpoint
 app/nav_exceptions.py                        root-cause grouping of NAV review findings
 app/nav_review_history.py                    NAV review iteration/round tracking
+app/nav_health_check.py                      daily portfolio-level fund health check
 app/contracts.py                             contract evidence, precedence and NAV rule checks
 app/contract_tools.py                        constrained contract specialist tools
 app/contract_router.py                       contract ingestion, search and NAV APIs

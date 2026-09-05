@@ -41,6 +41,7 @@ from app.fund_reconciliation import (
 )
 from app.models import ApprovalRequest, RejectionRequest
 from app.nav_exceptions import group_exceptions_by_root_cause
+from app.nav_health_check import build_daily_health_check
 from app.nav_quality import (
     SideLetterRule,
     build_case_id,
@@ -436,6 +437,7 @@ def run_nav_quality_review(
         controls_passed=report.controls_passed,
         exceptions_open=report.exceptions_open,
         case_id=case_id,
+        root_causes=root_causes,
     )
 
     return {
@@ -571,6 +573,17 @@ def get_nav_iteration_metrics() -> dict[str, Any]:
     """
 
     return get_nav_review_history_store().metrics().model_dump(mode="json")
+
+
+def run_daily_fund_health_check() -> dict[str, Any]:
+    """Return a portfolio-level health check across every fund/period reviewed so far: which are
+    ready_to_submit, which need attention, and — for those — the root causes still open as of
+    their latest round. Built entirely from recorded review rounds (via run_nav_quality_review);
+    report its entries directly rather than re-deriving fund status yourself. Running this daily
+    is a scheduling choice outside this tool, not something it does itself.
+    """
+
+    return build_daily_health_check(get_nav_review_history_store()).model_dump(mode="json")
 
 
 def reconcile_positions(
