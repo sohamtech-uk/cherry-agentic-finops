@@ -36,12 +36,20 @@ class CherryMoneyConnector:
             "Accept": "application/json",
         }
 
+    def _url(self, path: str) -> str:
+        """Support CHERRY_MONEY_API_URL with or without a trailing /api prefix."""
+
+        normalized_path = path if path.startswith("/") else f"/{path}"
+        if self._base_url.endswith("/api") and normalized_path.startswith("/api/"):
+            normalized_path = normalized_path[4:]
+        return f"{self._base_url}{normalized_path}"
+
     async def status(self) -> dict[str, Any]:
         """Return non-secret Cherry Money bridge capability status."""
 
         async with httpx.AsyncClient(timeout=20) as client:
             response = await client.get(
-                f"{self._base_url}/api/webmcp/status",
+                self._url("/api/webmcp/status"),
                 headers=self._headers(),
             )
             response.raise_for_status()
@@ -58,7 +66,7 @@ class CherryMoneyConnector:
         safe_limit = max(1, min(100, limit))
         async with httpx.AsyncClient(timeout=25) as client:
             response = await client.get(
-                f"{self._base_url}/api/webmcp/bootstrap",
+                self._url("/api/webmcp/bootstrap"),
                 params={"limit": safe_limit},
                 headers=self._headers(),
             )
@@ -70,7 +78,7 @@ class CherryMoneyConnector:
 
         async with httpx.AsyncClient(timeout=20) as client:
             response = await client.post(
-                f"{self._base_url}/expenseAdd",
+                self._url("/api/expenseAdd"),
                 json=payload,
                 headers=self._headers(),
             )
