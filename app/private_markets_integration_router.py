@@ -67,8 +67,7 @@ def _case_id(*hashes: str) -> str:
 
 def _bundle_hash(items: list[tuple[str, bytes]]) -> str:
     manifest = [
-        {"file_name": file_name, "sha256": _sha256(content)}
-        for file_name, content in items
+        {"file_name": file_name, "sha256": _sha256(content)} for file_name, content in items
     ]
     material = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return _sha256(material)
