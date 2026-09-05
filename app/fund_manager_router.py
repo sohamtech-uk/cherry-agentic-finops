@@ -10,6 +10,7 @@ from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 
 from app.config import get_settings
 from app.fund_manager_classification import classify_sources
+from app.fund_manager_orchestrator import run_analysis
 
 settings = get_settings()
 router = APIRouter(prefix="/api/fund-manager", tags=["fund-manager"])
@@ -36,6 +37,26 @@ def _safe_file_name(value: str | None, fallback: str) -> str:
     return candidate if candidate not in {"", ".", ".."} else fallback
 
 
+async def _read_upload_batch(files: list[UploadFile]) -> list[tuple[str, bytes, str | None]]:
+    if not files:
+        raise HTTPException(status_code=422, detail="At least one file is required.")
+    if len(files) > MAX_FILES:
+        raise HTTPException(status_code=413, detail=f"Maximum {MAX_FILES} files per batch.")
+
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    items: list[tuple[str, bytes, str | None]] = []
+    for upload in files:
+        file_name = _safe_file_name(upload.filename, "evidence")
+        content = await upload.read()
+        if len(content) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"{file_name} exceeds the {settings.max_upload_mb} MB upload limit.",
+            )
+        items.append((file_name, content, upload.content_type))
+    return items
+
+
 @router.get("/health")
 async def fund_manager_health() -> dict[str, Any]:
     return {
@@ -53,6 +74,17 @@ async def fund_manager_health() -> dict[str, Any]:
             "fund_manager_dashboard",
         ],
         "implemented_stages": ["multiple_files", "file_classification", "canonical_data_room"],
+        "partially_implemented_stages": {
+            "agent_determines_required_controls": (
+                "POST /analyse builds a control plan for every recognised source, but only "
+                "financial_statement pairs are actually executable today; other types are "
+                "reported not_yet_available."
+            ),
+            "deterministic_exception_engine": (
+                "Issues are only produced for the one control that runs: period-over-period "
+                "financial statement comparison."
+            ),
+        },
         "recognised_source_types": [
             "nav_workbook",
             "investor_gl",
@@ -96,23 +128,7 @@ async def classify_fund_evidence(
     """
 
     _require_upload_access(x_cherry_demo_token)
-    if not files:
-        raise HTTPException(status_code=422, detail="At least one file is required.")
-    if len(files) > MAX_FILES:
-        raise HTTPException(status_code=413, detail=f"Maximum {MAX_FILES} files per batch.")
-
-    max_bytes = settings.max_upload_mb * 1024 * 1024
-    items: list[tuple[str, bytes, str | None]] = []
-    for upload in files:
-        file_name = _safe_file_name(upload.filename, "evidence")
-        content = await upload.read()
-        if len(content) > max_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail=f"{file_name} exceeds the {settings.max_upload_mb} MB upload limit.",
-            )
-        items.append((file_name, content, upload.content_type))
-
+    items = await _read_upload_batch(files)
     sources = classify_sources(items)
     unknown_count = sum(1 for source in sources if source["status"] != "processed")
 
@@ -127,4 +143,36 @@ async def classify_fund_evidence(
         "control_boundary": (
             "This is a source inventory, not a review result. No control has run yet."
         ),
+    }
+
+
+@router.post("/analyse")
+async def analyse_fund_evidence(
+    files: Annotated[list[UploadFile], File(description="One or more mixed evidence files")],
+    fund_name: Annotated[str | None, Form(description="Optional fund/entity name")] = None,
+    reporting_period: Annotated[str | None, Form(description="Optional reporting period")] = None,
+    as_of_date: Annotated[str | None, Form(description="Optional as-of date, YYYY-MM-DD")] = None,
+    x_cherry_demo_token: Annotated[str | None, Header(alias="X-Cherry-Demo-Token")] = None,
+) -> dict[str, Any]:
+    """Classify the uploaded evidence, decide which control each source needs (the "agent
+    determines required controls" stage), and run whichever of those controls can execute
+    end-to-end from this upload alone. Returns a QC-report-shaped result: overall status, issue
+    counts, the control plan (including controls that were recognised but did not run, and why)
+    and any issues actually found, each with evidence and a recommended action.
+
+    This never fabricates a result: a control that needs evidence this endpoint doesn't yet
+    extract (e.g. a NAV workbook, an investor GL) is reported as not_yet_available in the control
+    plan rather than silently skipped or guessed at.
+    """
+
+    _require_upload_access(x_cherry_demo_token)
+    items = await _read_upload_batch(files)
+    result = run_analysis(items)
+
+    return {
+        "fund_name": fund_name,
+        "reporting_period": reporting_period,
+        "as_of_date": as_of_date,
+        "generated_at": datetime.now(UTC).isoformat(),
+        **result,
     }

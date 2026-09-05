@@ -99,17 +99,22 @@ def _classify_workbook(content: bytes, file_name: str) -> tuple[str, list[str]]:
     return "unknown_workbook", []
 
 
-def _classify_pdf(content: bytes, file_name: str) -> tuple[str, list[str]]:
+def _classify_document(content: bytes, file_name: str, unknown_type: str) -> tuple[str, list[str]]:
+    """Keyword-sniff a PDF, TXT or Markdown document's extracted text. Named unknown_pdf even for
+    TXT/MD sources for continuity with the existing recognised-type list; text and markdown
+    fixtures/documents are read the same way app.contracts and app.statement_tools already do."""
+
+    mime_type = "application/pdf" if file_name.casefold().endswith(".pdf") else "text/plain"
     try:
-        pages = read_document_pages(content, "application/pdf", file_name)
+        pages = read_document_pages(content, mime_type, file_name)
     except ValueError as exc:
-        return "unknown_pdf", [str(exc)]
+        return unknown_type, [str(exc)]
 
     haystack = " ".join(text for _, text in pages).casefold()
     for detected_type, keywords in _PDF_KEYWORD_RULES:
         if any(keyword in haystack for keyword in keywords):
             return detected_type, []
-    return "unknown_pdf", []
+    return unknown_type, []
 
 
 def _classify_json(content: bytes, file_name: str) -> tuple[str, list[str]]:
@@ -165,8 +170,8 @@ def classify_source(content: bytes, file_name: str, content_type: str | None) ->
     elif lowered.endswith((".xlsx", ".xls")):
         detected_type, warnings = _classify_workbook(content, file_name)
         status = "processed" if not detected_type.startswith("unknown") else "unknown"
-    elif lowered.endswith(".pdf"):
-        detected_type, warnings = _classify_pdf(content, file_name)
+    elif lowered.endswith((".pdf", ".txt", ".md")):
+        detected_type, warnings = _classify_document(content, file_name, "unknown_pdf")
         status = "processed" if not detected_type.startswith("unknown") else "unknown"
     elif lowered.endswith(".json"):
         detected_type, warnings = _classify_json(content, file_name)

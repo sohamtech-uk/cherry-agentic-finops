@@ -4,6 +4,7 @@
   const state = {
     files: [],
     sources: null,
+    analysis: null,
     busy: false,
   };
 
@@ -108,12 +109,14 @@
       <div class="fm-file-list" id="fm-file-list" aria-live="polite"></div>
 
       <div class="fm-actions">
-        <button type="button" class="fm-button primary" id="fm-classify" disabled>Identify sources</button>
+        <button type="button" class="fm-button secondary" id="fm-classify" disabled>Identify sources</button>
+        <button type="button" class="fm-button primary" id="fm-analyse" disabled>Analyse</button>
         <button type="button" class="fm-button ghost" id="fm-clear-files" hidden>Clear all</button>
         <span class="fm-file-count" id="fm-file-count"></span>
       </div>
 
       <div id="fm-inventory" aria-live="polite"></div>
+      <div id="fm-analysis" aria-live="polite"></div>
     </div>
   </div>
 </section>`;
@@ -130,6 +133,7 @@
     const list = q("#fm-file-list");
     const clearButton = q("#fm-clear-files");
     const classifyButton = q("#fm-classify");
+    const analyseButton = q("#fm-analyse");
     const countLabel = q("#fm-file-count");
     if (!list) return;
 
@@ -137,6 +141,7 @@
       list.innerHTML = "";
       clearButton.hidden = true;
       classifyButton.disabled = true;
+      analyseButton.disabled = true;
       countLabel.textContent = "";
       return;
     }
@@ -151,6 +156,7 @@
       .join("");
     clearButton.hidden = false;
     classifyButton.disabled = state.busy;
+    analyseButton.disabled = state.busy;
     countLabel.textContent = `${state.files.length} file${state.files.length === 1 ? "" : "s"} selected`;
   }
 
@@ -216,9 +222,7 @@
 </div>`;
   }
 
-  async function classifySources() {
-    if (state.files.length === 0 || state.busy) return;
-    busy(true);
+  function buildEvidenceForm() {
     const form = new FormData();
     for (const file of state.files) form.append("files", file, file.name);
     const fundName = q("#fm-fund-name")?.value.trim();
@@ -227,25 +231,31 @@
     if (fundName) form.append("fund_name", fundName);
     if (reportingPeriod) form.append("reporting_period", reportingPeriod);
     if (asOfDate) form.append("as_of_date", asOfDate);
+    return form;
+  }
 
+  async function postEvidence(path, form) {
     const headers = {};
     const token = demoToken();
     if (token) headers["X-Cherry-Demo-Token"] = token;
 
+    const response = await fetch(path, { method: "POST", body: form, headers });
+    let body = {};
+    try { body = await response.json(); } catch { body = {}; }
+    if (!response.ok) {
+      const detail = typeof body.detail === "string"
+        ? body.detail
+        : body.detail?.message || `${response.status} ${response.statusText}`;
+      throw new Error(detail);
+    }
+    return body;
+  }
+
+  async function classifySources() {
+    if (state.files.length === 0 || state.busy) return;
+    busy(true);
     try {
-      const response = await fetch("/api/fund-manager/classify", {
-        method: "POST",
-        body: form,
-        headers,
-      });
-      let body = {};
-      try { body = await response.json(); } catch { body = {}; }
-      if (!response.ok) {
-        const detail = typeof body.detail === "string"
-          ? body.detail
-          : body.detail?.message || `${response.status} ${response.statusText}`;
-        throw new Error(detail);
-      }
+      const body = await postEvidence("/api/fund-manager/classify", buildEvidenceForm());
       state.sources = body;
       renderInventory();
       notify(`Identified ${body.source_count} source${body.source_count === 1 ? "" : "s"}.`);
@@ -254,6 +264,104 @@
     } finally {
       busy(false);
     }
+  }
+
+  async function runAnalysis() {
+    if (state.files.length === 0 || state.busy) return;
+    busy(true);
+    try {
+      const body = await postEvidence("/api/fund-manager/analyse", buildEvidenceForm());
+      state.analysis = body;
+      state.sources = { sources: body.sources, source_count: body.sources.length,
+        unknown_count: body.sources.filter((s) => s.status !== "processed").length };
+      renderInventory();
+      renderAnalysis();
+      notify(
+        body.status === "clean"
+          ? "Analysis complete — no issues found among the controls that ran."
+          : `Analysis complete — ${body.issues_found} issue${body.issues_found === 1 ? "" : "s"} found.`,
+        body.status !== "clean"
+      );
+    } catch (error) {
+      notify(error.message || "Could not analyse the uploaded files.", true);
+    } finally {
+      busy(false);
+    }
+  }
+
+  function severityPill(severity) {
+    const label = severity.charAt(0).toUpperCase() + severity.slice(1);
+    if (severity === "high") return `<span class="fm-pill error">${esc(label)}</span>`;
+    if (severity === "medium") return `<span class="fm-pill review">${esc(label)}</span>`;
+    return `<span class="fm-pill ok">${esc(label)}</span>`;
+  }
+
+  function controlPlanStatusPill(status) {
+    if (status === "executed") return '<span class="fm-pill ok">Executed</span>';
+    if (status === "needs_pairing") return '<span class="fm-pill review">Needs pairing</span>';
+    return '<span class="fm-pill review">Not yet available</span>';
+  }
+
+  function renderAnalysis() {
+    const target = q("#fm-analysis");
+    if (!target) return;
+    if (!state.analysis) {
+      target.innerHTML = "";
+      return;
+    }
+
+    const { status, issues_found: issuesFound, material, critical, issues, control_plan: plan } =
+      state.analysis;
+    const statusClass = status === "clean" ? "ok" : "review";
+    const statusLabel = status === "clean" ? "Clean" : "Review required";
+
+    const issueCards = (issues || [])
+      .map((issue) => {
+        const evidence = (issue.evidence || [])
+          .map((item) => `<li>${esc(item.source)} — ${esc(item.detail)}</li>`)
+          .join("");
+        return `
+<div class="fm-issue-card">
+  <div class="fm-issue-head">
+    <strong>${esc(issue.title)}</strong>
+    ${severityPill(issue.severity)}
+  </div>
+  <p>${esc(issue.summary)}</p>
+  ${evidence ? `<ul class="fm-issue-evidence">${evidence}</ul>` : ""}
+  <p class="fm-issue-action"><strong>Recommended action:</strong> ${esc(issue.recommended_action)}</p>
+</div>`;
+      })
+      .join("");
+
+    const planRows = (plan || [])
+      .map((entry) => `
+<div class="fm-plan-row">
+  <span class="fm-plan-file" title="${esc(entry.filename)}">${esc(entry.filename)}</span>
+  <span class="fm-plan-control">${esc(entry.control)}</span>
+  ${controlPlanStatusPill(entry.status)}
+</div>`)
+      .join("");
+
+    target.innerHTML = `
+<div class="fm-analysis">
+  <div class="fm-qc-banner ${statusClass}">
+    <div>
+      <span class="fm-kicker">Fund administrator QC report</span>
+      <strong>${esc(statusLabel)}</strong>
+    </div>
+    <div class="fm-qc-metrics">
+      <div><span>Issues found</span><strong>${esc(issuesFound)}</strong></div>
+      <div><span>Material</span><strong>${esc(material)}</strong></div>
+      <div><span>Critical</span><strong>${esc(critical)}</strong></div>
+    </div>
+  </div>
+  ${issueCards ? `<div class="fm-issue-grid">${issueCards}</div>` : '<div class="fm-empty">No issues from the controls that ran.</div>'}
+  <details class="fm-control-plan">
+    <summary>Control plan (${(plan || []).length} recognised source${(plan || []).length === 1 ? "" : "s"})</summary>
+    <div class="fm-plan-grid">${planRows}</div>
+  </details>
+  <div class="fm-boundary">Deterministic tools produced every figure and comparison above; no LLM decided a pass/fail. Controls marked "not yet available" never ran — they are not silent passes.</div>
+</div>`;
   }
 
   function wireEvents() {
@@ -294,11 +402,14 @@
     q("#fm-clear-files")?.addEventListener("click", () => {
       state.files = [];
       state.sources = null;
+      state.analysis = null;
       renderFileList();
       renderInventory();
+      renderAnalysis();
     });
 
     q("#fm-classify")?.addEventListener("click", classifySources);
+    q("#fm-analyse")?.addEventListener("click", runAnalysis);
   }
 
   function addNavLink() {

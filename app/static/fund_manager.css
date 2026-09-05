@@ -189,10 +189,68 @@
 .fm-empty { padding: 26px; text-align: center; color: var(--fm-muted); font-size: 12px; }
 .fm-status-text[aria-live] { min-height: 1px; }
 
+.fm-analysis { margin-top: 26px; }
+
+.fm-qc-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 18px 20px;
+  border-radius: 14px;
+  border: 1px solid var(--fm-line);
+  background: var(--fm-panel);
+}
+.fm-qc-banner strong { display: block; margin-top: 4px; font-size: 18px; color: var(--fm-navy); }
+.fm-qc-banner.ok { border-color: var(--fm-success); background: var(--fm-success-soft); }
+.fm-qc-banner.ok strong { color: var(--fm-success); }
+.fm-qc-banner.review { border-color: var(--fm-warning); background: var(--fm-warning-soft); }
+.fm-qc-banner.review strong { color: var(--fm-warning); }
+
+.fm-qc-metrics { display: flex; gap: 22px; }
+.fm-qc-metrics div { text-align: right; }
+.fm-qc-metrics span { display: block; color: var(--fm-muted); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.fm-qc-metrics strong { margin-top: 2px; font-size: 20px; color: var(--fm-navy); }
+
+.fm-issue-grid { display: grid; gap: 12px; margin-top: 16px; }
+.fm-issue-card {
+  padding: 16px 18px;
+  border: 1px solid var(--fm-line);
+  border-radius: 12px;
+  background: var(--fm-panel);
+}
+.fm-issue-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.fm-issue-head strong { font-size: 13px; color: var(--fm-navy); }
+.fm-issue-card p { margin: 8px 0 0; color: var(--fm-ink); font-size: 12px; line-height: 1.55; }
+.fm-issue-evidence { margin: 8px 0 0; padding-left: 18px; color: var(--fm-muted); font-size: 11.5px; line-height: 1.6; }
+.fm-issue-action { color: var(--fm-muted) !important; }
+
+.fm-control-plan { margin-top: 18px; }
+.fm-control-plan summary { cursor: pointer; color: var(--fm-navy); font-size: 12px; font-weight: 800; }
+.fm-plan-grid { display: grid; gap: 8px; margin-top: 12px; }
+.fm-plan-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--fm-line);
+  border-radius: 9px;
+  background: var(--fm-paper);
+  font-size: 11.5px;
+}
+.fm-plan-file { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.fm-plan-control { color: var(--fm-muted); white-space: nowrap; }
+
 @media (max-width: 780px) {
   .fm-meta-grid { grid-template-columns: 1fr; }
   .fm-source-card { grid-template-columns: auto 1fr; }
   .fm-source-hash { grid-column: 1 / -1; }
   .fm-file-row { grid-template-columns: 1fr auto; }
   .fm-file-row .fm-file-size { display: none; }
+  .fm-qc-banner { flex-direction: column; align-items: flex-start; }
+  .fm-qc-metrics { gap: 14px; }
+  .fm-plan-row { grid-template-columns: 1fr auto; }
+  .fm-plan-control { display: none; }
 }
