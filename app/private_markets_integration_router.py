@@ -16,6 +16,7 @@ from app.private_markets import (
     GeminiCapitalCallExtractor,
     GeminiPrivateMarketsUnavailable,
     PrivateMarketsAnalysis,
+    PrivateMarketsDataset,
     parse_commitment_workbook,
 )
 from app.private_markets_io import parse_cash_json
@@ -25,6 +26,9 @@ settings = get_settings()
 extractor = GeminiCapitalCallExtractor(settings)
 studio = FundOpsStudioConnector(settings)
 router = APIRouter(prefix="/api/private-markets", tags=["private-markets-integration"])
+
+MAX_PDF_FILES = 25
+MAX_EXCEL_FILES = 20
 
 
 def _require_real_data_access(token: str | None) -> None:
@@ -61,11 +65,49 @@ def _case_id(*hashes: str) -> str:
     return f"PM-{_sha256(material)[:12].upper()}"
 
 
+def _bundle_hash(items: list[tuple[str, bytes]]) -> str:
+    manifest = [
+        {"file_name": file_name, "sha256": _sha256(content)} for file_name, content in items
+    ]
+    material = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return _sha256(material)
+
+
+def _merge_datasets(datasets: list[PrivateMarketsDataset]) -> PrivateMarketsDataset:
+    return PrivateMarketsDataset(
+        commitments=[item for dataset in datasets for item in dataset.commitments],
+        approved_bank_details=[
+            item for dataset in datasets for item in dataset.approved_bank_details
+        ],
+    )
+
+
+async def _agent_studio_result(payload: dict[str, Any]) -> dict[str, Any]:
+    if not studio.configured:
+        return {
+            "status": "not_configured",
+            "message": "Cherry strict controls completed; Agent Studio enrichment was skipped.",
+        }
+    try:
+        result = await studio.analyse_capital_call_case(payload)
+        return {"status": "completed", **result}
+    except FundOpsStudioUnavailable:
+        return {
+            "status": "unavailable",
+            "message": (
+                "Cherry strict controls completed; Agent Studio was temporarily unavailable."
+            ),
+        }
+
+
 @router.get("/integration/health")
 async def integration_health() -> dict[str, Any]:
     response: dict[str, Any] = {
         "status": "ok",
         "input_contract": ["pdf", "excel", "json"],
+        "input_multiplicity": {"pdf": "many", "excel": "many", "json": "one"},
+        "max_pdf_files": MAX_PDF_FILES,
+        "max_excel_files": MAX_EXCEL_FILES,
         "fundops_studio_configured": studio.configured,
         "financial_boundary": (
             "Cherry retains deterministic control authority; no payment initiation."
@@ -84,12 +126,12 @@ async def integration_health() -> dict[str, Any]:
 @router.post("/analyse-integrated")
 async def analyse_integrated_private_markets_case(
     capital_call: Annotated[
-        UploadFile,
-        File(description="Capital-call notice PDF"),
+        list[UploadFile],
+        File(description="One or more capital-call notice PDFs"),
     ],
     commitments: Annotated[
-        UploadFile,
-        File(description="LP commitment/control workbook (.xlsx)"),
+        list[UploadFile],
+        File(description="One or more LP commitment/control workbooks (.xlsx)"),
     ],
     fund_json: Annotated[
         UploadFile,
@@ -104,57 +146,74 @@ async def analyse_integrated_private_markets_case(
         Header(alias="X-Cherry-Demo-Token"),
     ] = None,
 ) -> dict[str, object]:
-    """Run the combined PDF + Excel + JSON private-markets workflow.
+    """Run a batch PDF + Excel + JSON private-markets workflow.
 
-    Cherry extracts the PDF, parses the commitment workbook and cash JSON, applies strict
-    deterministic controls, and then sends only structured case data and evidence hashes to the
-    optional FundOps Agent Studio microservice for capital-call review, reconciliation and exception
-    investigation. Cherry remains the authority for the financial control state.
+    Every PDF becomes an independently governed case. All supplied commitment/control workbooks are
+    parsed and merged into one supporting dataset, while the JSON cash feed is shared across the
+    batch. Cherry applies strict deterministic controls to each extracted notice and optionally
+    enriches each case through FundOps Agent Studio. Cherry remains the financial control authority.
     """
 
     _require_real_data_access(x_cherry_demo_token)
-    max_bytes = settings.max_upload_mb * 1024 * 1024
 
-    pdf_content = await capital_call.read()
-    workbook_content = await commitments.read()
-    json_content = await fund_json.read()
-    for label, content in {
-        "PDF": pdf_content,
-        "Excel": workbook_content,
-        "JSON": json_content,
-    }.items():
+    if not capital_call:
+        raise HTTPException(status_code=422, detail="At least one capital-call PDF is required.")
+    if not commitments:
+        raise HTTPException(status_code=422, detail="At least one .xlsx workbook is required.")
+    if len(capital_call) > MAX_PDF_FILES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"A maximum of {MAX_PDF_FILES} PDF files can be processed in one batch.",
+        )
+    if len(commitments) > MAX_EXCEL_FILES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"A maximum of {MAX_EXCEL_FILES} Excel files can be processed in one batch.",
+        )
+
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    pdf_items: list[tuple[str, bytes]] = []
+    workbook_items: list[tuple[str, bytes]] = []
+
+    for upload in capital_call:
+        file_name = upload.filename or "capital-call.pdf"
+        content = await upload.read()
         if len(content) > max_bytes:
             raise HTTPException(
                 status_code=413,
-                detail=f"{label} input exceeds the {settings.max_upload_mb} MB upload limit.",
+                detail=(
+                    f"PDF {file_name!r} exceeds the {settings.max_upload_mb} MB per-file limit."
+                ),
             )
+        is_pdf_content_type = (upload.content_type or "").lower() == "application/pdf"
+        if not is_pdf_content_type and not file_name.lower().endswith(".pdf"):
+            raise HTTPException(status_code=415, detail=f"{file_name!r} must be a PDF document.")
+        pdf_items.append((file_name, content))
 
-    if (capital_call.content_type or "").lower() != "application/pdf":
-        raise HTTPException(status_code=415, detail="capital_call must be a PDF document.")
-    if not (commitments.filename or "").lower().endswith(".xlsx"):
-        raise HTTPException(status_code=415, detail="commitments must be an .xlsx workbook.")
-    if not (fund_json.filename or "").lower().endswith(".json"):
-        raise HTTPException(status_code=415, detail="fund_json must be a .json file.")
+    for upload in commitments:
+        file_name = upload.filename or "commitments.xlsx"
+        content = await upload.read()
+        if len(content) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Excel file {file_name!r} exceeds the {settings.max_upload_mb} MB "
+                    "per-file limit."
+                ),
+            )
+        if not file_name.lower().endswith(".xlsx"):
+            raise HTTPException(status_code=415, detail=f"{file_name!r} must be an .xlsx workbook.")
+        workbook_items.append((file_name, content))
 
-    try:
-        dataset = parse_commitment_workbook(workbook_content)
-        transactions = parse_cash_json(json_content)
-    except (ValueError, ValidationError) as exc:
+    json_file_name = fund_json.filename or "fund-cash.json"
+    json_content = await fund_json.read()
+    if len(json_content) > max_bytes:
         raise HTTPException(
-            status_code=422,
-            detail=f"Invalid Excel/JSON supporting data: {exc}",
-        ) from exc
-
-    try:
-        call = await extractor.extract(
-            pdf_content,
-            "application/pdf",
-            capital_call.filename or "capital-call.pdf",
+            status_code=413,
+            detail=f"JSON input exceeds the {settings.max_upload_mb} MB upload limit.",
         )
-    except GeminiPrivateMarketsUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not json_file_name.lower().endswith(".json"):
+        raise HTTPException(status_code=415, detail="fund_json must be a .json file.")
 
     parsed_as_of: date | None = None
     if as_of_date:
@@ -163,80 +222,120 @@ async def analyse_integrated_private_markets_case(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="as_of_date must be YYYY-MM-DD.") from exc
 
-    analysis = analyse_private_markets_case_strict(
-        call,
-        dataset,
-        transactions,
-        as_of_date=parsed_as_of,
-    )
-    input_hashes = {
-        "pdf": _sha256(pdf_content),
-        "excel": _sha256(workbook_content),
-        "json": _sha256(json_content),
-    }
-    case_id = _case_id(*input_hashes.values())
-
-    studio_payload: dict[str, Any] = {
-        "case_id": case_id,
-        "capital_call": call.model_dump(mode="json"),
-        "commitments": [item.model_dump(mode="json") for item in dataset.commitments],
-        "approved_bank_details": [
-            item.model_dump(mode="json") for item in dataset.approved_bank_details
-        ],
-        "transactions": [item.model_dump(mode="json") for item in transactions],
-        "cherry_analysis": analysis.model_dump(mode="json"),
-        "sources": [
-            {
-                "kind": "pdf",
-                "file_name": capital_call.filename or "capital-call.pdf",
-                "sha256": input_hashes["pdf"],
-            },
-            {
-                "kind": "excel",
-                "file_name": commitments.filename or "commitments.xlsx",
-                "sha256": input_hashes["excel"],
-            },
-            {
-                "kind": "json",
-                "file_name": fund_json.filename or "fund-cash.json",
-                "sha256": input_hashes["json"],
-            },
-        ],
-    }
-
-    studio_result: dict[str, Any]
-    if not studio.configured:
-        studio_result = {
-            "status": "not_configured",
-            "message": "Cherry strict controls completed; Agent Studio enrichment was skipped.",
-        }
-    else:
+    datasets: list[PrivateMarketsDataset] = []
+    for file_name, content in workbook_items:
         try:
-            studio_result = await studio.analyse_capital_call_case(studio_payload)
-            studio_result = {"status": "completed", **studio_result}
-        except FundOpsStudioUnavailable:
-            studio_result = {
-                "status": "unavailable",
-                "message": (
-                    "Cherry strict controls completed; Agent Studio was temporarily unavailable."
+            datasets.append(parse_commitment_workbook(content))
+        except (ValueError, ValidationError) as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid commitment workbook {file_name!r}: {exc}",
+            ) from exc
+
+    try:
+        transactions = parse_cash_json(json_content)
+    except (ValueError, ValidationError) as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid JSON supporting data: {exc}") from exc
+
+    dataset = _merge_datasets(datasets)
+    excel_bundle_hash = _bundle_hash(workbook_items)
+    json_hash = _sha256(json_content)
+    sources_excel = [
+        {"kind": "excel", "file_name": file_name, "sha256": _sha256(content)}
+        for file_name, content in workbook_items
+    ]
+    json_source = {"kind": "json", "file_name": json_file_name, "sha256": json_hash}
+
+    cases: list[dict[str, object]] = []
+    for pdf_file_name, pdf_content in pdf_items:
+        try:
+            call = await extractor.extract(pdf_content, "application/pdf", pdf_file_name)
+        except GeminiPrivateMarketsUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Could not extract {pdf_file_name!r}: {exc}",
+            ) from exc
+
+        analysis = analyse_private_markets_case_strict(
+            call,
+            dataset,
+            transactions,
+            as_of_date=parsed_as_of,
+        )
+        pdf_hash = _sha256(pdf_content)
+        case_id = _case_id(pdf_hash, excel_bundle_hash, json_hash)
+        sources = [
+            {"kind": "pdf", "file_name": pdf_file_name, "sha256": pdf_hash},
+            *sources_excel,
+            json_source,
+        ]
+        studio_payload: dict[str, Any] = {
+            "case_id": case_id,
+            "capital_call": call.model_dump(mode="json"),
+            "commitments": [item.model_dump(mode="json") for item in dataset.commitments],
+            "approved_bank_details": [
+                item.model_dump(mode="json") for item in dataset.approved_bank_details
+            ],
+            "transactions": [item.model_dump(mode="json") for item in transactions],
+            "cherry_analysis": analysis.model_dump(mode="json"),
+            "sources": sources,
+        }
+        studio_result = await _agent_studio_result(studio_payload)
+        cases.append(
+            {
+                "case_id": case_id,
+                "source_pdf": pdf_file_name,
+                "synthetic": False,
+                "extraction": call.model_dump(mode="json"),
+                "analysis": analysis.model_dump(mode="json"),
+                "agent_studio": studio_result,
+                "evidence": {
+                    "input_sha256": {
+                        "pdf": pdf_hash,
+                        "excel_bundle": excel_bundle_hash,
+                        "json": json_hash,
+                    },
+                    "sources": sources,
+                    "analysis_sha256": _analysis_hash(analysis),
+                    "generated_at": datetime.now(UTC).isoformat(),
+                },
+                "financial_boundary": (
+                    "AI and Agent Studio enrich the case; Cherry deterministic controls decide "
+                    "whether it can reconcile, requires approval or needs evidence. No payment is "
+                    "initiated."
                 ),
             }
+        )
+
+    if not cases:
+        raise HTTPException(status_code=422, detail="No PDF cases were produced.")
+
+    batch_id = _case_id(
+        _bundle_hash(pdf_items),
+        excel_bundle_hash,
+        json_hash,
+    ).replace("PM-", "BATCH-")
+    first_case = cases[0]
+    action_counts: dict[str, int] = {}
+    for item in cases:
+        analysis_payload = item["analysis"]
+        if isinstance(analysis_payload, dict):
+            action = str(analysis_payload.get("action", "unknown"))
+            action_counts[action] = action_counts.get(action, 0) + 1
 
     return {
-        "case_id": case_id,
-        "synthetic": False,
-        "input_contract": ["pdf", "excel", "json"],
-        "controls_version": "strict-v1",
-        "extraction": call.model_dump(mode="json"),
-        "analysis": analysis.model_dump(mode="json"),
-        "agent_studio": studio_result,
-        "evidence": {
-            "input_sha256": input_hashes,
-            "analysis_sha256": _analysis_hash(analysis),
-            "generated_at": datetime.now(UTC).isoformat(),
+        **first_case,
+        "batch_id": batch_id,
+        "batch": {
+            "pdf_count": len(pdf_items),
+            "excel_count": len(workbook_items),
+            "json_count": 1,
+            "case_count": len(cases),
+            "action_counts": action_counts,
         },
-        "financial_boundary": (
-            "AI and Agent Studio enrich the case; Cherry deterministic controls decide whether it "
-            "can reconcile, requires approval or needs evidence. No payment is initiated."
-        ),
+        "cases": cases,
+        "input_contract": ["pdf", "excel", "json"],
+        "input_multiplicity": {"pdf": "many", "excel": "many", "json": "one"},
     }

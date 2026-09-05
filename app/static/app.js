@@ -1,4 +1,4 @@
-const state = { case: null, config: null };
+const state = { case: null, config: null, batchCases: [] };
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
@@ -39,7 +39,7 @@ function renderCase(payload) {
   state.case = payload; const extraction = payload.extraction; const analysis = payload.analysis; const code = extraction.currency; const [actionLabel, actionClass] = actionCopy(analysis.action);
   const studioStatus = payload.agent_studio?.status ? ` · Agent Studio ${titleise(payload.agent_studio.status)}` : "";
   $("#case-title").textContent = `${extraction.investor_name || "Unknown investor"} · ${extraction.notice_id || "Unreferenced notice"}`;
-  $("#case-subtitle").textContent = `${extraction.fund_name} · ${payload.synthetic ? "Synthetic demonstration" : "Uploaded evidence"}${studioStatus}`;
+  $("#case-subtitle").textContent = `${extraction.fund_name} · ${payload.synthetic ? "Synthetic demonstration" : "Uploaded evidence"}${payload.source_pdf ? ` · ${payload.source_pdf}` : ""}${studioStatus}`;
   $("#decision-badge").textContent = actionLabel; $("#decision-badge").className = `decision-badge ${actionClass}`;
   $("#metric-expected").textContent = money(analysis.expected_amount, code); $("#metric-received").textContent = money(analysis.received_amount, code); $("#metric-progress").textContent = `${analysis.funding_progress_percent}% funded`; $("#metric-outstanding").textContent = money(analysis.outstanding_amount, code); $("#metric-variance").textContent = `${money(analysis.variance_amount, code)} net variance`; $("#outstanding-card").classList.toggle("metric-alert", Number(analysis.outstanding_amount) > 0);
   const due = analysis.days_to_due; $("#metric-due").textContent = due == null ? "—" : due < 0 ? `${Math.abs(due)}d overdue` : due === 0 ? "Due today" : `${due} day${due === 1 ? "" : "s"}`; $("#metric-due-date").textContent = dateLabel(analysis.due_date);
@@ -48,9 +48,31 @@ function renderCase(payload) {
   const total = Number(analysis.total_commitment || extraction.total_commitment || 0); const before = Number(analysis.called_before_current || extraction.called_before_current || 0); const current = Number(extraction.current_call || 0);
   $("#total-commitment").textContent = money(total, code); $("#called-before").textContent = money(before, code); $("#current-call").textContent = money(current, code); $("#remaining-call").textContent = money(analysis.remaining_commitment, code); $("#called-bar").style.width = total ? `${Math.min(100, before / total * 100)}%` : "0%"; $("#current-bar").style.width = total ? `${Math.min(100, current / total * 100)}%` : "0%"; $("#ledger-status").textContent = `${analysis.controls_passed} passed`; $("#matched-transactions").textContent = analysis.matched_transaction_ids?.length ? analysis.matched_transaction_ids.join(", ") : "No matching booked cash"; $("#download-review").disabled = false;
 }
+function renderBatchPicker(cases) {
+  state.batchCases = Array.isArray(cases) ? cases : [];
+  const picker = $("#batch-case-picker");
+  const select = $("#batch-case-select");
+  if (!picker || !select || state.batchCases.length <= 1) {
+    picker?.classList.add("hidden");
+    if (select) select.innerHTML = "";
+    return;
+  }
+  select.innerHTML = state.batchCases.map((item, index) => {
+    const extraction = item.extraction || {};
+    const label = `${index + 1}. ${item.source_pdf || "PDF"} · ${extraction.investor_name || extraction.fund_name || "case"}`;
+    return `<option value="${index}">${escapeHtml(label)}</option>`;
+  }).join("");
+  picker.classList.remove("hidden");
+}
+function updateFileCounts() {
+  const pdfCount = $("#capital-call-input")?.files.length || 0;
+  const excelCount = $("#commitments-input")?.files.length || 0;
+  if ($("#capital-call-count")) $("#capital-call-count").textContent = pdfCount ? `${pdfCount} PDF${pdfCount === 1 ? "" : "s"} selected` : "Select one or more PDFs";
+  if ($("#commitments-count")) $("#commitments-count").textContent = excelCount ? `${excelCount} workbook${excelCount === 1 ? "" : "s"} selected` : "Select one or more workbooks";
+}
 async function runScenario(scenario, shouldScroll = true) {
   loading(true); $$('[data-scenario]').forEach((button) => button.classList.toggle("active", button.dataset.scenario === scenario));
-  try { const payload = await api(`/api/private-markets/demo/${scenario}`, { method: "POST" }); renderCase(payload); if (shouldScroll) $("#control-room").scrollIntoView({ behavior: "smooth", block: "start" }); toast(`${payload.analysis.controls_passed} controls passed · ${payload.analysis.exceptions_open} exceptions open.`); } catch (error) { toast(error.message, true); } finally { loading(false); }
+  try { const payload = await api(`/api/private-markets/demo/${scenario}`, { method: "POST" }); renderCase(payload); renderBatchPicker([]); if (shouldScroll) $("#control-room").scrollIntoView({ behavior: "smooth", block: "start" }); toast(`${payload.analysis.controls_passed} controls passed · ${payload.analysis.exceptions_open} exceptions open.`); } catch (error) { toast(error.message, true); } finally { loading(false); }
 }
 async function loadConfig() {
   try { state.config = await api("/api/config"); const label = state.config.google_ready ? `${state.config.gemini_model} ready` : "Safe demo mode"; $("#cloud-state").className = `environment ${state.config.google_ready ? "ready" : "demo"}`; $("#cloud-state").innerHTML = `<i></i><span>${escapeHtml(label)}</span>`; } catch { $("#cloud-state").innerHTML = "<i></i><span>Environment unavailable</span>"; }
@@ -60,29 +82,49 @@ function downloadReview() {
 }
 async function uploadEvidence(event) {
   event.preventDefault();
+  const pdfFiles = [...$("#capital-call-input").files];
+  const excelFiles = [...$("#commitments-input").files];
+  const jsonFile = $("#cash-input").files[0];
+  if (!pdfFiles.length || !excelFiles.length || !jsonFile) {
+    toast("Select at least one PDF, one Excel workbook and one JSON file.", true);
+    return;
+  }
   const form = new FormData();
-  form.append("capital_call", $("#capital-call-input").files[0]);
-  form.append("commitments", $("#commitments-input").files[0]);
-  form.append("fund_json", $("#cash-input").files[0]);
+  pdfFiles.forEach((file) => form.append("capital_call", file));
+  excelFiles.forEach((file) => form.append("commitments", file));
+  form.append("fund_json", jsonFile);
   if ($("#as-of-input").value) form.append("as_of_date", $("#as-of-input").value);
   const token = $("#upload-token")?.value.trim();
   const headers = token ? { "X-Cherry-Demo-Token": token } : {};
-  $("#upload-message").textContent = "Processing PDF, Excel and JSON through Cherry controls and Agent Studio…";
+  $("#upload-message").textContent = `Processing ${pdfFiles.length} PDF${pdfFiles.length === 1 ? "" : "s"}, ${excelFiles.length} Excel workbook${excelFiles.length === 1 ? "" : "s"} and one JSON cash feed…`;
   loading(true);
   try {
     const result = await api("/api/private-markets/analyse-integrated", { method: "POST", body: form, headers });
-    renderCase({ ...result, synthetic: false, transactions: [] });
-    const studio = result.agent_studio?.status || "not_configured";
-    $("#upload-message").textContent = `Case ${result.case_id} created. Agent Studio: ${titleise(studio)}.`;
+    const cases = Array.isArray(result.cases) && result.cases.length ? result.cases : [result];
+    renderBatchPicker(cases);
+    renderCase({ ...cases[0], synthetic: false, transactions: [] });
+    const batch = result.batch || { pdf_count: pdfFiles.length, excel_count: excelFiles.length, case_count: cases.length };
+    $("#upload-message").textContent = `Batch ${result.batch_id || result.case_id}: ${batch.case_count} governed case${batch.case_count === 1 ? "" : "s"} from ${batch.pdf_count} PDF${batch.pdf_count === 1 ? "" : "s"} + ${batch.excel_count} Excel workbook${batch.excel_count === 1 ? "" : "s"}.`;
     $("#control-room").scrollIntoView({ behavior: "smooth" });
-    toast(`PDF + Excel + JSON analysed · Agent Studio ${titleise(studio)}.`);
+    toast(`${batch.case_count} case${batch.case_count === 1 ? "" : "s"} analysed from the selected evidence batch.`);
   } catch (error) {
     $("#upload-message").textContent = error.message;
+    renderBatchPicker([]);
     toast(error.message, true);
   } finally {
     loading(false);
   }
 }
-function bindEvents() { $$('[data-scenario]').forEach((button) => button.addEventListener("click", () => runScenario(button.dataset.scenario))); $("#download-review").addEventListener("click", downloadReview); $("#upload-form").addEventListener("submit", uploadEvidence); }
-async function initialise() { bindEvents(); await loadConfig(); await runScenario("exception", false); }
+function bindEvents() {
+  $$('[data-scenario]').forEach((button) => button.addEventListener("click", () => runScenario(button.dataset.scenario)));
+  $("#download-review").addEventListener("click", downloadReview);
+  $("#upload-form").addEventListener("submit", uploadEvidence);
+  $("#capital-call-input").addEventListener("change", updateFileCounts);
+  $("#commitments-input").addEventListener("change", updateFileCounts);
+  $("#batch-case-select").addEventListener("change", (event) => {
+    const selected = state.batchCases[Number(event.target.value)];
+    if (selected) renderCase({ ...selected, synthetic: false, transactions: [] });
+  });
+}
+async function initialise() { bindEvents(); updateFileCounts(); await loadConfig(); await runScenario("exception", false); }
 document.addEventListener("DOMContentLoaded", initialise);
