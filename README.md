@@ -259,6 +259,9 @@ app/private_markets_router.py                legacy/demo and Cherry Money routes
 app/private_markets_integration_router.py    PDF + Excel + JSON orchestration
 app/nav_quality.py                           NAV Quality Controller schemas, GL parser and checks
 app/nav_quality_router.py                    NAV Quality Controller endpoint
+app/nav_reconciliation.py                    quick ad hoc balance-sheet/NAV-bridge checks
+app/reconciliation_tools.py                  atomic agent tools (read/sum/compare/bridge)
+agents/cherry_finops/agent.py                Google ADK agents (reconciliation_specialist and peers)
 app/fundops_studio.py                        Agent Studio microservice client
 app/static/                                  judge-facing control-room UI
 fixtures/private_markets/                    synthetic backup data

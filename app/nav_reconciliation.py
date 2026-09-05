@@ -3,20 +3,19 @@
 These are pure accounting checks with no LLM involvement, matching the "LLM for
 interpretation; deterministic code for accounting" boundary used across Cherry Agent. Every
 control returns PASS/FAIL plus the figures used, so an agent can explain the result without
-recomputing it.
+recomputing it. Severity follows the same FindingSeverity vocabulary as app.nav_quality and
+app.private_markets_strict; these are quick, ad hoc scalar-figure checks for when only isolated
+numbers are available, distinct from the full administrator-NAV-pack review in app.nav_quality.
 """
 
 from __future__ import annotations
 
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 from typing import Any
 
-TWOPLACES = Decimal("0.01")
+from app.private_markets import FindingSeverity, money
+
 DEFAULT_TOLERANCE = "0.01"
-
-
-def money(value: Decimal | float | int | str | None) -> Decimal:
-    return Decimal(str(value or 0)).quantize(TWOPLACES, rounding=ROUND_HALF_UP)
 
 
 def validate_balance_sheet_equity(
@@ -45,7 +44,7 @@ def validate_balance_sheet_equity(
     return {
         "control": "BS_EQUITY_RECONCILIATION",
         "status": "PASS" if passed else "FAIL",
-        "severity": "pass" if passed else "critical",
+        "severity": (FindingSeverity.PASS if passed else FindingSeverity.HIGH).value,
         "assets": str(assets_amount),
         "liabilities": str(liabilities_amount),
         "expected_equity": str(expected_amount),
@@ -109,7 +108,7 @@ def validate_nav_bridge(
     return {
         "control": "NAV_BRIDGE",
         "status": "PASS" if passed else "FAIL",
-        "severity": "pass" if passed else "critical",
+        "severity": (FindingSeverity.PASS if passed else FindingSeverity.HIGH).value,
         "opening_nav": str(opening_amount),
         "contributions": str(contributions_amount),
         "investment_movement": str(investment_amount),

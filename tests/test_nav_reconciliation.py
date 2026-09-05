@@ -25,7 +25,7 @@ def test_balance_sheet_equity_fails_and_reports_difference() -> None:
     )
 
     assert result["status"] == "FAIL"
-    assert result["severity"] == "critical"
+    assert result["severity"] == "high"
     assert result["expected_equity"] == "92500000.00"
     assert result["reported_equity"] == "89800000.00"
     assert result["difference"] == "2700000.00"
@@ -72,6 +72,6 @@ def test_nav_bridge_fails_and_reports_difference() -> None:
     )
 
     assert result["status"] == "FAIL"
-    assert result["severity"] == "critical"
+    assert result["severity"] == "high"
     assert result["expected_closing_nav"] == "91425000.00"
     assert result["difference"] == "-200220.00"

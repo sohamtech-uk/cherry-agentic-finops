@@ -5,6 +5,12 @@ from typing import Any, Literal
 
 from app.container import get_engine
 from app.models import ApprovalRequest, RejectionRequest
+from app.nav_quality import (
+    parse_administrator_nav_summary,
+    parse_investor_level_gl_workbook,
+    parse_side_letter_rules,
+    review_nav_quality,
+)
 from app.nav_reconciliation import validate_balance_sheet_equity as _validate_balance_sheet_equity
 from app.nav_reconciliation import validate_nav_bridge as _validate_nav_bridge
 from app.reconciliation_tools import build_bridge as _build_bridge
@@ -87,10 +93,10 @@ def reject_workflow(workflow_id: str, reviewer_name: str, reason: str) -> dict[s
     )
 
 
-def _read_workbook_bytes(workbook_path: str) -> bytes:
-    path = Path(workbook_path)
+def _read_file_bytes(file_path: str) -> bytes:
+    path = Path(file_path)
     if not path.is_file():
-        raise ValueError(f"Workbook path {workbook_path!r} does not exist.")
+        raise ValueError(f"File path {file_path!r} does not exist.")
     return path.read_bytes()
 
 
@@ -102,7 +108,7 @@ def identify_ylookup_workbook(workbook_path: str) -> dict[str, Any]:
         workbook_path: Local path to an XLSX workbook.
     """
 
-    content = _read_workbook_bytes(workbook_path)
+    content = _read_file_bytes(workbook_path)
     return inspect_workbook(content, Path(workbook_path).name)
 
 
@@ -118,7 +124,7 @@ def reconcile_bank_statement_workbook(
         pdf_file_names: Names of the source bank-statement PDFs supplied alongside the workbook.
     """
 
-    content = _read_workbook_bytes(workbook_path)
+    content = _read_file_bytes(workbook_path)
     return analyse_bank_statement_workbook(content, Path(workbook_path).name, pdf_file_names or [])
 
 
@@ -130,7 +136,7 @@ def reconcile_investor_gl_workbook(workbook_path: str) -> dict[str, Any]:
         workbook_path: Local path to the investor-level GL workbook.
     """
 
-    content = _read_workbook_bytes(workbook_path)
+    content = _read_file_bytes(workbook_path)
     return analyse_investor_gl_workbook(content, Path(workbook_path).name)
 
 
@@ -141,7 +147,7 @@ def reconcile_loader_sample_workbook(workbook_path: str) -> dict[str, Any]:
         workbook_path: Local path to the loader sample or mapping workbook.
     """
 
-    content = _read_workbook_bytes(workbook_path)
+    content = _read_file_bytes(workbook_path)
     return analyse_loader_sample(content, Path(workbook_path).name)
 
 
@@ -154,7 +160,9 @@ def validate_balance_sheet_equity(
     """NAV Guardian Check #1: reconcile assets minus liabilities against reported equity.
 
     This performs the arithmetic deterministically; report the returned status, expected and
-    reported figures and difference rather than recomputing them yourself.
+    reported figures and difference rather than recomputing them yourself. Use this for a quick
+    check when you only have three isolated figures; when you have a full administrator NAV
+    summary, call run_nav_quality_review instead for the complete review.
 
     Args:
         assets: Total balance-sheet assets as a decimal string, e.g. "105200000.00".
@@ -182,7 +190,9 @@ def validate_nav_bridge(
 
     Closing NAV = Opening NAV + contributions +/- investment movement +/- FX + income - expenses
     - distributions. This performs the arithmetic deterministically; report the returned status
-    and figures rather than recomputing them yourself.
+    and figures rather than recomputing them yourself. Use this for a quick check against isolated
+    figures; when you have a full administrator NAV summary, call run_nav_quality_review instead
+    for the complete review.
 
     Args:
         opening_nav: Prior-period closing NAV as a decimal string.
@@ -276,3 +286,40 @@ def build_bridge(
     """
 
     return _build_bridge(opening_balance, movements, reported_closing, tolerance)
+
+
+def run_nav_quality_review(
+    nav_summary_path: str,
+    source_ledger_path: str | None = None,
+    side_letter_rules_path: str | None = None,
+) -> dict[str, Any]:
+    """Run the full NAV Quality Controller review of an administrator's NAV pack: balance sheet
+    footing, NAV bridge footing, independent NAV recalculation, investor capital reconciliation
+    and side-letter rule validation, in one deterministic pass. Returns findings, work items and
+    a recommended action (ready_to_submit / needs_review / return_to_administrator) — never a
+    correction; report what the tool found rather than recomputing any of it yourself.
+
+    Use validate_balance_sheet_equity / validate_nav_bridge instead when you only have isolated
+    figures rather than a full NAV summary and optional source ledger.
+
+    Args:
+        nav_summary_path: Local path to the administrator's reported NAV summary (.json): legal
+            entity, period end, balance sheet, NAV bridge and investor capital lines.
+        source_ledger_path: Optional local path to an investor-level GL export (.xlsx) to
+            independently recompute the balance sheet, NAV and investor capital against.
+        side_letter_rules_path: Optional local path to structured side-letter rules (.json), e.g.
+            a management-fee-offsets-called-capital rule for a named investor.
+    """
+
+    summary = parse_administrator_nav_summary(_read_file_bytes(nav_summary_path))
+    ledger = (
+        parse_investor_level_gl_workbook(_read_file_bytes(source_ledger_path))
+        if source_ledger_path
+        else None
+    )
+    rules = (
+        parse_side_letter_rules(_read_file_bytes(side_letter_rules_path))
+        if side_letter_rules_path
+        else None
+    )
+    return review_nav_quality(summary, ledger, rules).model_dump(mode="json")

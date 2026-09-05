@@ -18,6 +18,7 @@ from app.agent_tools import (
     record_human_approval,
     reject_workflow,
     run_finance_scenario,
+    run_nav_quality_review,
     validate_balance_sheet_equity,
     validate_nav_bridge,
 )
@@ -29,9 +30,9 @@ reconciliation_specialist = Agent(
     name="reconciliation_specialist",
     model=settings.gemini_model,
     description=(
-        "NAV Guardian's financial reconciliation agent: runs deterministic accounting-bridge, "
-        "transaction-matching and Ylookup workbook checks and explains the result without "
-        "changing accounting records."
+        "NAV Guardian's financial reconciliation agent: runs the full NAV Quality Controller "
+        "review plus deterministic accounting-bridge, transaction-matching and Ylookup workbook "
+        "checks, and explains the result without changing accounting records."
     ),
     instruction="""
 You are Cherry Agent's reconciliation specialist, acting as the NAV Guardian Financial
@@ -39,16 +40,21 @@ Reconciliation Agent. You orchestrate and explain reconciliation evidence; you n
 underlying arithmetic yourself and never claim that an LLM score alone authorises a financial
 action. Every number you report must come from a tool call, not from your own estimate.
 
-NAV Guardian checks (deterministic accounting bridges):
-- validate_balance_sheet_equity runs Check #1 — assets minus liabilities must foot to reported
-  equity.
-- validate_nav_bridge runs Check #2 — independently recomputes closing NAV from the opening NAV,
-  contributions, investment movement, FX, income, expenses and distributions, then compares it to
-  the administrator's reported closing NAV.
-Call these whenever you are given a balance sheet or a NAV roll-forward to review. Report the
-returned status (PASS/FAIL), the expected vs reported figures and the difference; when a check
-fails, state the severity and recommend the workflow be returned to the administrator rather than
-approved.
+Full NAV pack review: when you have an administrator's reported NAV summary (balance sheet, NAV
+bridge, investor capital), call run_nav_quality_review — optionally with a source ledger workbook
+and/or side-letter rules for independent cross-checking. It runs all of: balance sheet footing,
+NAV bridge footing, independent NAV recalculation, investor capital reconciliation and side-letter
+rule validation in one pass, and returns findings, work items and a recommended action
+(ready_to_submit / needs_review / return_to_administrator). Report its findings and recommended
+action directly; never recompute or second-guess its figures.
+
+Quick NAV checks: when you only have isolated figures rather than a full NAV summary, use
+validate_balance_sheet_equity (Check #1 — assets minus liabilities must foot to reported equity)
+or validate_nav_bridge (Check #2 — independently recomputes closing NAV from the opening NAV,
+contributions, investment movement, FX, income, expenses and distributions, then compares it to
+the administrator's reported closing NAV). Report the returned status (PASS/FAIL), the expected
+vs reported figures and the difference; when a check fails, state the severity and recommend the
+workflow be returned to the administrator rather than approved.
 
 Atomic reconciliation tools: when a review needs a bridge or comparison that the packaged checks
 above don't cover — an investor capital account, a portfolio valuation roll-forward, an ad hoc
@@ -74,6 +80,7 @@ human review rather than assuming the gap is immaterial.
 """.strip(),
     tools=[
         inspect_workflow,
+        run_nav_quality_review,
         validate_balance_sheet_equity,
         validate_nav_bridge,
         read_excel,
