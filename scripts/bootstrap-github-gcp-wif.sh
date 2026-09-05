@@ -7,8 +7,6 @@ set -Eeuo pipefail
 # Usage:
 #   bash scripts/bootstrap-github-gcp-wif.sh [YOUR_PROJECT_ID]
 #
-# If PROJECT_ID is omitted, the script uses the currently selected gcloud project.
-#
 # Optional:
 #   DEPLOY_NOW=true bash scripts/bootstrap-github-gcp-wif.sh [YOUR_PROJECT_ID]
 #
@@ -18,11 +16,23 @@ set -Eeuo pipefail
 PROJECT_ID="${1:-${GOOGLE_CLOUD_PROJECT:-}}"
 REPO="${GITHUB_REPOSITORY:-sohamtech-uk/cherry-agentic-finops}"
 GITHUB_ENVIRONMENT="${GITHUB_ENVIRONMENT:-production}"
+REGION="${REGION:-europe-west1}"
 POOL_ID="${WIF_POOL_ID:-github-actions-pool}"
 PROVIDER_ID="${WIF_PROVIDER_ID:-github-actions-provider}"
 DEPLOY_SA_NAME="${GCP_DEPLOY_SA_NAME:-github-actions-deployer}"
 RUNTIME_SA_NAME="${GCP_RUNTIME_SA_NAME:-cherry-agent-runtime}"
+ARTIFACT_REPOSITORY="${ARTIFACT_REPOSITORY:-cherry-agent}"
+EVIDENCE_BUCKET="${EVIDENCE_BUCKET:-${PROJECT_ID}-cherry-finops-evidence}"
+PUBSUB_TOPIC="${PUBSUB_TOPIC:-finance-workflow-events}"
 DEPLOY_NOW="${DEPLOY_NOW:-false}"
+
+if [[ -z "${PROJECT_ID}" ]]; then
+  PROJECT_ID="$(gcloud config get-value project 2>/dev/null || true)"
+fi
+if [[ -z "${PROJECT_ID}" || "${PROJECT_ID}" == "(unset)" ]]; then
+  echo "Usage: $0 GOOGLE_CLOUD_PROJECT_ID" >&2
+  exit 2
+fi
 
 for command in gcloud python3; do
   command -v "${command}" >/dev/null || {
@@ -30,16 +40,6 @@ for command in gcloud python3; do
     exit 2
   }
 done
-
-if [[ -z "${PROJECT_ID}" ]]; then
-  PROJECT_ID="$(gcloud config get-value project 2>/dev/null || true)"
-fi
-if [[ -z "${PROJECT_ID}" || "${PROJECT_ID}" == "(unset)" ]]; then
-  echo "No Google Cloud project is selected." >&2
-  echo "Run: gcloud config set project YOUR_PROJECT_ID" >&2
-  echo "Then rerun: bash scripts/bootstrap-github-gcp-wif.sh" >&2
-  exit 2
-fi
 
 gcloud config set project "${PROJECT_ID}" >/dev/null
 if [[ "$(gcloud projects describe "${PROJECT_ID}" --format='value(projectId)' 2>/dev/null || true)" != "${PROJECT_ID}" ]]; then
@@ -52,7 +52,7 @@ DEPLOY_EMAIL="${DEPLOY_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 RUNTIME_EMAIL="${RUNTIME_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 PROVIDER_RESOURCE="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/providers/${PROVIDER_ID}"
 
-printf 'Project: %s\nRepository: %s\n' "${PROJECT_ID}" "${REPO}"
+printf 'Project: %s\nRepository: %s\nRegion: %s\n' "${PROJECT_ID}" "${REPO}" "${REGION}"
 
 gcloud services enable \
   iam.googleapis.com \
@@ -60,17 +60,21 @@ gcloud services enable \
   sts.googleapis.com \
   run.googleapis.com \
   artifactregistry.googleapis.com \
+  aiplatform.googleapis.com \
+  firestore.googleapis.com \
+  pubsub.googleapis.com \
+  storage.googleapis.com \
   serviceusage.googleapis.com \
   --project="${PROJECT_ID}" \
   --quiet
 
+# GitHub Actions deployment identity.
 if ! gcloud iam service-accounts describe "${DEPLOY_EMAIL}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
   gcloud iam service-accounts create "${DEPLOY_SA_NAME}" \
     --project="${PROJECT_ID}" \
     --display-name="GitHub Actions deployer for Cherry FundOps"
 fi
 
-# Project-scoped permissions used by .github/workflows/deploy.yml.
 for role in \
   roles/run.admin \
   roles/artifactregistry.writer \
@@ -82,18 +86,68 @@ for role in \
     --quiet >/dev/null
 done
 
-# The deployer must be allowed to attach the existing Cloud Run runtime SA.
-if gcloud iam service-accounts describe "${RUNTIME_EMAIL}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
-  gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_EMAIL}" \
+# Cloud Run runtime identity used by deploy.yml.
+if ! gcloud iam service-accounts describe "${RUNTIME_EMAIL}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+  gcloud iam service-accounts create "${RUNTIME_SA_NAME}" \
     --project="${PROJECT_ID}" \
-    --member="serviceAccount:${DEPLOY_EMAIL}" \
-    --role="roles/iam.serviceAccountUser" \
-    --quiet >/dev/null
-else
-  echo "WARNING: runtime service account ${RUNTIME_EMAIL} does not exist yet." >&2
-  echo "Run scripts/deploy-cloudshell.sh once or create that runtime service account before GitHub deployment." >&2
+    --display-name="Cherry Agent Cloud Run runtime"
 fi
 
+for role in \
+  roles/aiplatform.user \
+  roles/datastore.user \
+  roles/pubsub.publisher \
+  roles/logging.logWriter; do
+  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member="serviceAccount:${RUNTIME_EMAIL}" \
+    --role="${role}" \
+    --condition=None \
+    --quiet >/dev/null
+done
+
+gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_EMAIL}" \
+  --project="${PROJECT_ID}" \
+  --member="serviceAccount:${DEPLOY_EMAIL}" \
+  --role="roles/iam.serviceAccountUser" \
+  --quiet >/dev/null
+
+# Infrastructure expected by the current Cloud Run workflow.
+if ! gcloud artifacts repositories describe "${ARTIFACT_REPOSITORY}" \
+  --project="${PROJECT_ID}" --location="${REGION}" >/dev/null 2>&1; then
+  gcloud artifacts repositories create "${ARTIFACT_REPOSITORY}" \
+    --project="${PROJECT_ID}" \
+    --location="${REGION}" \
+    --repository-format=docker \
+    --description="Cherry FundOps container images"
+fi
+
+if ! gcloud storage buckets describe "gs://${EVIDENCE_BUCKET}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+  gcloud storage buckets create "gs://${EVIDENCE_BUCKET}" \
+    --project="${PROJECT_ID}" \
+    --location="${REGION}" \
+    --uniform-bucket-level-access
+fi
+gcloud storage buckets update "gs://${EVIDENCE_BUCKET}" --versioning >/dev/null
+
+gcloud storage buckets add-iam-policy-binding "gs://${EVIDENCE_BUCKET}" \
+  --member="serviceAccount:${RUNTIME_EMAIL}" \
+  --role="roles/storage.objectAdmin" \
+  --quiet >/dev/null
+
+if ! gcloud pubsub topics describe "${PUBSUB_TOPIC}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+  gcloud pubsub topics create "${PUBSUB_TOPIC}" --project="${PROJECT_ID}"
+fi
+
+if ! gcloud firestore databases describe --database='(default)' --project="${PROJECT_ID}" >/dev/null 2>&1; then
+  gcloud firestore databases create \
+    --database='(default)' \
+    --location=eur3 \
+    --type=firestore-native \
+    --project="${PROJECT_ID}" \
+    --quiet
+fi
+
+# GitHub OIDC Workload Identity Federation.
 if ! gcloud iam workload-identity-pools describe "${POOL_ID}" \
   --project="${PROJECT_ID}" --location=global >/dev/null 2>&1; then
   gcloud iam workload-identity-pools create "${POOL_ID}" \
@@ -123,6 +177,7 @@ gcloud iam service-accounts add-iam-policy-binding "${DEPLOY_EMAIL}" \
   --role="roles/iam.workloadIdentityUser" \
   --quiet >/dev/null
 
+# A fresh token is generated on each bootstrap unless explicitly supplied.
 UPLOAD_TOKEN="${CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN:-$(python3 - <<'PY'
 import secrets
 print(secrets.token_urlsafe(32))
@@ -131,12 +186,15 @@ PY
 
 cat <<VALUES
 
-Created / verified Google Cloud deployment identity.
+Created / verified Google Cloud deployment and runtime identities.
 
 GitHub production Environment variables:
 GCP_PROJECT_ID=${PROJECT_ID}
 GCP_WORKLOAD_IDENTITY_PROVIDER=${PROVIDER_RESOURCE}
 GCP_DEPLOY_SERVICE_ACCOUNT=${DEPLOY_EMAIL}
+
+Cloud Run runtime service account:
+${RUNTIME_EMAIL}
 
 GitHub production Environment secret:
 CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN=${UPLOAD_TOKEN}
