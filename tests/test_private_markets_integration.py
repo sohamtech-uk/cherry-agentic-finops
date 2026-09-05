@@ -54,4 +54,20 @@ def test_integrated_health_declares_pdf_excel_json_contract() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["input_contract"] == ["pdf", "excel", "json"]
+    assert body["input_required"] == {"pdf": True, "excel": True, "json": False}
+    assert body["input_multiplicity"]["json"] == "zero_or_one"
     assert "fundops_studio_configured" in body
+
+
+def test_integrated_openapi_marks_cash_json_optional() -> None:
+    spec = client.get("/openapi.json").json()
+    request_schema = spec["paths"]["/api/private-markets/analyse-integrated"]["post"][
+        "requestBody"
+    ]["content"]["multipart/form-data"]["schema"]
+    if "$ref" in request_schema:
+        component_name = request_schema["$ref"].rsplit("/", 1)[-1]
+        request_schema = spec["components"]["schemas"][component_name]
+
+    assert "capital_call" in request_schema["required"]
+    assert "commitments" in request_schema["required"]
+    assert "fund_json" not in request_schema["required"]
