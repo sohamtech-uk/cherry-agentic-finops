@@ -22,7 +22,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.fund_reconciliation import ExceptionItem, prioritise_exceptions
+from app.fund_reconciliation import EvidenceRef, ExceptionItem, prioritise_exceptions
 from app.private_markets import FindingSeverity
 
 NextStep = Literal[
@@ -77,6 +77,7 @@ class RelatedException(BaseModel):
     title: str
     severity: FindingSeverity
     impact_amount: Decimal
+    evidence: list[EvidenceRef] = Field(default_factory=list)
 
 
 class Investigation(BaseModel):
@@ -125,6 +126,7 @@ def investigate_exception(
             title=item.title,
             severity=item.severity,
             impact_amount=item.impact_amount,
+            evidence=item.evidence,
         )
         for item in ranked
         if item is not target and target.key is not None and item.key == target.key

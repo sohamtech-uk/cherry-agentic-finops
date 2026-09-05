@@ -19,6 +19,12 @@ down a different axis from the first six: instead of comparing two records of th
 (internal vs external), they compare an administrator-reported figure against a *rule* — the
 governing fee rate/basis or the fund manager's own expected allocation — so a break can be flagged
 even when there is nothing else to diff against.
+
+``attach_evidence`` is the other domain-agnostic function here: it stamps document lineage (source
+filename, SHA-256 hash, and the exception's own key as a locator) onto an already-produced
+exceptions list, so "why did Cherry flag this" traces back to the exact uploaded file(s) rather
+than a bare in-memory finding. Like ``prioritise_exceptions``, it works on the common
+``ExceptionItem`` shape and never recomputes a figure.
 """
 
 from __future__ import annotations
@@ -70,6 +76,28 @@ def _load_json(content: bytes, *names: str) -> list[dict[str, Any]]:
     return _rows(payload, *names)
 
 
+class EvidenceSource(BaseModel):
+    """One input file's identity, as supplied by the caller that actually read it. This module
+    never sees a raw file path or its bytes -- only the parsed records -- so a source's filename
+    and hash always come from outside (typically ``app.agent_tools``'s file-reading layer)."""
+
+    source_id: str
+    filename: str
+    sha256: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+
+
+class EvidenceRef(BaseModel):
+    """One document-lineage pointer for a single exception: which source produced it, that
+    source's tamper-evident SHA-256 hash (the same file re-hashes to the same value; a changed
+    file does not), and where within it the finding sits -- the same key used to match records for
+    this check (an account, security_id, trade_id, investor or expense_id)."""
+
+    source_id: str
+    filename: str
+    sha256: str
+    locator: str | None = None
+
+
 class ExceptionItem(BaseModel):
     """A single triageable finding from any fund-reconciliation check, in a common shape so
     ``prioritise_exceptions`` can rank findings from different checks together."""
@@ -90,6 +118,7 @@ class ExceptionItem(BaseModel):
     detail: str
     severity: FindingSeverity
     impact_amount: Decimal = Decimal("0")
+    evidence: list[EvidenceRef] = Field(default_factory=list)
 
 
 # --- Positions -------------------------------------------------------------------------------
@@ -1208,3 +1237,43 @@ def prioritise_exceptions(
         key=lambda item: (severity_rank.get(item.severity, 99), -item.impact_amount),
     )
     return ranked if top_n is None else ranked[:top_n]
+
+
+# --- Document lineage ------------------------------------------------------------------------
+
+
+def attach_evidence(
+    exceptions: list[ExceptionItem], *, sources: list[EvidenceSource]
+) -> list[ExceptionItem]:
+    """Stamp every exception with the document lineage for every source that fed the check that
+    produced it: each source's filename and SHA-256 hash, plus the exception's own key as the
+    locator (the record -- an account, security_id, trade_id, investor or expense_id -- the
+    finding is about within that source).
+
+    Domain-agnostic, like ``prioritise_exceptions``: it never re-derives a figure or a finding, and
+    it does not decide which source is "responsible" for a break -- every source passed in is cited
+    on every exception, because this module never sees which side of a two-file comparison a given
+    caller believes is at fault. Call it once per check, passing every source file that check read
+    (both sides of a reconciliation, or the single file for a single-source detection); the caller
+    (typically ``app.agent_tools``, which is where a file's bytes and path are actually available)
+    is responsible for supplying each source's filename and SHA-256 hash.
+    """
+
+    if not sources:
+        return exceptions
+    return [
+        item.model_copy(
+            update={
+                "evidence": [
+                    EvidenceRef(
+                        source_id=source.source_id,
+                        filename=source.filename,
+                        sha256=source.sha256,
+                        locator=item.key,
+                    )
+                    for source in sources
+                ]
+            }
+        )
+        for item in exceptions
+    ]

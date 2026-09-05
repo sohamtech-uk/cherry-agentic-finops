@@ -167,6 +167,10 @@ Reconciliation (internal vs external, e.g. administrator or custodian):
   mismatches on trades present in both sides.
 Each of these returns "exceptions" already in the common shape prioritise_exceptions expects —
 prefer reading that list over the raw "breaks" array when you need to rank or combine findings.
+Every exception's "evidence" list already names the exact source file(s) (filename, SHA-256 hash)
+and the record locator (account, security_id, trade_id, investor or expense_id) it was found in —
+when asked "why did Cherry flag this," cite that evidence directly rather than re-describing the
+break from memory or guessing which upload it came from.
 
 Rule-based validation (administrator figure vs. a rule, not another record):
 - validate_management_fees matches by investor name and compares the administrator's calculated

@@ -397,6 +397,13 @@ def test_reconcile_positions_tool_flags_a_break(tmp_path: Path) -> None:
     assert result["matched_count"] == 0
     assert result["breaks"][0]["break_type"] == "quantity_mismatch"
     assert result["exceptions"][0]["category"] == "position"
+    evidence = result["exceptions"][0]["evidence"]
+    assert {ref["filename"] for ref in evidence} == {
+        "internal-positions.json",
+        "external-positions.json",
+    }
+    assert all(ref["locator"] == "SEC1" for ref in evidence)
+    assert all(len(ref["sha256"]) == 64 for ref in evidence)
 
 
 def test_reconcile_positions_tool_wraps_invalid_json(tmp_path: Path) -> None:
@@ -421,6 +428,9 @@ def test_reconcile_cash_tool_flags_a_break(tmp_path: Path) -> None:
     result = reconcile_cash(internal_path, external_path)
 
     assert result["breaks"][0]["break_type"] == "balance_mismatch"
+    evidence = result["exceptions"][0]["evidence"]
+    assert {ref["filename"] for ref in evidence} == {"internal-cash.json", "external-cash.json"}
+    assert all(ref["locator"] == "ACC1/USD" for ref in evidence)
 
 
 def test_reconcile_trades_tool_flags_a_break(tmp_path: Path) -> None:
@@ -439,6 +449,12 @@ def test_reconcile_trades_tool_flags_a_break(tmp_path: Path) -> None:
     result = reconcile_trades(internal_path, external_path)
 
     assert result["breaks"][0]["break_type"] == "side_mismatch"
+    evidence = result["exceptions"][0]["evidence"]
+    assert {ref["filename"] for ref in evidence} == {
+        "internal-trades.json",
+        "external-trades.json",
+    }
+    assert all(ref["locator"] == "T1" for ref in evidence)
 
 
 def test_detect_stale_prices_tool_flags_a_high_severity_finding(tmp_path: Path) -> None:
@@ -451,6 +467,10 @@ def test_detect_stale_prices_tool_flags_a_high_severity_finding(tmp_path: Path) 
 
     assert result["findings"][0]["severity"] == "high"
     assert result["exceptions"][0]["category"] == "stale_price"
+    evidence = result["exceptions"][0]["evidence"]
+    assert len(evidence) == 1
+    assert evidence[0]["filename"] == "prices.json"
+    assert evidence[0]["locator"] == "SEC1"
 
 
 def test_validate_management_fees_tool_flags_amount_mismatch(tmp_path: Path) -> None:
@@ -474,6 +494,9 @@ def test_validate_management_fees_tool_flags_amount_mismatch(tmp_path: Path) -> 
 
     assert result["breaks"][0]["break_type"] == "amount_mismatch"
     assert result["exceptions"][0]["category"] == "management_fee"
+    evidence = result["exceptions"][0]["evidence"]
+    assert {ref["filename"] for ref in evidence} == {"fee-rules.json", "administrator-fees.json"}
+    assert all(ref["locator"] == "Investor A" for ref in evidence)
 
 
 def test_validate_management_fees_tool_wraps_invalid_json(tmp_path: Path) -> None:
@@ -499,6 +522,12 @@ def test_reconcile_expense_allocations_tool_flags_category_mismatch(tmp_path: Pa
 
     assert result["breaks"][0]["break_type"] == "category_mismatch"
     assert result["exceptions"][0]["category"] == "expense_allocation"
+    evidence = result["exceptions"][0]["evidence"]
+    assert {ref["filename"] for ref in evidence} == {
+        "expected-allocations.json",
+        "administrator-expenses.json",
+    }
+    assert all(ref["locator"] == "EXP1" for ref in evidence)
 
 
 def test_reconcile_expense_allocations_tool_wraps_invalid_json(tmp_path: Path) -> None:
@@ -598,6 +627,10 @@ def test_detect_unsettled_trades_tool_flags_an_overdue_trade(tmp_path: Path) -> 
 
     assert result["findings"][0]["severity"] == "high"
     assert result["exceptions"][0]["category"] == "unsettled_trade"
+    evidence = result["exceptions"][0]["evidence"]
+    assert len(evidence) == 1
+    assert evidence[0]["filename"] == "trades.json"
+    assert evidence[0]["locator"] == "T1"
 
 
 def test_detect_exposure_breaches_tool_flags_a_breach(tmp_path: Path) -> None:
@@ -614,6 +647,8 @@ def test_detect_exposure_breaches_tool_flags_a_breach(tmp_path: Path) -> None:
 
     assert result["breaches"][0]["key"] == "SEC1"
     assert result["exceptions"][0]["category"] == "exposure_breach"
+    evidence = result["exceptions"][0]["evidence"]
+    assert {ref["filename"] for ref in evidence} == {"positions.json", "limits.json"}
 
 
 def test_detect_exposure_breaches_tool_wraps_zero_nav(tmp_path: Path) -> None:

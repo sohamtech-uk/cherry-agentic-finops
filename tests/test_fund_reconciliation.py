@@ -10,6 +10,7 @@ from app.fund_reconciliation import (
     AdministratorExpenseLine,
     AdministratorFeeLine,
     CashBalance,
+    EvidenceSource,
     ExceptionItem,
     ExpectedExpenseAllocation,
     ExposureLimit,
@@ -17,6 +18,7 @@ from app.fund_reconciliation import (
     Position,
     PriceRecord,
     Trade,
+    attach_evidence,
     detect_exposure_breaches,
     detect_stale_prices,
     detect_unsettled_trades,
@@ -731,3 +733,74 @@ def test_prioritise_exceptions_respects_top_n() -> None:
     ranked = prioritise_exceptions(items, top_n=2)
     assert len(ranked) == 2
     assert ranked[0].code == "c4"
+
+
+# --- attach_evidence ----------------------------------------------------------------------------
+
+
+def test_attach_evidence_stamps_every_source_on_every_exception() -> None:
+    items = [
+        ExceptionItem(
+            category="cash", code="c1", key="ACC1", title="x", detail="", severity="high"
+        ),
+        ExceptionItem(
+            category="cash", code="c2", key="ACC2", title="y", detail="", severity="warning"
+        ),
+    ]
+    sources = [
+        EvidenceSource(source_id="internal_cash", filename="internal.json", sha256="a" * 64),
+        EvidenceSource(source_id="external_cash", filename="external.json", sha256="b" * 64),
+    ]
+
+    stamped = attach_evidence(items, sources=sources)
+
+    assert len(stamped[0].evidence) == 2
+    assert {ref.source_id for ref in stamped[0].evidence} == {"internal_cash", "external_cash"}
+    assert {ref.filename for ref in stamped[0].evidence} == {"internal.json", "external.json"}
+    assert len(stamped[1].evidence) == 2
+
+
+def test_attach_evidence_uses_item_key_as_locator() -> None:
+    items = [
+        ExceptionItem(category="cash", code="c1", key="ACC1", title="x", detail="", severity="high")
+    ]
+    sources = [EvidenceSource(source_id="internal_cash", filename="internal.json", sha256="a" * 64)]
+
+    stamped = attach_evidence(items, sources=sources)
+
+    assert stamped[0].evidence[0].locator == "ACC1"
+    assert stamped[0].evidence[0].sha256 == "a" * 64
+
+
+def test_attach_evidence_locator_is_none_when_item_has_no_key() -> None:
+    items = [
+        ExceptionItem(
+            category="stale_price", code="s1", key=None, title="x", detail="", severity="high"
+        )
+    ]
+    sources = [EvidenceSource(source_id="prices", filename="prices.json", sha256="c" * 64)]
+
+    stamped = attach_evidence(items, sources=sources)
+
+    assert stamped[0].evidence[0].locator is None
+
+
+def test_attach_evidence_returns_unchanged_list_when_no_sources() -> None:
+    items = [
+        ExceptionItem(category="cash", code="c1", key="ACC1", title="x", detail="", severity="high")
+    ]
+
+    stamped = attach_evidence(items, sources=[])
+
+    assert stamped[0].evidence == []
+
+
+def test_attach_evidence_does_not_mutate_original_items() -> None:
+    original = ExceptionItem(
+        category="cash", code="c1", key="ACC1", title="x", detail="", severity="high"
+    )
+    sources = [EvidenceSource(source_id="internal_cash", filename="internal.json", sha256="a" * 64)]
+
+    attach_evidence([original], sources=sources)
+
+    assert original.evidence == []
