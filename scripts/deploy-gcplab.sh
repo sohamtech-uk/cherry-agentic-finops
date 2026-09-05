@@ -5,10 +5,7 @@ PROJECT_ID="${1:-${GOOGLE_CLOUD_PROJECT:-}}"
 REGION="${2:-europe-west1}"
 SERVICE="cherry-finops"
 REPOSITORY="cherry-agent"
-RUNTIME_SA="cherry-agent-runtime"
 MODEL="${CHERRY_GEMINI_MODEL:-gemini-3.7-flash}"
-TOPIC="finance-workflow-events"
-BUCKET="${PROJECT_ID}-cherry-finops-evidence"
 TOKEN_FILE="${HOME}/.cherry-finops-demo-token"
 
 command -v gcloud >/dev/null || { echo "Run this script in Google Cloud Shell." >&2; exit 1; }
@@ -23,10 +20,30 @@ if [[ -z "${PROJECT_ID}" || "${PROJECT_ID}" == "(unset)" ]]; then
   exit 2
 fi
 
+if [[ -z "${GOOGLE_API_KEY:-}" ]]; then
+  cat >&2 <<'MESSAGE'
+GOOGLE_API_KEY is not set.
+
+This gcplab.me project blocks project IAM policy changes, so this deployment intentionally uses the
+hackathon-provided Gemini API key instead of creating/granting a privileged Vertex AI runtime
+service account.
+
+Rotate any key that has been shared publicly, then in Cloud Shell enter the replacement without
+putting it in shell history:
+
+  read -rsp "Gemini API key: " GOOGLE_API_KEY; echo
+  export GOOGLE_API_KEY
+
+Then rerun this script.
+MESSAGE
+  exit 2
+fi
+
 ACCOUNT="$(gcloud config get-value account 2>/dev/null || true)"
 echo "Deploying Cherry FundOps from account: ${ACCOUNT}"
 echo "Project: ${PROJECT_ID}"
 echo "Region:  ${REGION}"
+echo "Mode:    restricted-IAM gcplab / Gemini API key / memory persistence"
 
 gcloud config set project "${PROJECT_ID}" >/dev/null
 
@@ -35,15 +52,14 @@ if [[ "$(gcloud projects describe "${PROJECT_ID}" --format='value(projectId)' 2>
   exit 1
 fi
 
+# The temporary gcplab.me accounts intentionally restrict setIamPolicy. Keep this deployment
+# compatible with those restrictions: no project IAM mutations, no custom runtime role grants,
+# no Firestore/Storage/PubSub dependencies. The judge-facing workflow still uses Cloud Run and
+# real Gemini document understanding, while deterministic Cherry controls remain unchanged.
 SERVICES=(
   run.googleapis.com
   artifactregistry.googleapis.com
-  aiplatform.googleapis.com
-  firestore.googleapis.com
-  storage.googleapis.com
-  pubsub.googleapis.com
-  iam.googleapis.com
-  iamcredentials.googleapis.com
+  generativelanguage.googleapis.com
   serviceusage.googleapis.com
 )
 gcloud services enable "${SERVICES[@]}"
@@ -53,42 +69,6 @@ if ! gcloud artifacts repositories describe "${REPOSITORY}" --location "${REGION
     --repository-format=docker \
     --location="${REGION}" \
     --description="Cherry FundOps container images"
-fi
-
-if ! gcloud iam service-accounts describe "${RUNTIME_SA}@${PROJECT_ID}.iam.gserviceaccount.com" >/dev/null 2>&1; then
-  gcloud iam service-accounts create "${RUNTIME_SA}" \
-    --display-name="Cherry FundOps Cloud Run runtime"
-fi
-
-RUNTIME_EMAIL="${RUNTIME_SA}@${PROJECT_ID}.iam.gserviceaccount.com"
-for role in roles/aiplatform.user roles/datastore.user roles/pubsub.publisher roles/logging.logWriter; do
-  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-    --member="serviceAccount:${RUNTIME_EMAIL}" \
-    --role="${role}" \
-    --condition=None \
-    --quiet >/dev/null
-done
-
-if ! gcloud storage buckets describe "gs://${BUCKET}" >/dev/null 2>&1; then
-  gcloud storage buckets create "gs://${BUCKET}" \
-    --location="${REGION}" \
-    --uniform-bucket-level-access
-fi
-
-gcloud storage buckets update "gs://${BUCKET}" --versioning >/dev/null
-
-gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
-  --member="serviceAccount:${RUNTIME_EMAIL}" \
-  --role="roles/storage.objectAdmin" \
-  --quiet >/dev/null
-
-if ! gcloud pubsub topics describe "${TOPIC}" >/dev/null 2>&1; then
-  gcloud pubsub topics create "${TOPIC}"
-fi
-
-if ! gcloud firestore databases describe --database='(default)' >/dev/null 2>&1; then
-  echo "Creating the default Firestore Native database in eur3…"
-  gcloud firestore databases create --database='(default)' --location=eur3 --type=firestore-native
 fi
 
 if [[ -n "${CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN:-}" ]]; then
@@ -120,12 +100,11 @@ gcloud run deploy "${SERVICE}" \
   --no-invoker-iam-check \
   --ingress=all \
   --default-url \
-  --service-account="${RUNTIME_EMAIL}" \
   --memory=1Gi \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=5 \
-  --set-env-vars="CHERRY_ENVIRONMENT=production,CHERRY_PERSISTENCE_BACKEND=firestore,CHERRY_GEMINI_MODEL=${MODEL},CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN=${UPLOAD_TOKEN},GOOGLE_GENAI_USE_VERTEXAI=true,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=global,CHERRY_EVIDENCE_BUCKET=${BUCKET},CHERRY_PUBSUB_TOPIC=${TOPIC}"
+  --set-env-vars="CHERRY_ENVIRONMENT=production,CHERRY_PERSISTENCE_BACKEND=memory,CHERRY_GEMINI_MODEL=${MODEL},CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN=${UPLOAD_TOKEN},GOOGLE_GENAI_USE_VERTEXAI=false,GOOGLE_API_KEY=${GOOGLE_API_KEY},GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=global"
 
 SERVICE_URL="$(gcloud run services describe "${SERVICE}" --region="${REGION}" --format='value(status.url)')"
 
@@ -148,6 +127,8 @@ curl --fail --retry 12 --retry-delay 5 --retry-all-errors \
 echo
 echo "Cherry FundOps deployment complete."
 echo "URL: ${SERVICE_URL}"
+echo "Gemini mode: API key (GOOGLE_GENAI_USE_VERTEXAI=false)"
+echo "Persistence: memory (appropriate for the temporary hackathon runtime)"
 echo "Demo upload token saved locally at: ${TOKEN_FILE}"
-echo "Do not paste that token into chat or commit it to Git."
+echo "Do not paste the API key or upload token into chat or commit either to Git."
 echo "This temporary gcplab.me project should be treated as hackathon-only runtime infrastructure."
