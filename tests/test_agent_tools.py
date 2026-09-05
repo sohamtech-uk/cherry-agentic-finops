@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from openpyxl import Workbook
+from reportlab.pdfgen import canvas
 
 from app.agent_tools import (
     compare_dates,
@@ -23,6 +24,7 @@ from app.agent_tools import (
     prioritise_exceptions,
     query_database,
     read_document,
+    reconcile_bank_statement_cash,
     reconcile_cash,
     reconcile_expense_allocations,
     reconcile_investor_gl_workbook,
@@ -382,6 +384,14 @@ def _write_json(path: Path, payload: object) -> str:
     return str(path)
 
 
+def _write_pdf(path: Path, *lines: str) -> str:
+    pdf = canvas.Canvas(str(path))
+    for index, line in enumerate(lines):
+        pdf.drawString(100, 750 - index * 20, line)
+    pdf.save()
+    return str(path)
+
+
 def test_reconcile_positions_tool_flags_a_break(tmp_path: Path) -> None:
     internal_path = _write_json(
         tmp_path / "internal-positions.json",
@@ -431,6 +441,45 @@ def test_reconcile_cash_tool_flags_a_break(tmp_path: Path) -> None:
     evidence = result["exceptions"][0]["evidence"]
     assert {ref["filename"] for ref in evidence} == {"internal-cash.json", "external-cash.json"}
     assert all(ref["locator"] == "ACC1/USD" for ref in evidence)
+
+
+def test_reconcile_bank_statement_cash_tool_flags_a_break(tmp_path: Path) -> None:
+    internal_path = _write_json(
+        tmp_path / "internal-cash.json",
+        [
+            {
+                "fund": "Fund X",
+                "account": "GB29NWBK60161331926819",
+                "currency": "GBP",
+                "balance": 12000,
+            }
+        ],
+    )
+    statement_path = _write_pdf(
+        tmp_path / "chase_statement.pdf",
+        "Statement of Account",
+        "IBAN: GB29NWBK60161331926819",
+        "Currency: GBP",
+        "Closing Balance: GBP 12,345.67",
+    )
+
+    result = reconcile_bank_statement_cash(statement_path, internal_path)
+
+    assert result["breaks"][0]["break_type"] == "balance_mismatch"
+    evidence = result["exceptions"][0]["evidence"]
+    assert {ref["filename"] for ref in evidence} == {"internal-cash.json", "chase_statement.pdf"}
+    assert all(ref["locator"] == "GB29NWBK60161331926819/GBP" for ref in evidence)
+
+
+def test_reconcile_bank_statement_cash_tool_wraps_unreadable_statement(tmp_path: Path) -> None:
+    internal_path = _write_json(
+        tmp_path / "internal-cash.json",
+        [{"fund": "Fund X", "account": "ACC1", "currency": "USD", "balance": 1000}],
+    )
+    statement_path = _write_pdf(tmp_path / "statement.pdf", "Statement of Account")
+
+    with pytest.raises(ValueError, match="closing/ending/current/available balance"):
+        reconcile_bank_statement_cash(statement_path, internal_path)
 
 
 def test_reconcile_trades_tool_flags_a_break(tmp_path: Path) -> None:

@@ -18,6 +18,7 @@ from app.agent_tools import (
     compare_periods,
     identify_ylookup_workbook,
     read_document,
+    reconcile_bank_statement_cash,
     reconcile_bank_statement_workbook,
     reconcile_cash,
     reconcile_investor_gl_workbook,
@@ -117,6 +118,9 @@ Tool routing guidance:
 - investor_gl -> reconcile_investor_gl_workbook
 - loader_template -> reconcile_loader_sample_workbook
 - bank_statement_working_file -> reconcile_bank_statement_workbook
+- bank_statement + cash_transactions pair -> reconcile_bank_statement_cash (bank statement is
+  always the external side; its account/IBAN, currency and closing balance are extracted from the
+  document text, never estimated by you)
 - positions pair -> reconcile_positions
 - cash_transactions pair -> reconcile_cash
 - trades pair -> reconcile_trades
@@ -181,6 +185,7 @@ Set overall status from tool/control outcomes only:
         get_fund_manager_control_catalogue,
         identify_ylookup_workbook,
         reconcile_bank_statement_workbook,
+        reconcile_bank_statement_cash,
         reconcile_investor_gl_workbook,
         reconcile_loader_sample_workbook,
         reconcile_positions,

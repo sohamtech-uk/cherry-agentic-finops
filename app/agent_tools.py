@@ -8,6 +8,7 @@ from typing import Any, Literal
 
 from pydantic import ValidationError
 
+from app.bank_statement_tools import extract_bank_statement_balances
 from app.config import get_settings
 from app.container import get_engine
 from app.exception_investigation import investigate_exception as _investigate_exception
@@ -681,6 +682,48 @@ def reconcile_cash(internal_cash_path: str, external_cash_path: str) -> dict[str
         kind="External cash balances",
         extension=".json",
         parser=parse_cash_balances,
+    )
+    result = _reconcile_cash(internal, external)
+    exceptions = _attach_evidence(
+        result.to_exceptions(), sources=[internal_source, external_source]
+    )
+    return {
+        **result.model_dump(mode="json"),
+        "exceptions": [item.model_dump(mode="json") for item in exceptions],
+    }
+
+
+def reconcile_bank_statement_cash(
+    bank_statement_path: str, internal_cash_path: str
+) -> dict[str, Any]:
+    """Compare internal fund cash balances against a real bank statement's extracted closing
+    balance, matched by (account, currency). This performs the same deterministic comparison as
+    reconcile_cash; use this one instead when the external side is a bank statement PDF rather
+    than a structured cash-balance export.
+
+    Args:
+        bank_statement_path: Local path to the bank statement PDF (external side). Its account/
+            IBAN, currency and closing balance are extracted deterministically from the document
+            text; a statement whose layout does not expose these fails rather than guessing.
+        internal_cash_path: Local path to the internal cash-balance export (.json): an array, or
+            an object with a cash_balances array, of {fund, account, currency, balance, ...}.
+    """
+
+    internal, internal_source = _parse_input_file_with_evidence(
+        internal_cash_path,
+        source_id="internal_cash",
+        kind="Internal cash balances",
+        extension=".json",
+        parser=parse_cash_balances,
+    )
+    bank_statement_content = _read_file_bytes(bank_statement_path)
+    external = extract_bank_statement_balances(
+        bank_statement_content, Path(bank_statement_path).name
+    )
+    external_source = EvidenceSource(
+        source_id="external_bank_statement",
+        filename=Path(bank_statement_path).name,
+        sha256=sha256_hex(bank_statement_content),
     )
     result = _reconcile_cash(internal, external)
     exceptions = _attach_evidence(
