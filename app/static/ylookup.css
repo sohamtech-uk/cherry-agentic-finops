@@ -17,7 +17,8 @@
   font-weight: 500;
   letter-spacing: -.035em;
 }
-.dataset-title > p:last-child {
+.dataset-title > p:last-child,
+.dataset-title > div > p:last-child {
   max-width: 880px;
   margin: 12px 0 0;
   color: #56615c;
@@ -134,30 +135,8 @@
   padding: 22px 24px 26px;
 }
 .dataset-exceptions h4 {
-  margin: 0 0 12px;
+  margin: 0 0 4px;
   font-size: 13px;
-}
-.dataset-exception {
-  display: grid;
-  grid-template-columns: 80px 1fr;
-  gap: 7px 12px;
-  padding: 12px 0;
-  border-top: 1px solid #e5e1d8;
-}
-.dataset-exception b {
-  color: #123c32;
-  font-size: 10px;
-}
-.dataset-exception span {
-  color: #9b3d29;
-  font-size: 10px;
-  font-weight: 800;
-}
-.dataset-exception p {
-  grid-column: 2;
-  margin: 0;
-  color: #56615c;
-  font-size: 10px;
 }
 .clear-memory-button {
   color: #8c2e1d;
@@ -176,12 +155,233 @@
   font-size: 9px;
   line-height: 1.5;
 }
+
+.dataset-title {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 28px;
+}
+.dataset-title > div:first-child {
+  min-width: 0;
+}
+.dataset-report-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.dataset-report-actions > span {
+  width: 100%;
+  color: #61706a;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .12em;
+  text-align: right;
+  text-transform: uppercase;
+}
+.dataset-report-actions button {
+  padding: 9px 12px;
+  color: #123c32;
+  border: 1px solid #b8c9c0;
+  border-radius: 9px;
+  background: #eef6f0;
+  font-size: 10px;
+  font-weight: 850;
+}
+.dataset-report-actions button:hover {
+  border-color: #6f9b8b;
+  background: #e3f2e8;
+}
+.exception-list-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 20px;
+  margin-bottom: 10px;
+}
+.exception-list-head p {
+  margin: 0;
+  color: #66716d;
+  font-size: 9px;
+}
+.exception-list-head > b {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  color: #8c2e1d;
+  border-radius: 999px;
+  background: #fff0eb;
+  font-size: 9px;
+}
+.exception-scroll {
+  max-height: 780px;
+  overflow: auto;
+  border-top: 1px solid #e5e1d8;
+}
+.dataset-exception {
+  display: block;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid #e5e1d8;
+}
+.dataset-exception summary {
+  display: grid;
+  grid-template-columns: 76px minmax(180px, .9fr) minmax(260px, 1.7fr) 122px;
+  gap: 10px 14px;
+  align-items: start;
+  padding: 15px 2px;
+  list-style: none;
+  cursor: pointer;
+}
+.dataset-exception summary::-webkit-details-marker {
+  display: none;
+}
+.dataset-exception summary:hover {
+  background: #faf8f2;
+}
+.dataset-exception .exception-row {
+  color: #123c32;
+  font-size: 10px;
+  font-weight: 900;
+}
+.dataset-exception .exception-reason {
+  color: #9b3d29;
+  font-size: 10px;
+  font-weight: 850;
+}
+.dataset-exception .exception-narrative {
+  color: #56615c;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+.dataset-exception .exception-open-label {
+  justify-self: end;
+  color: #456a5e;
+  font-size: 9px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.dataset-exception[open] .exception-open-label {
+  color: #8c2e1d;
+}
+.exception-detail {
+  display: grid;
+  grid-template-columns: .8fr 1.2fr;
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid #d8d5cc;
+  border-radius: 12px;
+  background: #f8f5ee;
+  margin: 0 0 16px;
+}
+.exception-detail h5 {
+  margin: 0 0 10px;
+  color: #123c32;
+  font-size: 11px;
+}
+.exception-context-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.exception-context-grid > div {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid #e0ddd4;
+  border-radius: 8px;
+  background: #fffdf8;
+}
+.exception-context-grid small,
+.exception-context-grid strong {
+  display: block;
+}
+.exception-context-grid small {
+  color: #65706c;
+  font-size: 7px;
+  font-weight: 850;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.exception-context-grid strong {
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: #17201d;
+  font-size: 9px;
+}
+.reconciliation-guidance {
+  padding: 13px;
+  border: 1px solid #d2ddd6;
+  border-radius: 10px;
+  background: #fffdf8;
+}
+.reconciliation-guidance + .reconciliation-guidance {
+  margin-top: 9px;
+}
+.guidance-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.guidance-head strong {
+  color: #8c2e1d;
+  font-size: 10px;
+}
+.guidance-head span {
+  padding: 4px 7px;
+  color: #315f50;
+  border-radius: 999px;
+  background: #e9f8dc;
+  font-size: 8px;
+  font-weight: 800;
+}
+.reconciliation-guidance ol {
+  margin: 10px 0;
+  padding-left: 20px;
+  color: #4f5c57;
+  font-size: 9px;
+}
+.reconciliation-guidance li + li {
+  margin-top: 5px;
+}
+.guidance-proof {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.guidance-proof p {
+  margin: 0;
+  padding: 9px;
+  color: #56615c;
+  border-radius: 8px;
+  background: #f5f2eb;
+  font-size: 8.5px;
+}
+.guidance-proof b {
+  display: block;
+  margin-bottom: 3px;
+  color: #123c32;
+  font-size: 7px;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
 @media (max-width: 1000px) {
   .dataset-metrics { grid-template-columns: repeat(3, 1fr); }
+  .dataset-title { align-items: flex-start; flex-direction: column; }
+  .dataset-report-actions { justify-content: flex-start; }
+  .dataset-report-actions > span { text-align: left; }
+  .dataset-exception summary { grid-template-columns: 62px 1fr 1.5fr; }
+  .dataset-exception .exception-open-label { grid-column: 2 / -1; justify-self: start; }
+  .exception-detail { grid-template-columns: 1fr; }
 }
 @media (max-width: 650px) {
   .dataset-head { flex-direction: column; }
   .dataset-metrics { grid-template-columns: repeat(2, 1fr); }
-  .dataset-exception { grid-template-columns: 1fr; }
-  .dataset-exception p { grid-column: 1; }
+  .dataset-exception summary { grid-template-columns: 1fr; }
+  .dataset-exception .exception-open-label { grid-column: 1; }
+  .exception-context-grid,.guidance-proof { grid-template-columns: 1fr; }
 }
