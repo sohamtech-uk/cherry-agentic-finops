@@ -67,7 +67,9 @@ async def integration_health() -> dict[str, Any]:
         "status": "ok",
         "input_contract": ["pdf", "excel", "json"],
         "fundops_studio_configured": studio.configured,
-        "financial_boundary": "Cherry retains deterministic control authority; no payment initiation.",
+        "financial_boundary": (
+            "Cherry retains deterministic control authority; no payment initiation."
+        ),
     }
     if not studio.configured:
         response["fundops_studio"] = {"status": "not_configured"}
@@ -138,7 +140,10 @@ async def analyse_integrated_private_markets_case(
         dataset = parse_commitment_workbook(workbook_content)
         transactions = parse_cash_json(json_content)
     except (ValueError, ValidationError) as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid Excel/JSON supporting data: {exc}") from exc
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid Excel/JSON supporting data: {exc}",
+        ) from exc
 
     try:
         call = await extractor.extract(
@@ -212,7 +217,9 @@ async def analyse_integrated_private_markets_case(
         except FundOpsStudioUnavailable:
             studio_result = {
                 "status": "unavailable",
-                "message": "Cherry strict controls completed; Agent Studio was temporarily unavailable.",
+                "message": (
+                    "Cherry strict controls completed; Agent Studio was temporarily unavailable."
+                ),
             }
 
     return {
