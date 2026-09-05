@@ -20,7 +20,9 @@ def _require_clear_access(token: str | None) -> None:
     if not expected:
         raise HTTPException(
             status_code=503,
-            detail="Memory clearing is disabled until the private-markets demo token is configured.",
+            detail=(
+                "Memory clearing is disabled until the private-markets demo token is configured."
+            ),
         )
     if not token or not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=401, detail="Valid private-markets demo token required.")
@@ -35,10 +37,11 @@ async def clear_memory(
 ) -> dict[str, Any]:
     """Clear ephemeral server workflow state for the hackathon memory deployment.
 
-    Private-markets and Ylookup upload endpoints process uploaded bytes request-by-request and do not
-    persist the raw PDF/XLSX payloads in the in-memory workflow repository. This endpoint clears any
-    workflow records that are present in that repository. Persistent backends such as Firestore are
-    deliberately excluded so this button can never become a remote database-delete operation.
+    Private-markets and Ylookup upload endpoints process uploaded bytes request-by-request.
+    They do not persist the raw PDF/XLSX payloads in the in-memory workflow repository. This
+    endpoint clears any workflow records that are present in that repository. Persistent backends
+    such as Firestore are deliberately excluded so this button can never become a remote
+    database-delete operation.
     """
 
     _require_clear_access(x_cherry_demo_token)
