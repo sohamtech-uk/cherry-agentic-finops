@@ -31,6 +31,13 @@ def _sha256(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def _hash_items(items: list[tuple[str, bytes]]) -> list[dict[str, str]]:
+    hashes: list[dict[str, str]] = []
+    for file_name, content in items:
+        hashes.append({"file_name": file_name, "sha256": _sha256(content)})
+    return hashes
+
+
 @router.get("/health")
 async def ylookup_health() -> dict[str, Any]:
     return {
@@ -122,13 +129,7 @@ async def analyse_ylookup_dataset(
         )
 
     result["evidence"] = {
-        "pdf_sha256": [
-            {"file_name": file_name, "sha256": _sha256(content)}
-            for file_name, content in pdf_items
-        ],
-        "excel_sha256": [
-            {"file_name": file_name, "sha256": _sha256(content)}
-            for file_name, content in workbook_items
-        ],
+        "pdf_sha256": _hash_items(pdf_items),
+        "excel_sha256": _hash_items(workbook_items),
     }
     return result
