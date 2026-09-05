@@ -6,6 +6,29 @@
   display: grid;
   gap: 18px;
 }
+/* When a sponsor report is visible, stop treating it like a third grid cell.
+   The upload copy/form remain responsive, while the generated report always
+   gets its own full-width row. */
+.upload-section:has(#dataset-results:not(.hidden)) {
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.upload-section:has(#dataset-results:not(.hidden)) > .upload-copy {
+  flex: 1 1 380px;
+  min-width: 0;
+}
+.upload-section:has(#dataset-results:not(.hidden)) > .upload-card {
+  flex: 1 1 520px;
+  min-width: 0;
+}
+.upload-section:has(#dataset-results:not(.hidden)) > #dataset-results {
+  flex: 0 0 100%;
+  width: 100% !important;
+  max-width: none !important;
+  margin-inline: 0 !important;
+  align-self: stretch;
+}
 .dataset-title {
   padding: 26px 28px;
   border: 1px solid #d6d2c8;
