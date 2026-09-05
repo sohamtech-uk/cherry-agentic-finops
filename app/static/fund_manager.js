@@ -50,7 +50,7 @@
   }
 
   function demoToken() {
-    return q("#fm-demo-token")?.value.trim() || "";
+    return q("#fm-demo-token")?.value.trim() || q("#upload-token")?.value.trim() || "";
   }
 
   function injectStyles() {
