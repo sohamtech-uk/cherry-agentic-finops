@@ -34,6 +34,7 @@ def test_homepage_is_served() -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert "Close capital calls" in response.text
+    assert "Clear uploaded data &amp; memory" in response.text
 
 
 def test_private_markets_demo_surfaces_work_queue() -> None:
@@ -50,3 +51,20 @@ def test_awaiting_cash_demo_assigns_investor_operations() -> None:
 
     assert body["analysis"]["action"] == "request_evidence"
     assert body["analysis"]["work_items"][0]["owner"] == "Investor operations"
+
+
+def test_clear_memory_endpoint_removes_ephemeral_workflows() -> None:
+    client.post("/api/session/clear-memory")
+    workflow = client.post("/api/demo/autonomous").json()
+    assert workflow["workflow_id"]
+    assert client.get("/api/workflows").json()
+
+    response = client.post("/api/session/clear-memory")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "cleared"
+    assert body["persistence_backend"] == "memory"
+    assert body["cleared_workflow_records"] >= 1
+    assert body["raw_uploads_retained"] is False
+    assert client.get("/api/workflows").json() == []

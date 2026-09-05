@@ -37,6 +37,7 @@ function renderTasks(tasks, action) {
 }
 function renderCase(payload) {
   state.case = payload; const extraction = payload.extraction; const analysis = payload.analysis; const code = extraction.currency; const [actionLabel, actionClass] = actionCopy(analysis.action);
+  $("#dashboard")?.classList.remove("hidden");
   const studioStatus = payload.agent_studio?.status ? ` · Agent Studio ${titleise(payload.agent_studio.status)}` : "";
   const cashStatus = payload.cash_feed_supplied === false ? " · Cash evidence pending" : "";
   $("#case-title").textContent = `${extraction.investor_name || "Unknown investor"} · ${extraction.notice_id || "Unreferenced notice"}`;
@@ -118,6 +119,40 @@ async function loadConfig() {
 function downloadReview() {
   if (!state.case) return; const blob = new Blob([JSON.stringify(state.case, null, 2)], { type: "application/json" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${state.case.case_id || "private-markets-case"}-review.json`; link.click(); URL.revokeObjectURL(link.href); toast("Review brief downloaded with findings and assigned work.");
 }
+function resetEvidenceWorkspace() {
+  state.case = null;
+  state.batchCases = [];
+  renderBatchPicker([]);
+  $("#upload-form")?.reset();
+  updateFileCounts();
+  const datasetResults = $("#dataset-results");
+  if (datasetResults) {
+    datasetResults.innerHTML = "";
+    datasetResults.classList.add("hidden");
+  }
+  $("#dashboard")?.classList.add("hidden");
+  if ($("#download-review")) $("#download-review").disabled = true;
+  $$('[data-scenario]').forEach((button) => button.classList.remove("active"));
+  if ($("#upload-message")) {
+    $("#upload-message").textContent = "Uploaded data and rendered analysis cleared. Select new evidence to start again.";
+  }
+}
+async function clearUploadedMemory() {
+  const confirmed = window.confirm("Clear selected files, rendered analysis and ephemeral server workflow memory?");
+  if (!confirmed) return;
+  const token = $("#upload-token")?.value.trim();
+  const headers = token ? { "X-Cherry-Demo-Token": token } : {};
+  loading(true);
+  try {
+    const result = await api("/api/session/clear-memory", { method: "POST", headers });
+    resetEvidenceWorkspace();
+    toast(`Memory cleared · ${result.cleared_workflow_records || 0} server workflow record${Number(result.cleared_workflow_records || 0) === 1 ? "" : "s"} removed.`);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    loading(false);
+  }
+}
 async function uploadEvidence(event) {
   event.preventDefault();
   const pdfFiles = [...$("#capital-call-input").files];
@@ -170,6 +205,7 @@ function bindEvents() {
   $$('[data-scenario]').forEach((button) => button.addEventListener("click", () => runScenario(button.dataset.scenario)));
   $("#download-review").addEventListener("click", downloadReview);
   $("#upload-form").addEventListener("submit", uploadEvidence);
+  $("#clear-upload-memory").addEventListener("click", clearUploadedMemory);
   $("#capital-call-input").addEventListener("change", updateFileCounts);
   $("#commitments-input").addEventListener("change", updateFileCounts);
   $("#batch-case-select").addEventListener("change", (event) => {

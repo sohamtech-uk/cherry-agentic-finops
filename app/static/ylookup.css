@@ -159,6 +159,23 @@
   color: #56615c;
   font-size: 10px;
 }
+.clear-memory-button {
+  color: #8c2e1d;
+  border-color: #e1b3a9;
+  background: #fff0eb;
+  box-shadow: none;
+}
+.clear-memory-button:hover {
+  border-color: #c94d35;
+  background: #ffe4dc;
+}
+.memory-note {
+  grid-column: 1 / -1;
+  margin: -2px 0 0;
+  color: #6b5a55;
+  font-size: 9px;
+  line-height: 1.5;
+}
 @media (max-width: 1000px) {
   .dataset-metrics { grid-template-columns: repeat(3, 1fr); }
 }
