@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
-from datetime import date
-from typing import Annotated
+import os
+from datetime import UTC, date, datetime
+from typing import Annotated, Any
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from pydantic import ValidationError
 
 from app.config import get_settings
+from app.connectors import CherryMoneyConnector
 from app.private_markets import (
     ApprovedBankDetails,
     CapitalCallExtraction,
@@ -15,15 +19,51 @@ from app.private_markets import (
     GeminiCapitalCallExtractor,
     GeminiPrivateMarketsUnavailable,
     LPCommitment,
+    PrivateMarketsAnalysis,
     PrivateMarketsDataset,
-    analyse_private_markets_case,
     parse_cash_csv,
     parse_commitment_workbook,
 )
+from app.private_markets_strict import analyse_private_markets_case_strict
 
 settings = get_settings()
 extractor = GeminiCapitalCallExtractor(settings)
+cherry_money = CherryMoneyConnector(settings)
 router = APIRouter(prefix="/api/private-markets", tags=["private-markets"])
+
+
+def _require_real_data_access(token: str | None) -> None:
+    expected = os.getenv("CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN", "").strip()
+    if settings.environment != "production" and not expected:
+        return
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Real private-markets uploads are disabled until "
+                "CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN is configured."
+            ),
+        )
+    if not token or not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=401, detail="Valid private-markets demo token required.")
+
+
+def _sha256(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def _analysis_hash(analysis: PrivateMarketsAnalysis) -> str:
+    payload = json.dumps(
+        analysis.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return _sha256(payload)
+
+
+def _case_id(*hashes: str) -> str:
+    material = "|".join(hashes).encode("utf-8")
+    return f"PM-{_sha256(material)[:12].upper()}"
 
 
 def _demo_case(
@@ -99,11 +139,15 @@ def _demo_case(
 
 @router.get("/health")
 async def private_markets_health() -> dict[str, object]:
+    expected_token = bool(os.getenv("CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN", "").strip())
     return {
         "status": "ok",
+        "controls": "strict-v1",
         "google_ready": settings.google_ready,
+        "cherry_money_read_only_configured": cherry_money.configured,
         "accepted_commitment_format": "xlsx",
         "accepted_cash_format": "utf-8 csv",
+        "real_upload_protected": settings.environment == "production" or expected_token,
         "financial_boundary": "Decision support only; no payment initiation.",
     }
 
@@ -114,7 +158,7 @@ async def private_markets_demo(scenario: str) -> dict[str, object]:
         call, dataset, transactions = _demo_case(scenario)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    analysis = analyse_private_markets_case(
+    analysis = analyse_private_markets_case_strict(
         call,
         dataset,
         transactions,
@@ -124,6 +168,7 @@ async def private_markets_demo(scenario: str) -> dict[str, object]:
         "case_id": "CPGF-2026-03-LP001",
         "scenario": scenario,
         "synthetic": True,
+        "controls_version": "strict-v1",
         "source_files": [
             "Capital call notice",
             "LP commitment workbook",
@@ -132,6 +177,32 @@ async def private_markets_demo(scenario: str) -> dict[str, object]:
         "extraction": call.model_dump(mode="json"),
         "analysis": analysis.model_dump(mode="json"),
         "transactions": [transaction.model_dump(mode="json") for transaction in transactions],
+        "evidence": {
+            "analysis_sha256": _analysis_hash(analysis),
+            "generated_at": datetime.now(UTC).isoformat(),
+        },
+    }
+
+
+@router.get("/cherry-money/snapshot")
+async def cherry_money_snapshot(
+    x_cherry_demo_token: Annotated[
+        str | None,
+        Header(alias="X-Cherry-Demo-Token"),
+    ] = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    _require_real_data_access(x_cherry_demo_token)
+    if not cherry_money.configured:
+        raise HTTPException(status_code=503, detail="Cherry Money read-only bridge is not configured.")
+    try:
+        snapshot = await cherry_money.finance_snapshot(limit=limit)
+    except Exception as exc:  # pragma: no cover - depends on external service
+        raise HTTPException(status_code=502, detail="Cherry Money read-only bridge unavailable.") from exc
+    return {
+        "read_only": True,
+        "source": "Cherry Money /api/webmcp/bootstrap",
+        "snapshot": snapshot,
     }
 
 
@@ -164,7 +235,12 @@ async def analyse_private_markets(
         str | None,
         Form(description="Optional YYYY-MM-DD date for due-date controls."),
     ] = None,
+    x_cherry_demo_token: Annotated[
+        str | None,
+        Header(alias="X-Cherry-Demo-Token"),
+    ] = None,
 ) -> dict[str, object]:
+    _require_real_data_access(x_cherry_demo_token)
     max_bytes = settings.max_upload_mb * 1024 * 1024
     workbook_content = await commitments.read()
     cash_content = await cash.read()
@@ -180,7 +256,9 @@ async def analyse_private_markets(
     except (ValueError, ValidationError) as exc:
         raise HTTPException(status_code=422, detail=f"Invalid supporting data: {exc}") from exc
 
+    notice_content: bytes
     if capital_call_json:
+        notice_content = capital_call_json.encode("utf-8")
         try:
             payload = json.loads(capital_call_json)
             payload.setdefault("source", "manual")
@@ -195,8 +273,8 @@ async def analyse_private_markets(
                 status_code=422,
                 detail="Provide either capital_call or capital_call_json.",
             )
-        content = await capital_call.read()
-        if len(content) > max_bytes:
+        notice_content = await capital_call.read()
+        if len(notice_content) > max_bytes:
             raise HTTPException(
                 status_code=413,
                 detail=f"Capital-call document exceeds the {settings.max_upload_mb} MB upload limit.",
@@ -212,7 +290,7 @@ async def analyse_private_markets(
             raise HTTPException(status_code=415, detail=f"Unsupported document type: {mime_type}")
         try:
             call = await extractor.extract(
-                content,
+                notice_content,
                 mime_type,
                 capital_call.filename or "capital-call",
             )
@@ -228,13 +306,26 @@ async def analyse_private_markets(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="as_of_date must be YYYY-MM-DD.") from exc
 
-    analysis = analyse_private_markets_case(
+    analysis = analyse_private_markets_case_strict(
         call,
         dataset,
         transactions,
         as_of_date=parsed_as_of,
     )
+    input_hashes = {
+        "capital_call": _sha256(notice_content),
+        "commitments": _sha256(workbook_content),
+        "cash": _sha256(cash_content),
+    }
     return {
+        "case_id": _case_id(*input_hashes.values()),
+        "synthetic": False,
+        "controls_version": "strict-v1",
         "extraction": call.model_dump(mode="json"),
         "analysis": analysis.model_dump(mode="json"),
+        "evidence": {
+            "input_sha256": input_hashes,
+            "analysis_sha256": _analysis_hash(analysis),
+            "generated_at": datetime.now(UTC).isoformat(),
+        },
     }
