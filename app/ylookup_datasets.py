@@ -264,9 +264,7 @@ def analyse_bank_statement_workbook(
                         "matched_project_code": matched_project,
                         "resolved_position": resolved_position,
                         "classification": classification,
-                        "related_party_match": _text(
-                            _cell(row, indexes, "Related Party Match")
-                        ),
+                        "related_party_match": _text(_cell(row, indexes, "Related Party Match")),
                         "reasons": reasons,
                         "narrative": _text(_cell(row, indexes, "Narrative"))[:500],
                         "reconciliation_guidance": [
