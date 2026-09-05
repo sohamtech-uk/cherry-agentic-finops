@@ -38,15 +38,16 @@ function renderTasks(tasks, action) {
 function renderCase(payload) {
   state.case = payload; const extraction = payload.extraction; const analysis = payload.analysis; const code = extraction.currency; const [actionLabel, actionClass] = actionCopy(analysis.action);
   const studioStatus = payload.agent_studio?.status ? ` · Agent Studio ${titleise(payload.agent_studio.status)}` : "";
+  const cashStatus = payload.cash_feed_supplied === false ? " · Cash evidence pending" : "";
   $("#case-title").textContent = `${extraction.investor_name || "Unknown investor"} · ${extraction.notice_id || "Unreferenced notice"}`;
-  $("#case-subtitle").textContent = `${extraction.fund_name} · ${payload.synthetic ? "Synthetic demonstration" : "Uploaded evidence"}${payload.source_pdf ? ` · ${payload.source_pdf}` : ""}${studioStatus}`;
+  $("#case-subtitle").textContent = `${extraction.fund_name} · ${payload.synthetic ? "Synthetic demonstration" : "Uploaded evidence"}${payload.source_pdf ? ` · ${payload.source_pdf}` : ""}${cashStatus}${studioStatus}`;
   $("#decision-badge").textContent = actionLabel; $("#decision-badge").className = `decision-badge ${actionClass}`;
   $("#metric-expected").textContent = money(analysis.expected_amount, code); $("#metric-received").textContent = money(analysis.received_amount, code); $("#metric-progress").textContent = `${analysis.funding_progress_percent}% funded`; $("#metric-outstanding").textContent = money(analysis.outstanding_amount, code); $("#metric-variance").textContent = `${money(analysis.variance_amount, code)} net variance`; $("#outstanding-card").classList.toggle("metric-alert", Number(analysis.outstanding_amount) > 0);
   const due = analysis.days_to_due; $("#metric-due").textContent = due == null ? "—" : due < 0 ? `${Math.abs(due)}d overdue` : due === 0 ? "Due today" : `${due} day${due === 1 ? "" : "s"}`; $("#metric-due-date").textContent = dateLabel(analysis.due_date);
   $("#extraction-confidence").textContent = `${extraction.confidence}% confidence`; $("#notice-fund").textContent = extraction.fund_name; $("#notice-id").textContent = extraction.notice_id || "—"; $("#notice-investor").textContent = extraction.investor_name || "Not stated"; $("#notice-due").textContent = dateLabel(extraction.due_date); $("#notice-amount").textContent = money(extraction.current_call, code); $("#notice-reference").textContent = extraction.payment_reference || "Not stated"; $("#notice-bank").textContent = extraction.bank_name || "Bank not stated"; $("#notice-account").textContent = extraction.account_last4 ? `•••• ${extraction.account_last4}` : "Account incomplete";
   renderFindings(analysis.findings || []); renderTasks(analysis.work_items || [], analysis.action);
   const total = Number(analysis.total_commitment || extraction.total_commitment || 0); const before = Number(analysis.called_before_current || extraction.called_before_current || 0); const current = Number(extraction.current_call || 0);
-  $("#total-commitment").textContent = money(total, code); $("#called-before").textContent = money(before, code); $("#current-call").textContent = money(current, code); $("#remaining-call").textContent = money(analysis.remaining_commitment, code); $("#called-bar").style.width = total ? `${Math.min(100, before / total * 100)}%` : "0%"; $("#current-bar").style.width = total ? `${Math.min(100, current / total * 100)}%` : "0%"; $("#ledger-status").textContent = `${analysis.controls_passed} passed`; $("#matched-transactions").textContent = analysis.matched_transaction_ids?.length ? analysis.matched_transaction_ids.join(", ") : "No matching booked cash"; $("#download-review").disabled = false;
+  $("#total-commitment").textContent = money(total, code); $("#called-before").textContent = money(before, code); $("#current-call").textContent = money(current, code); $("#remaining-call").textContent = money(analysis.remaining_commitment, code); $("#called-bar").style.width = total ? `${Math.min(100, before / total * 100)}%` : "0%"; $("#current-bar").style.width = total ? `${Math.min(100, current / total * 100)}%` : "0%"; $("#ledger-status").textContent = `${analysis.controls_passed} passed`; $("#matched-transactions").textContent = payload.cash_feed_supplied === false ? "Cash evidence not supplied" : analysis.matched_transaction_ids?.length ? analysis.matched_transaction_ids.join(", ") : "No matching booked cash"; $("#download-review").disabled = false;
 }
 function renderBatchPicker(cases) {
   state.batchCases = Array.isArray(cases) ? cases : [];
@@ -84,29 +85,31 @@ async function uploadEvidence(event) {
   event.preventDefault();
   const pdfFiles = [...$("#capital-call-input").files];
   const excelFiles = [...$("#commitments-input").files];
-  const jsonFile = $("#cash-input").files[0];
-  if (!pdfFiles.length || !excelFiles.length || !jsonFile) {
-    toast("Select at least one PDF, one Excel workbook and one JSON file.", true);
+  const jsonFile = $("#cash-input").files[0] || null;
+  if (!pdfFiles.length || !excelFiles.length) {
+    toast("Select at least one PDF and one Excel workbook.", true);
     return;
   }
   const form = new FormData();
   pdfFiles.forEach((file) => form.append("capital_call", file));
   excelFiles.forEach((file) => form.append("commitments", file));
-  form.append("fund_json", jsonFile);
+  if (jsonFile) form.append("fund_json", jsonFile);
   if ($("#as-of-input").value) form.append("as_of_date", $("#as-of-input").value);
   const token = $("#upload-token")?.value.trim();
   const headers = token ? { "X-Cherry-Demo-Token": token } : {};
-  $("#upload-message").textContent = `Processing ${pdfFiles.length} PDF${pdfFiles.length === 1 ? "" : "s"}, ${excelFiles.length} Excel workbook${excelFiles.length === 1 ? "" : "s"} and one JSON cash feed…`;
+  const cashMessage = jsonFile ? " with JSON cash evidence" : " without cash JSON";
+  $("#upload-message").textContent = `Processing ${pdfFiles.length} PDF${pdfFiles.length === 1 ? "" : "s"} and ${excelFiles.length} Excel workbook${excelFiles.length === 1 ? "" : "s"}${cashMessage}…`;
   loading(true);
   try {
     const result = await api("/api/private-markets/analyse-integrated", { method: "POST", body: form, headers });
     const cases = Array.isArray(result.cases) && result.cases.length ? result.cases : [result];
     renderBatchPicker(cases);
     renderCase({ ...cases[0], synthetic: false, transactions: [] });
-    const batch = result.batch || { pdf_count: pdfFiles.length, excel_count: excelFiles.length, case_count: cases.length };
-    $("#upload-message").textContent = `Batch ${result.batch_id || result.case_id}: ${batch.case_count} governed case${batch.case_count === 1 ? "" : "s"} from ${batch.pdf_count} PDF${batch.pdf_count === 1 ? "" : "s"} + ${batch.excel_count} Excel workbook${batch.excel_count === 1 ? "" : "s"}.`;
+    const batch = result.batch || { pdf_count: pdfFiles.length, excel_count: excelFiles.length, case_count: cases.length, json_count: jsonFile ? 1 : 0 };
+    const cashSummary = batch.json_count ? "cash evidence included" : "cash evidence pending";
+    $("#upload-message").textContent = `Batch ${result.batch_id || result.case_id}: ${batch.case_count} governed case${batch.case_count === 1 ? "" : "s"} from ${batch.pdf_count} PDF${batch.pdf_count === 1 ? "" : "s"} + ${batch.excel_count} Excel workbook${batch.excel_count === 1 ? "" : "s"}; ${cashSummary}.`;
     $("#control-room").scrollIntoView({ behavior: "smooth" });
-    toast(`${batch.case_count} case${batch.case_count === 1 ? "" : "s"} analysed from the selected evidence batch.`);
+    toast(`${batch.case_count} case${batch.case_count === 1 ? "" : "s"} analysed · ${cashSummary}.`);
   } catch (error) {
     $("#upload-message").textContent = error.message;
     renderBatchPicker([]);

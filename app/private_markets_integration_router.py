@@ -13,10 +13,14 @@ from pydantic import ValidationError
 from app.config import get_settings
 from app.fundops_studio import FundOpsStudioConnector, FundOpsStudioUnavailable
 from app.private_markets import (
+    FindingSeverity,
+    FundCashTransaction,
     GeminiCapitalCallExtractor,
     GeminiPrivateMarketsUnavailable,
+    PrivateMarketsAction,
     PrivateMarketsAnalysis,
     PrivateMarketsDataset,
+    WorkItemPriority,
     parse_commitment_workbook,
 )
 from app.private_markets_io import parse_cash_json
@@ -29,6 +33,7 @@ router = APIRouter(prefix="/api/private-markets", tags=["private-markets-integra
 
 MAX_PDF_FILES = 25
 MAX_EXCEL_FILES = 20
+NO_JSON_HASH = "NO_CASH_JSON"
 
 
 def _require_real_data_access(token: str | None) -> None:
@@ -82,6 +87,39 @@ def _merge_datasets(datasets: list[PrivateMarketsDataset]) -> PrivateMarketsData
     )
 
 
+def _mark_cash_evidence_pending(analysis: PrivateMarketsAnalysis) -> None:
+    """Distinguish an omitted cash feed from a verified missing receipt."""
+
+    for finding in analysis.findings:
+        if finding.code != "cash.missing":
+            continue
+        finding.code = "cash.evidence_not_supplied"
+        finding.severity = FindingSeverity.WARNING
+        finding.title = "Cash evidence not supplied"
+        finding.detail = (
+            "PDF and Excel controls were completed without a cash/bank export. "
+            "Attach cash evidence later to complete receipt reconciliation."
+        )
+        finding.expected = None
+        finding.observed = None
+
+    for work_item in analysis.work_items:
+        if work_item.code != "resolve_cash_shortfall":
+            continue
+        work_item.code = "attach_cash_evidence"
+        work_item.priority = WorkItemPriority.NORMAL
+        work_item.title = "Attach fund cash evidence"
+        work_item.instruction = (
+            "Add a JSON cash/bank export when available. Document and ledger analysis is complete; "
+            "cash reconciliation remains pending."
+        )
+
+    analysis.action = PrivateMarketsAction.REQUEST_EVIDENCE
+    analysis.controls_summary = (
+        f"{analysis.controls_passed} controls passed; cash reconciliation is pending evidence."
+    )
+
+
 async def _agent_studio_result(payload: dict[str, Any]) -> dict[str, Any]:
     if not studio.configured:
         return {
@@ -105,7 +143,8 @@ async def integration_health() -> dict[str, Any]:
     response: dict[str, Any] = {
         "status": "ok",
         "input_contract": ["pdf", "excel", "json"],
-        "input_multiplicity": {"pdf": "many", "excel": "many", "json": "one"},
+        "input_required": {"pdf": True, "excel": True, "json": False},
+        "input_multiplicity": {"pdf": "many", "excel": "many", "json": "zero_or_one"},
         "max_pdf_files": MAX_PDF_FILES,
         "max_excel_files": MAX_EXCEL_FILES,
         "fundops_studio_configured": studio.configured,
@@ -134,9 +173,9 @@ async def analyse_integrated_private_markets_case(
         File(description="One or more LP commitment/control workbooks (.xlsx)"),
     ],
     fund_json: Annotated[
-        UploadFile,
-        File(description="Fund cash/bank transactions (.json)"),
-    ],
+        UploadFile | None,
+        File(description="Optional fund cash/bank transactions (.json)"),
+    ] = None,
     as_of_date: Annotated[
         str | None,
         Form(description="Optional YYYY-MM-DD control date."),
@@ -146,12 +185,13 @@ async def analyse_integrated_private_markets_case(
         Header(alias="X-Cherry-Demo-Token"),
     ] = None,
 ) -> dict[str, object]:
-    """Run a batch PDF + Excel + JSON private-markets workflow.
+    """Run a batch private-markets workflow with optional cash evidence.
 
     Every PDF becomes an independently governed case. All supplied commitment/control workbooks are
-    parsed and merged into one supporting dataset, while the JSON cash feed is shared across the
-    batch. Cherry applies strict deterministic controls to each extracted notice and optionally
-    enriches each case through FundOps Agent Studio. Cherry remains the financial control authority.
+    parsed and merged into one supporting dataset. When a JSON cash feed is supplied it is shared
+    across the batch; when it is omitted Cherry still extracts and validates the notices and ledger
+    evidence, while cash-dependent controls remain unresolved and request supporting evidence rather
+    than blocking the upload itself. Cherry remains the financial control authority.
     """
 
     _require_real_data_access(x_cherry_demo_token)
@@ -205,15 +245,26 @@ async def analyse_integrated_private_markets_case(
             raise HTTPException(status_code=415, detail=f"{file_name!r} must be an .xlsx workbook.")
         workbook_items.append((file_name, content))
 
-    json_file_name = fund_json.filename or "fund-cash.json"
-    json_content = await fund_json.read()
-    if len(json_content) > max_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"JSON input exceeds the {settings.max_upload_mb} MB upload limit.",
-        )
-    if not json_file_name.lower().endswith(".json"):
-        raise HTTPException(status_code=415, detail="fund_json must be a .json file.")
+    json_file_name: str | None = None
+    json_content: bytes | None = None
+    transactions: list[FundCashTransaction] = []
+    if fund_json is not None:
+        json_file_name = fund_json.filename or "fund-cash.json"
+        json_content = await fund_json.read()
+        if len(json_content) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"JSON input exceeds the {settings.max_upload_mb} MB upload limit.",
+            )
+        if not json_file_name.lower().endswith(".json"):
+            raise HTTPException(status_code=415, detail="fund_json must be a .json file.")
+        try:
+            transactions = parse_cash_json(json_content)
+        except (ValueError, ValidationError) as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid JSON supporting data: {exc}",
+            ) from exc
 
     parsed_as_of: date | None = None
     if as_of_date:
@@ -232,19 +283,18 @@ async def analyse_integrated_private_markets_case(
                 detail=f"Invalid commitment workbook {file_name!r}: {exc}",
             ) from exc
 
-    try:
-        transactions = parse_cash_json(json_content)
-    except (ValueError, ValidationError) as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid JSON supporting data: {exc}") from exc
-
     dataset = _merge_datasets(datasets)
     excel_bundle_hash = _bundle_hash(workbook_items)
-    json_hash = _sha256(json_content)
-    sources_excel = [
+    json_hash = _sha256(json_content) if json_content is not None else NO_JSON_HASH
+    sources_excel: list[dict[str, str | None]] = [
         {"kind": "excel", "file_name": file_name, "sha256": _sha256(content)}
         for file_name, content in workbook_items
     ]
-    json_source = {"kind": "json", "file_name": json_file_name, "sha256": json_hash}
+    json_source: dict[str, str | None] | None = (
+        {"kind": "json", "file_name": json_file_name, "sha256": json_hash}
+        if json_file_name is not None
+        else None
+    )
 
     cases: list[dict[str, object]] = []
     for pdf_file_name, pdf_content in pdf_items:
@@ -264,13 +314,17 @@ async def analyse_integrated_private_markets_case(
             transactions,
             as_of_date=parsed_as_of,
         )
+        if json_content is None:
+            _mark_cash_evidence_pending(analysis)
+
         pdf_hash = _sha256(pdf_content)
         case_id = _case_id(pdf_hash, excel_bundle_hash, json_hash)
-        sources = [
+        sources: list[dict[str, str | None]] = [
             {"kind": "pdf", "file_name": pdf_file_name, "sha256": pdf_hash},
             *sources_excel,
-            json_source,
         ]
+        if json_source is not None:
+            sources.append(json_source)
         studio_payload: dict[str, Any] = {
             "case_id": case_id,
             "capital_call": call.model_dump(mode="json"),
@@ -283,20 +337,22 @@ async def analyse_integrated_private_markets_case(
             "sources": sources,
         }
         studio_result = await _agent_studio_result(studio_payload)
+        input_sha256: dict[str, str | None] = {
+            "pdf": pdf_hash,
+            "excel_bundle": excel_bundle_hash,
+            "json": json_hash if json_content is not None else None,
+        }
         cases.append(
             {
                 "case_id": case_id,
                 "source_pdf": pdf_file_name,
                 "synthetic": False,
+                "cash_feed_supplied": json_content is not None,
                 "extraction": call.model_dump(mode="json"),
                 "analysis": analysis.model_dump(mode="json"),
                 "agent_studio": studio_result,
                 "evidence": {
-                    "input_sha256": {
-                        "pdf": pdf_hash,
-                        "excel_bundle": excel_bundle_hash,
-                        "json": json_hash,
-                    },
+                    "input_sha256": input_sha256,
                     "sources": sources,
                     "analysis_sha256": _analysis_hash(analysis),
                     "generated_at": datetime.now(UTC).isoformat(),
@@ -331,11 +387,12 @@ async def analyse_integrated_private_markets_case(
         "batch": {
             "pdf_count": len(pdf_items),
             "excel_count": len(workbook_items),
-            "json_count": 1,
+            "json_count": 1 if json_content is not None else 0,
             "case_count": len(cases),
             "action_counts": action_counts,
         },
         "cases": cases,
         "input_contract": ["pdf", "excel", "json"],
-        "input_multiplicity": {"pdf": "many", "excel": "many", "json": "one"},
+        "input_required": {"pdf": True, "excel": True, "json": False},
+        "input_multiplicity": {"pdf": "many", "excel": "many", "json": "zero_or_one"},
     }
