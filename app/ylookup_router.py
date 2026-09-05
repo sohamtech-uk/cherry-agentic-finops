@@ -9,7 +9,7 @@ from fastapi import APIRouter, Body, File, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from app.config import get_settings
-from app.ylookup_datasets import analyse_ylookup_dataset_batch
+from app.private_markets_dataset_analysis import analyse_private_markets_dataset_batch
 from app.ylookup_reports import build_ylookup_excel_report, build_ylookup_pdf_report
 
 settings = get_settings()
@@ -24,7 +24,7 @@ def _require_upload_access(token: str | None) -> None:
     if settings.environment != "production" and not expected:
         return
     if not expected:
-        raise HTTPException(status_code=503, detail="Ylookup uploads are not configured.")
+        raise HTTPException(status_code=503, detail="Private-markets uploads are not configured.")
     if not token or not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=401, detail="Valid private-markets demo token required.")
 
@@ -61,11 +61,11 @@ async def ylookup_health() -> dict[str, Any]:
 async def analyse_ylookup_dataset(
     documents: Annotated[
         list[UploadFile] | None,
-        File(description="Optional Ylookup PDF documents, including bank statements"),
+        File(description="Optional private-markets PDF documents, including bank statements"),
     ] = None,
     workbooks: Annotated[
         list[UploadFile] | None,
-        File(description="One or more Ylookup XLSX workbooks"),
+        File(description="One or more private-markets XLSX workbooks"),
     ] = None,
     x_cherry_demo_token: Annotated[
         str | None,
@@ -115,10 +115,7 @@ async def analyse_ylookup_dataset(
         workbook_items.append((file_name, content))
 
     try:
-        result = analyse_ylookup_dataset_batch(
-            workbook_items,
-            [file_name for file_name, _ in pdf_items],
-        )
+        result = analyse_private_markets_dataset_batch(workbook_items, pdf_items)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -127,7 +124,7 @@ async def analyse_ylookup_dataset(
             status_code=422,
             detail={
                 "code": "not_ylookup_dataset",
-                "message": "No recognised Ylookup sponsor workbook contract was detected.",
+                "message": "No recognised private-markets workbook contract was detected.",
             },
         )
 
@@ -143,7 +140,7 @@ async def download_ylookup_report(
     report_format: str,
     result: Annotated[
         dict[str, Any],
-        Body(description="Previously returned /api/ylookup/analyse result"),
+        Body(description="Previously returned private-markets dataset analysis result"),
     ],
     x_cherry_demo_token: Annotated[
         str | None,
@@ -159,20 +156,20 @@ async def download_ylookup_report(
     _require_upload_access(x_cherry_demo_token)
     if result.get("workflow_type") != "ylookup_dataset_batch":
         raise HTTPException(
-            status_code=422, detail="A Ylookup dataset analysis result is required."
+            status_code=422, detail="A private-markets dataset analysis result is required."
         )
 
     if report_format == "xlsx":
         content = build_ylookup_excel_report(result)
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        filename = "cherry-fundops-ylookup-review.xlsx"
+        filename = "cherry-fundops-private-markets-review.xlsx"
     elif report_format == "pdf":
         try:
             content = build_ylookup_pdf_report(result)
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         media_type = "application/pdf"
-        filename = "cherry-fundops-ylookup-review.pdf"
+        filename = "cherry-fundops-private-markets-review.pdf"
     else:
         raise HTTPException(status_code=404, detail="Report format must be pdf or xlsx.")
 
