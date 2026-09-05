@@ -167,6 +167,35 @@ The integrated JSON parser accepts either a top-level transaction array or:
 Common aliases such as `id`, `date`, `value_date`, `amount_gbp`, `payment_reference` and `narrative`
 are normalised before strict validation.
 
+## NAV Quality Controller
+
+A second, independent deterministic reviewer for a fund administrator's NAV pack, targeting the
+top problem identified from the sponsor call transcripts: a draft NAV that takes several review
+rounds before a manager can trust it.
+
+```text
+POST /api/nav-quality/review
+```
+
+Multipart inputs:
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `nav_summary` | yes | administrator's reported NAV summary `.json` (balance sheet, NAV bridge, investor capital) |
+| `source_ledger` | no | investor-level GL export `.xlsx`, to independently recompute the balance sheet, NAV and investor capital |
+| `side_letter_rules` | no | structured side-letter terms `.json` (e.g. management fee offsets called capital) |
+
+Every check is plain `Decimal` arithmetic, never an LLM: does the balance sheet foot to equity, does
+the NAV bridge (opening + contributions + investment movement + income − expenses − distributions)
+foot to the reported closing NAV, does an independent recalculation from the source ledger agree with
+the reported NAV, does each investor's capital account agree with the ledger (and any side-letter
+term that applies to it)? The response is a recommended action
+(`ready_to_submit` / `needs_review` / `return_to_administrator`) plus findings, work items and
+SHA-256 evidence hashes for every input — it never posts a correcting entry or amends the NAV itself.
+
+This ships as a standalone endpoint (see `/api/docs`); it is not yet wired into the shared
+auto-detect upload form described above.
+
 ## Run locally
 
 Python 3.11+:
@@ -188,6 +217,7 @@ http://localhost:8080
 http://localhost:8080/api/docs
 http://localhost:8080/api/private-markets/health
 http://localhost:8080/api/private-markets/integration/health
+http://localhost:8080/api/nav-quality/health
 ```
 
 Generate backup fixtures:
@@ -227,6 +257,11 @@ app/private_markets_strict.py                fail-closed deterministic controls
 app/private_markets_io.py                    JSON cash parser
 app/private_markets_router.py                legacy/demo and Cherry Money routes
 app/private_markets_integration_router.py    PDF + Excel + JSON orchestration
+app/nav_quality.py                           NAV Quality Controller schemas, GL parser and checks
+app/nav_quality_router.py                    NAV Quality Controller endpoint
+app/nav_reconciliation.py                    quick ad hoc balance-sheet/NAV-bridge checks
+app/reconciliation_tools.py                  atomic agent tools (read/sum/compare/bridge)
+agents/cherry_finops/agent.py                Google ADK agents (reconciliation_specialist and peers)
 app/fundops_studio.py                        Agent Studio microservice client
 app/static/                                  judge-facing control-room UI
 fixtures/private_markets/                    synthetic backup data

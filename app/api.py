@@ -15,6 +15,7 @@ from app.config import get_settings
 from app.container import get_engine
 from app.document_ai import GeminiDocumentExtractor, GeminiUnavailable
 from app.models import ApprovalRequest, BankTransaction, RejectionRequest
+from app.nav_quality_router import router as nav_quality_router
 from app.private_markets_integration_router import router as private_markets_integration_router
 from app.private_markets_router import router as private_markets_router
 from app.session_router import router as session_router
@@ -55,6 +56,7 @@ app.include_router(private_markets_router)
 app.include_router(private_markets_integration_router)
 app.include_router(ylookup_router)
 app.include_router(session_router)
+app.include_router(nav_quality_router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
