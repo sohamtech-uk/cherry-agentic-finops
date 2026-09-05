@@ -68,8 +68,10 @@ function renderBatchPicker(cases) {
 function updateFileCounts() {
   const pdfCount = $("#capital-call-input")?.files.length || 0;
   const excelCount = $("#commitments-input")?.files.length || 0;
+  const bankStatementCount = $("#bank-statements-input")?.files.length || 0;
   if ($("#capital-call-count")) $("#capital-call-count").textContent = pdfCount ? `${pdfCount} PDF${pdfCount === 1 ? "" : "s"} selected` : "Select one or more PDFs";
   if ($("#commitments-count")) $("#commitments-count").textContent = excelCount ? `${excelCount} workbook${excelCount === 1 ? "" : "s"} selected` : "Select one or more workbooks";
+  if ($("#bank-statements-count")) $("#bank-statements-count").textContent = bankStatementCount ? `${bankStatementCount} statement${bankStatementCount === 1 ? "" : "s"} selected` : "Select one or more bank statement PDFs";
 }
 async function runScenario(scenario, shouldScroll = true) {
   loading(true); $$('[data-scenario]').forEach((button) => button.classList.toggle("active", button.dataset.scenario === scenario));
@@ -86,6 +88,7 @@ async function uploadEvidence(event) {
   const pdfFiles = [...$("#capital-call-input").files];
   const excelFiles = [...$("#commitments-input").files];
   const jsonFile = $("#cash-input").files[0] || null;
+  const bankStatementFiles = [...$("#bank-statements-input").files];
   if (!pdfFiles.length || !excelFiles.length) {
     toast("Select at least one PDF and one Excel workbook.", true);
     return;
@@ -94,19 +97,20 @@ async function uploadEvidence(event) {
   pdfFiles.forEach((file) => form.append("capital_call", file));
   excelFiles.forEach((file) => form.append("commitments", file));
   if (jsonFile) form.append("fund_json", jsonFile);
+  bankStatementFiles.forEach((file) => form.append("bank_statements", file));
   if ($("#as-of-input").value) form.append("as_of_date", $("#as-of-input").value);
   const token = $("#upload-token")?.value.trim();
   const headers = token ? { "X-Cherry-Demo-Token": token } : {};
-  const cashMessage = jsonFile ? " with JSON cash evidence" : " without cash JSON";
-  $("#upload-message").textContent = `Processing ${pdfFiles.length} PDF${pdfFiles.length === 1 ? "" : "s"} and ${excelFiles.length} Excel workbook${excelFiles.length === 1 ? "" : "s"}${cashMessage}…`;
+  const cashLabel = [jsonFile ? "one JSON cash feed" : null, bankStatementFiles.length ? `${bankStatementFiles.length} bank statement${bankStatementFiles.length === 1 ? "" : "s"}` : null].filter(Boolean).join(" + ") || "no cash evidence";
+  $("#upload-message").textContent = `Processing ${pdfFiles.length} PDF${pdfFiles.length === 1 ? "" : "s"} and ${excelFiles.length} Excel workbook${excelFiles.length === 1 ? "" : "s"} with ${cashLabel}…`;
   loading(true);
   try {
     const result = await api("/api/private-markets/analyse-integrated", { method: "POST", body: form, headers });
     const cases = Array.isArray(result.cases) && result.cases.length ? result.cases : [result];
     renderBatchPicker(cases);
     renderCase({ ...cases[0], synthetic: false, transactions: [] });
-    const batch = result.batch || { pdf_count: pdfFiles.length, excel_count: excelFiles.length, case_count: cases.length, json_count: jsonFile ? 1 : 0 };
-    const cashSummary = batch.json_count ? "cash evidence included" : "cash evidence pending";
+    const batch = result.batch || { pdf_count: pdfFiles.length, excel_count: excelFiles.length, case_count: cases.length, json_count: jsonFile ? 1 : 0, bank_statement_count: bankStatementFiles.length };
+    const cashSummary = (batch.json_count || batch.bank_statement_count) ? "cash evidence included" : "cash evidence pending";
     $("#upload-message").textContent = `Batch ${result.batch_id || result.case_id}: ${batch.case_count} governed case${batch.case_count === 1 ? "" : "s"} from ${batch.pdf_count} PDF${batch.pdf_count === 1 ? "" : "s"} + ${batch.excel_count} Excel workbook${batch.excel_count === 1 ? "" : "s"}; ${cashSummary}.`;
     $("#control-room").scrollIntoView({ behavior: "smooth" });
     toast(`${batch.case_count} case${batch.case_count === 1 ? "" : "s"} analysed · ${cashSummary}.`);
@@ -124,6 +128,7 @@ function bindEvents() {
   $("#upload-form").addEventListener("submit", uploadEvidence);
   $("#capital-call-input").addEventListener("change", updateFileCounts);
   $("#commitments-input").addEventListener("change", updateFileCounts);
+  $("#bank-statements-input").addEventListener("change", updateFileCounts);
   $("#batch-case-select").addEventListener("change", (event) => {
     const selected = state.batchCases[Number(event.target.value)];
     if (selected) renderCase({ ...selected, synthetic: false, transactions: [] });

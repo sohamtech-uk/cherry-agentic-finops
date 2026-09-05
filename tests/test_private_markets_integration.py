@@ -53,9 +53,16 @@ def test_integrated_health_declares_pdf_excel_json_contract() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["input_contract"] == ["pdf", "excel", "json"]
-    assert body["input_required"] == {"pdf": True, "excel": True, "json": False}
+    assert body["input_contract"] == ["pdf", "excel", "json", "bank_statement_pdf"]
+    assert body["input_required"] == {
+        "pdf": True,
+        "excel": True,
+        "json": False,
+        "bank_statement_pdf": False,
+    }
     assert body["input_multiplicity"]["json"] == "zero_or_one"
+    assert body["input_multiplicity"]["bank_statement_pdf"] == "zero_or_many"
+    assert body["max_bank_statement_files"] > 0
     assert "fundops_studio_configured" in body
 
 
@@ -71,3 +78,4 @@ def test_integrated_openapi_marks_cash_json_optional() -> None:
     assert "capital_call" in request_schema["required"]
     assert "commitments" in request_schema["required"]
     assert "fund_json" not in request_schema["required"]
+    assert "bank_statements" not in request_schema["required"]

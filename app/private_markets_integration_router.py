@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from pydantic import ValidationError
 
+from app.bank_statement_pdf import parse_bank_statement_pdf, to_fund_cash_transactions
 from app.config import get_settings
 from app.fundops_studio import FundOpsStudioConnector, FundOpsStudioUnavailable
 from app.private_markets import (
@@ -33,7 +34,9 @@ router = APIRouter(prefix="/api/private-markets", tags=["private-markets-integra
 
 MAX_PDF_FILES = 25
 MAX_EXCEL_FILES = 20
+MAX_BANK_STATEMENT_FILES = 20
 NO_JSON_HASH = "NO_CASH_JSON"
+NO_BANK_STATEMENT_HASH = "NO_BANK_STATEMENTS"
 
 
 def _require_real_data_access(token: str | None) -> None:
@@ -110,8 +113,8 @@ def _mark_cash_evidence_pending(analysis: PrivateMarketsAnalysis) -> None:
         work_item.priority = WorkItemPriority.NORMAL
         work_item.title = "Attach fund cash evidence"
         work_item.instruction = (
-            "Add a JSON cash/bank export when available. Document and ledger analysis is complete; "
-            "cash reconciliation remains pending."
+            "Add a JSON cash/bank export or bank-statement PDF when available. Document and "
+            "ledger analysis is complete; cash reconciliation remains pending."
         )
 
     analysis.action = PrivateMarketsAction.REQUEST_EVIDENCE
@@ -142,11 +145,22 @@ async def _agent_studio_result(payload: dict[str, Any]) -> dict[str, Any]:
 async def integration_health() -> dict[str, Any]:
     response: dict[str, Any] = {
         "status": "ok",
-        "input_contract": ["pdf", "excel", "json"],
-        "input_required": {"pdf": True, "excel": True, "json": False},
-        "input_multiplicity": {"pdf": "many", "excel": "many", "json": "zero_or_one"},
+        "input_contract": ["pdf", "excel", "json", "bank_statement_pdf"],
+        "input_required": {
+            "pdf": True,
+            "excel": True,
+            "json": False,
+            "bank_statement_pdf": False,
+        },
+        "input_multiplicity": {
+            "pdf": "many",
+            "excel": "many",
+            "json": "zero_or_one",
+            "bank_statement_pdf": "zero_or_many",
+        },
         "max_pdf_files": MAX_PDF_FILES,
         "max_excel_files": MAX_EXCEL_FILES,
+        "max_bank_statement_files": MAX_BANK_STATEMENT_FILES,
         "fundops_studio_configured": studio.configured,
         "financial_boundary": (
             "Cherry retains deterministic control authority; no payment initiation."
@@ -176,6 +190,15 @@ async def analyse_integrated_private_markets_case(
         UploadFile | None,
         File(description="Optional fund cash/bank transactions (.json)"),
     ] = None,
+    bank_statements: Annotated[
+        list[UploadFile] | None,
+        File(
+            description=(
+                "Optional bank-statement PDFs, parsed deterministically (no LLM) into cash "
+                "transactions."
+            )
+        ),
+    ] = None,
     as_of_date: Annotated[
         str | None,
         Form(description="Optional YYYY-MM-DD control date."),
@@ -187,14 +210,22 @@ async def analyse_integrated_private_markets_case(
 ) -> dict[str, object]:
     """Run a batch private-markets workflow with optional cash evidence.
 
-    Every PDF becomes an independently governed case. All supplied commitment/control workbooks are
-    parsed and merged into one supporting dataset. When a JSON cash feed is supplied it is shared
-    across the batch; when it is omitted Cherry still extracts and validates the notices and ledger
-    evidence, while cash-dependent controls remain unresolved and request supporting evidence rather
-    than blocking the upload itself. Cherry remains the financial control authority.
+    Every capital-call PDF becomes an independently governed case. All supplied commitment/control
+    workbooks are parsed and merged into one supporting dataset. Fund cash evidence is optional and
+    can come from a shared JSON feed, one or more bank-statement PDFs parsed deterministically by
+    ``app.bank_statement_pdf``, both, or neither: when no cash evidence is supplied at all, Cherry
+    still extracts and validates the notices and ledger evidence, while cash-dependent controls
+    remain unresolved and request supporting evidence rather than blocking the upload itself. Cherry
+    remains the financial control authority.
     """
 
     _require_real_data_access(x_cherry_demo_token)
+
+    bank_statement_uploads = [
+        upload for upload in (bank_statements or []) if (upload.filename or "").strip()
+    ]
+    has_json = fund_json is not None and (fund_json.filename or "").strip() != ""
+    has_bank_statements = bool(bank_statement_uploads)
 
     if not capital_call:
         raise HTTPException(status_code=422, detail="At least one capital-call PDF is required.")
@@ -209,6 +240,14 @@ async def analyse_integrated_private_markets_case(
         raise HTTPException(
             status_code=413,
             detail=f"A maximum of {MAX_EXCEL_FILES} Excel files can be processed in one batch.",
+        )
+    if len(bank_statement_uploads) > MAX_BANK_STATEMENT_FILES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"A maximum of {MAX_BANK_STATEMENT_FILES} bank statement PDFs can be processed "
+                "in one batch."
+            ),
         )
 
     max_bytes = settings.max_upload_mb * 1024 * 1024
@@ -247,8 +286,8 @@ async def analyse_integrated_private_markets_case(
 
     json_file_name: str | None = None
     json_content: bytes | None = None
-    transactions: list[FundCashTransaction] = []
-    if fund_json is not None:
+    if has_json:
+        assert fund_json is not None  # narrowed by has_json above
         json_file_name = fund_json.filename or "fund-cash.json"
         json_content = await fund_json.read()
         if len(json_content) > max_bytes:
@@ -258,13 +297,25 @@ async def analyse_integrated_private_markets_case(
             )
         if not json_file_name.lower().endswith(".json"):
             raise HTTPException(status_code=415, detail="fund_json must be a .json file.")
-        try:
-            transactions = parse_cash_json(json_content)
-        except (ValueError, ValidationError) as exc:
+
+    bank_statement_items: list[tuple[str, bytes]] = []
+    for upload in bank_statement_uploads:
+        file_name = upload.filename or "bank-statement.pdf"
+        content = await upload.read()
+        if len(content) > max_bytes:
             raise HTTPException(
-                status_code=422,
-                detail=f"Invalid JSON supporting data: {exc}",
-            ) from exc
+                status_code=413,
+                detail=(
+                    f"Bank statement {file_name!r} exceeds the {settings.max_upload_mb} MB "
+                    "per-file limit."
+                ),
+            )
+        is_pdf_content_type = (upload.content_type or "").lower() == "application/pdf"
+        if not is_pdf_content_type and not file_name.lower().endswith(".pdf"):
+            raise HTTPException(
+                status_code=415, detail=f"{file_name!r} must be a PDF bank statement."
+            )
+        bank_statement_items.append((file_name, content))
 
     parsed_as_of: date | None = None
     if as_of_date:
@@ -283,12 +334,41 @@ async def analyse_integrated_private_markets_case(
                 detail=f"Invalid commitment workbook {file_name!r}: {exc}",
             ) from exc
 
+    transactions: list[FundCashTransaction] = []
+    if has_json:
+        assert json_content is not None
+        try:
+            transactions.extend(parse_cash_json(json_content))
+        except (ValueError, ValidationError) as exc:
+            raise HTTPException(
+                status_code=422, detail=f"Invalid JSON supporting data: {exc}"
+            ) from exc
+
+    for file_name, content in bank_statement_items:
+        try:
+            statement = parse_bank_statement_pdf(content, file_name)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid bank statement {file_name!r}: {exc}",
+            ) from exc
+        transactions.extend(to_fund_cash_transactions(statement))
+
+    has_cash_evidence = has_json or has_bank_statements
+
     dataset = _merge_datasets(datasets)
     excel_bundle_hash = _bundle_hash(workbook_items)
     json_hash = _sha256(json_content) if json_content is not None else NO_JSON_HASH
+    bank_statement_bundle_hash = (
+        _bundle_hash(bank_statement_items) if has_bank_statements else NO_BANK_STATEMENT_HASH
+    )
     sources_excel: list[dict[str, str | None]] = [
         {"kind": "excel", "file_name": file_name, "sha256": _sha256(content)}
         for file_name, content in workbook_items
+    ]
+    sources_bank_statements: list[dict[str, str | None]] = [
+        {"kind": "bank_statement", "file_name": file_name, "sha256": _sha256(content)}
+        for file_name, content in bank_statement_items
     ]
     json_source: dict[str, str | None] | None = (
         {"kind": "json", "file_name": json_file_name, "sha256": json_hash}
@@ -314,14 +394,15 @@ async def analyse_integrated_private_markets_case(
             transactions,
             as_of_date=parsed_as_of,
         )
-        if json_content is None:
+        if not has_cash_evidence:
             _mark_cash_evidence_pending(analysis)
 
         pdf_hash = _sha256(pdf_content)
-        case_id = _case_id(pdf_hash, excel_bundle_hash, json_hash)
+        case_id = _case_id(pdf_hash, excel_bundle_hash, json_hash, bank_statement_bundle_hash)
         sources: list[dict[str, str | None]] = [
             {"kind": "pdf", "file_name": pdf_file_name, "sha256": pdf_hash},
             *sources_excel,
+            *sources_bank_statements,
         ]
         if json_source is not None:
             sources.append(json_source)
@@ -340,14 +421,15 @@ async def analyse_integrated_private_markets_case(
         input_sha256: dict[str, str | None] = {
             "pdf": pdf_hash,
             "excel_bundle": excel_bundle_hash,
-            "json": json_hash if json_content is not None else None,
+            "json": json_hash if has_json else None,
+            "bank_statement_bundle": bank_statement_bundle_hash if has_bank_statements else None,
         }
         cases.append(
             {
                 "case_id": case_id,
                 "source_pdf": pdf_file_name,
                 "synthetic": False,
-                "cash_feed_supplied": json_content is not None,
+                "cash_feed_supplied": has_cash_evidence,
                 "extraction": call.model_dump(mode="json"),
                 "analysis": analysis.model_dump(mode="json"),
                 "agent_studio": studio_result,
@@ -372,6 +454,7 @@ async def analyse_integrated_private_markets_case(
         _bundle_hash(pdf_items),
         excel_bundle_hash,
         json_hash,
+        bank_statement_bundle_hash,
     ).replace("PM-", "BATCH-")
     first_case = cases[0]
     action_counts: dict[str, int] = {}
@@ -387,12 +470,23 @@ async def analyse_integrated_private_markets_case(
         "batch": {
             "pdf_count": len(pdf_items),
             "excel_count": len(workbook_items),
-            "json_count": 1 if json_content is not None else 0,
+            "json_count": 1 if has_json else 0,
+            "bank_statement_count": len(bank_statement_items),
             "case_count": len(cases),
             "action_counts": action_counts,
         },
         "cases": cases,
-        "input_contract": ["pdf", "excel", "json"],
-        "input_required": {"pdf": True, "excel": True, "json": False},
-        "input_multiplicity": {"pdf": "many", "excel": "many", "json": "zero_or_one"},
+        "input_contract": ["pdf", "excel", "json", "bank_statement_pdf"],
+        "input_required": {
+            "pdf": True,
+            "excel": True,
+            "json": False,
+            "bank_statement_pdf": False,
+        },
+        "input_multiplicity": {
+            "pdf": "many",
+            "excel": "many",
+            "json": "zero_or_one",
+            "bank_statement_pdf": "zero_or_many",
+        },
     }
