@@ -9,7 +9,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.cash_application.exceptions import (
     ApplicationStatus,
@@ -26,6 +26,12 @@ from app.cash_application.exceptions import (
     ReviewDecision,
     investigate_cash_exception,
 )
+from app.cash_application.review import (
+    ControllerReviewPacket,
+    ReviewAction,
+    verify_review_audit,
+)
+from app.private_markets import money as normalise_money
 
 
 class CanonicalReviewStatus(StrEnum):
@@ -246,4 +252,107 @@ def exception_to_canonical_outcome(
         policy=policy,
         audit=audit,
         advisory_recommended_action=advisory_recommended_action,
+    )
+
+
+class TrialInvoiceOutcome(BaseModel):
+    invoice_id: str
+    invoice_state: str
+    balance_before: Decimal
+    cash_applied: Decimal
+    authorised_adjustment: Decimal
+    balance_after: Decimal
+    ledger_version: int
+
+    @field_validator(
+        "balance_before",
+        "cash_applied",
+        "authorised_adjustment",
+        "balance_after",
+        mode="before",
+    )
+    @classmethod
+    def normalise_amount(cls, value: object) -> Decimal:
+        return normalise_money(value)
+
+
+class TrialAuditOutcome(BaseModel):
+    event_count: int = Field(ge=0)
+    actions: list[str]
+    denial_codes: list[str]
+    decision_count: int = Field(ge=0)
+    simulated_post_count: int = Field(ge=0)
+    chain_valid: bool
+
+
+class ControllerReviewTrialOutcome(BaseModel):
+    case_id: str
+    trial_id: str
+    control_disposition: str
+    failed_control_codes: list[str]
+    receipt_settlement_status: str
+    receipt_allocation_status: str
+    application_status: str
+    exception_status: str
+    review_status: str
+    review_version: int
+    decision_recorded: bool
+    decision_action: ReviewAction | None
+    latest_denial_code: str | None
+    invoice: TrialInvoiceOutcome
+    ledger_mutated: bool
+    production_write_performed: bool
+    audit: TrialAuditOutcome
+
+
+def to_trial_outcome(
+    packet: ControllerReviewPacket, *, trial_id: str
+) -> ControllerReviewTrialOutcome:
+    """Map typed controller-review state to stable grader fields."""
+
+    state = packet.remaining_ar_state
+    audit_actions = [event.action for event in packet.audit_events]
+    denial_codes = [attempt.code for attempt in packet.review_attempts]
+    simulated_post_count = audit_actions.count("application.posted_simulated")
+    return ControllerReviewTrialOutcome(
+        case_id=packet.case_id,
+        trial_id=trial_id,
+        control_disposition=packet.control_disposition,
+        failed_control_codes=[
+            check.code for check in packet.control_checks if check.outcome == "BLOCK"
+        ],
+        receipt_settlement_status=packet.receipt.settlement_status,
+        receipt_allocation_status=packet.receipt.allocation_status,
+        application_status=packet.application_status,
+        exception_status=packet.exception_status,
+        review_status=packet.review_status,
+        review_version=packet.review_version,
+        decision_recorded=packet.recorded_decision is not None,
+        decision_action=(
+            packet.recorded_decision.action if packet.recorded_decision is not None else None
+        ),
+        latest_denial_code=denial_codes[-1] if denial_codes else None,
+        invoice=TrialInvoiceOutcome(
+            invoice_id=state.invoice_id,
+            invoice_state=state.invoice_state,
+            balance_before=state.invoice_balance_before,
+            cash_applied=state.cash_applied,
+            authorised_adjustment=state.authorised_adjustment,
+            balance_after=state.open_balance,
+            ledger_version=state.ledger_version,
+        ),
+        ledger_mutated=(
+            state.cash_applied > 0
+            or state.authorised_adjustment > 0
+            or simulated_post_count > 0
+        ),
+        production_write_performed=packet.production_write_performed,
+        audit=TrialAuditOutcome(
+            event_count=len(packet.audit_events),
+            actions=audit_actions,
+            denial_codes=denial_codes,
+            decision_count=audit_actions.count("review.decision_recorded"),
+            simulated_post_count=simulated_post_count,
+            chain_valid=verify_review_audit(packet.audit_events),
+        ),
     )

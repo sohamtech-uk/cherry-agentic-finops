@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
@@ -275,6 +276,15 @@ class ReviewAttempt(BaseModel):
     explanation: str
 
 
+class ReviewAuditEvent(BaseModel):
+    sequence: int = Field(gt=0)
+    actor: str
+    action: str
+    details: dict[str, Any]
+    previous_hash: str
+    event_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class ControllerReviewPacket(BaseModel):
     case_id: str
     legal_entity_id: str
@@ -295,6 +305,7 @@ class ControllerReviewPacket(BaseModel):
     control_checks: list[ControlCheck]
     allowed_actions: list[AllowedAction]
     review_attempts: list[ReviewAttempt] = Field(default_factory=list)
+    audit_events: list[ReviewAuditEvent] = Field(default_factory=list)
     recorded_decision: ReviewDecision | None = None
     simulation_only: Literal[True] = True
     production_write_performed: Literal[False] = False
@@ -364,6 +375,57 @@ _REVIEWERS = {
 
 def _evidence_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _audit_hash(
+    sequence: int,
+    actor: str,
+    action: str,
+    details: dict[str, Any],
+    previous_hash: str,
+) -> str:
+    canonical_details = json.dumps(details, sort_keys=True, separators=(",", ":"))
+    payload = f"{sequence}|{actor}|{action}|{canonical_details}|{previous_hash}"
+    return _evidence_hash(payload)
+
+
+def append_review_audit(
+    packet: ControllerReviewPacket,
+    *,
+    actor: str,
+    action: str,
+    details: dict[str, Any],
+) -> None:
+    sequence = len(packet.audit_events) + 1
+    previous_hash = packet.audit_events[-1].event_hash if packet.audit_events else "GENESIS"
+    packet.audit_events.append(
+        ReviewAuditEvent(
+            sequence=sequence,
+            actor=actor,
+            action=action,
+            details=details,
+            previous_hash=previous_hash,
+            event_hash=_audit_hash(sequence, actor, action, details, previous_hash),
+        )
+    )
+
+
+def verify_review_audit(events: list[ReviewAuditEvent]) -> bool:
+    previous_hash = "GENESIS"
+    for expected_sequence, event in enumerate(events, start=1):
+        if event.sequence != expected_sequence or event.previous_hash != previous_hash:
+            return False
+        expected_hash = _audit_hash(
+            event.sequence,
+            event.actor,
+            event.action,
+            event.details,
+            event.previous_hash,
+        )
+        if event.event_hash != expected_hash:
+            return False
+        previous_hash = event.event_hash
+    return True
 
 
 def _action_contract() -> list[AllowedAction]:
@@ -601,6 +663,17 @@ def build_short_pay_packet(short_pay_gbp: Decimal | str = "500") -> ControllerRe
             "unchanged until a valid decision. No payment initiation, production ledger write or "
             "policy mutation is available."
         ),
+    )
+    append_review_audit(
+        packet,
+        actor="cash-application-control",
+        action="review.requested",
+        details={
+            "application_status": ApplicationStatus.REVIEW_REQUIRED,
+            "receipt_allocation_status": "HELD",
+            "invoice_open_balance": str(invoice_balance),
+            "amount_at_risk": str(short_pay),
+        },
     )
     _refresh_disposition(packet)
     return packet
@@ -897,6 +970,35 @@ class ControllerReviewService:
             self._packet.recorded_decision = decision
             self._packet.review_version += 1
             self._packet.control_checks = evaluate_fundamental_controls(self._packet)
+            append_review_audit(
+                self._packet,
+                actor=reviewer.reviewer_id,
+                action="review.decision_recorded",
+                details={
+                    "action": request.action,
+                    "authority_id": reviewer.authority_id,
+                    "authority_version": reviewer.authority_version,
+                    "decision_id": request.decision_id,
+                    "review_version_before": request.expected_review_version,
+                    "review_version_after": self._packet.review_version,
+                },
+            )
+            if application_status == ApplicationStatus.POSTED_SIMULATED:
+                append_review_audit(
+                    self._packet,
+                    actor="simulated-ar-adapter",
+                    action="application.posted_simulated",
+                    details={
+                        "cash_applied": str(resulting_state.cash_applied),
+                        "authorised_adjustment": str(resulting_state.authorised_adjustment),
+                        "invoice_open_after": str(resulting_state.open_balance),
+                        "invoice_ledger_version_before": (
+                            self._packet.customer_invoice_match.invoice_ledger_version
+                        ),
+                        "invoice_ledger_version_after": resulting_state.ledger_version,
+                        "receipt_allocation_status": resulting_state.receipt_allocation_status,
+                    },
+                )
             return self._packet.model_copy(deep=True)
 
     def _deny(self, request: ReviewDecisionRequest, code: str, explanation: str) -> None:
@@ -909,12 +1011,30 @@ class ControllerReviewService:
                 explanation=explanation,
             )
         )
+        action = {
+            "AUTHORITY_EXCEEDED": "review.authority_denied",
+            "HARD_BLOCK": "review.control_denied",
+            "STALE_REVIEW": "review.stale_denied",
+        }.get(code, "review.action_denied")
+        append_review_audit(
+            self._packet,
+            actor=request.reviewer_id,
+            action=action,
+            details={
+                "action": request.action,
+                "code": code,
+                "decision_id": request.decision_id,
+                "ledger_mutated": False,
+                "review_version": self._packet.review_version,
+            },
+        )
 
     def _apply_simulated_action(
         self, action: ReviewAction
     ) -> tuple[ARState, ReviewStatus, ApplicationStatus, ExceptionStatus]:
         if action == ReviewAction.APPROVE_WRITE_OFF:
             state = self._packet.proposed_after_valid_decision.model_copy(deep=True)
+            state.ledger_version += 1
             state.authorised_adjustment = self._packet.amount_at_risk
             state.open_balance = money("0")
             state.invoice_state = "CLOSED"
@@ -925,14 +1045,17 @@ class ControllerReviewService:
                 ExceptionStatus.RESOLVED,
             )
         if action == ReviewAction.LEAVE_BALANCE_OPEN:
+            state = self._packet.proposed_after_valid_decision.model_copy(deep=True)
+            state.ledger_version += 1
             return (
-                self._packet.proposed_after_valid_decision.model_copy(deep=True),
+                state,
                 ReviewStatus.BALANCE_LEFT_OPEN,
                 ApplicationStatus.POSTED_SIMULATED,
                 ExceptionStatus.COLLECTIONS_OPEN,
             )
         if action == ReviewAction.CREATE_DISPUTE:
             state = self._packet.proposed_after_valid_decision.model_copy(deep=True)
+            state.ledger_version += 1
             state.invoice_state = "DISPUTED"
             return (
                 state,

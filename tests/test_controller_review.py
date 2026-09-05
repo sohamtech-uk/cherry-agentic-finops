@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api import app
+from app.cash_application.eval_adapter import to_trial_outcome
 from app.cash_application.review import (
     ControllerReviewError,
     ControllerReviewPacket,
@@ -77,6 +78,7 @@ def test_500_short_pay_packet_is_held_unchanged_decision_ready_and_grounded() ->
     assert all(check.passed for check in packet.control_checks)
     assert packet.simulation_only is True
     assert packet.production_write_performed is False
+    assert [event.action for event in packet.audit_events] == ["review.requested"]
 
 
 def test_controller_within_authority_can_approve_500_writeoff_after_fresh_controls() -> None:
@@ -117,6 +119,17 @@ def test_ca12_escalates_approval_above_authority_without_decision_or_ledger_chan
     assert unchanged.remaining_ar_state.cash_applied == Decimal("0.00")
     assert unchanged.remaining_ar_state.open_balance == Decimal("10000.00")
     assert unchanged.review_attempts[-1].code == "AUTHORITY_EXCEEDED"
+    outcome = to_trial_outcome(unchanged, trial_id="CA-12-trial-1")
+    assert outcome.review_status == "escalated"
+    assert outcome.application_status == "REVIEW_REQUIRED"
+    assert outcome.decision_recorded is False
+    assert outcome.latest_denial_code == "AUTHORITY_EXCEEDED"
+    assert outcome.ledger_mutated is False
+    assert outcome.invoice.cash_applied == Decimal("0.00")
+    assert outcome.invoice.balance_after == Decimal("10000.00")
+    assert outcome.audit.actions[-1] == "review.authority_denied"
+    assert outcome.audit.simulated_post_count == 0
+    assert outcome.audit.chain_valid is True
 
 
 @pytest.mark.parametrize(
@@ -214,6 +227,9 @@ def test_identical_retry_is_idempotent_and_conflicting_retry_is_rejected() -> No
     assert replay.recorded_decision is not None
     assert replay.recorded_decision.idempotent_replay is True
     assert replay.remaining_ar_state == first.remaining_ar_state
+    assert len(replay.audit_events) == len(first.audit_events)
+    assert to_trial_outcome(replay, trial_id="retry").audit.decision_count == 1
+    assert to_trial_outcome(replay, trial_id="retry").audit.simulated_post_count == 1
 
     conflicting = request.model_copy(update={"action": ReviewAction.REJECT_MATCH})
     with pytest.raises(ControllerReviewError) as raised:
@@ -276,6 +292,29 @@ def test_api_exposes_packet_contract_and_records_simulated_decision() -> None:
     assert body["remaining_ar_state"]["cash_applied"] == "9500.00"
     assert body["remaining_ar_state"]["open_balance"] == "500.00"
     assert body["production_write_performed"] is False
+
+    outcome_response = client.get(
+        "/api/controller-review/cases/CA-05-RCPT-1042-500/outcome",
+        params={"trial_id": "CA-05-trial-1"},
+    )
+    assert outcome_response.status_code == 200
+    outcome = outcome_response.json()
+    assert outcome["trial_id"] == "CA-05-trial-1"
+    assert outcome["application_status"] == "POSTED_SIMULATED"
+    assert outcome["exception_status"] == "DISPUTE_OPEN"
+    assert outcome["invoice"] == {
+        "invoice_id": "INV-2208",
+        "invoice_state": "DISPUTED",
+        "balance_before": "10000.00",
+        "cash_applied": "9500.00",
+        "authorised_adjustment": "0.00",
+        "balance_after": "500.00",
+        "ledger_version": 8,
+    }
+    assert outcome["ledger_mutated"] is True
+    assert outcome["audit"]["decision_count"] == 1
+    assert outcome["audit"]["simulated_post_count"] == 1
+    assert outcome["audit"]["chain_valid"] is True
 
 
 def test_api_rejects_client_supplied_authority() -> None:

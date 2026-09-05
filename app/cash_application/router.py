@@ -3,8 +3,9 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
+from app.cash_application.eval_adapter import to_trial_outcome
 from app.cash_application.review import (
     ControllerReviewError,
     ControllerReviewService,
@@ -79,6 +80,20 @@ async def get_review_packet(case_id: str) -> dict[str, Any]:
     except ControllerReviewError as exc:
         _raise_http_error(exc)
     return packet.model_dump(mode="json")
+
+
+@router.get("/cases/{case_id}/outcome")
+async def get_review_trial_outcome(
+    case_id: str,
+    trial_id: str = Query(min_length=1, max_length=100),
+) -> dict[str, Any]:
+    """Return stable grader fields; this endpoint never derives state from the UI."""
+
+    try:
+        packet = get_controller_review_service().get_packet(case_id)
+    except ControllerReviewError as exc:
+        _raise_http_error(exc)
+    return to_trial_outcome(packet, trial_id=trial_id).model_dump(mode="json")
 
 
 @router.post("/cases/{case_id}/decisions")
