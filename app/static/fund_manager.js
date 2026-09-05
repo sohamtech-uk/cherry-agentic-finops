@@ -50,7 +50,7 @@
   }
 
   function demoToken() {
-    return q("#upload-token")?.value.trim() || "";
+    return q("#fm-demo-token")?.value.trim() || "";
   }
 
   function injectStyles() {
@@ -92,14 +92,9 @@
     </div>
 
     <div class="fm-card">
-      <div class="fm-meta-grid">
-        <label class="fm-field"><span>Fund / entity</span><input type="text" id="fm-fund-name" placeholder="Optional"></label>
-        <label class="fm-field"><span>Reporting period</span><input type="text" id="fm-reporting-period" placeholder="Optional, e.g. Q2 2026"></label>
-        <label class="fm-field"><span>As-of date</span><input type="date" id="fm-as-of-date"></label>
-      </div>
+      <label class="fm-field fm-token-field"><span>Demo upload token <small>(protected deployment only)</small></span><input type="password" id="fm-demo-token" autocomplete="off" placeholder="Not stored in the browser"></label>
 
       <div class="fm-dropzone" id="fm-dropzone">
-        <strong>Add fund evidence</strong>
         <span>PDF · XLSX · CSV · JSON — drop files here or</span>
         <button type="button" class="fm-button secondary" id="fm-browse">Browse files</button>
         <small>Mixed file types in one review are fine. Nothing is required in advance.</small>
@@ -225,12 +220,6 @@
   function buildEvidenceForm() {
     const form = new FormData();
     for (const file of state.files) form.append("files", file, file.name);
-    const fundName = q("#fm-fund-name")?.value.trim();
-    const reportingPeriod = q("#fm-reporting-period")?.value.trim();
-    const asOfDate = q("#fm-as-of-date")?.value.trim();
-    if (fundName) form.append("fund_name", fundName);
-    if (reportingPeriod) form.append("reporting_period", reportingPeriod);
-    if (asOfDate) form.append("as_of_date", asOfDate);
     return form;
   }
 
