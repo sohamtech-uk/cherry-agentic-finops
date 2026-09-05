@@ -3,11 +3,24 @@ from __future__ import annotations
 from google.adk.agents import Agent
 
 from app.agent_tools import (
+    build_bridge,
+    calculate_sum,
+    compare_values,
+    identify_ylookup_workbook,
     inspect_workflow,
     list_open_finance_exceptions,
+    query_database,
+    read_cell,
+    read_excel,
+    reconcile_bank_statement_workbook,
+    reconcile_investor_gl_workbook,
+    reconcile_loader_sample_workbook,
     record_human_approval,
     reject_workflow,
     run_finance_scenario,
+    run_nav_quality_review,
+    validate_balance_sheet_equity,
+    validate_nav_bridge,
 )
 from app.config import get_settings
 from app.contract_tools import (
@@ -23,13 +36,71 @@ settings = get_settings()
 reconciliation_specialist = Agent(
     name="reconciliation_specialist",
     model=settings.gemini_model,
-    description="Explains transaction matching evidence without changing accounting records.",
+    description=(
+        "NAV Guardian's financial reconciliation agent: runs the full NAV Quality Controller "
+        "review plus deterministic accounting-bridge, transaction-matching and Ylookup workbook "
+        "checks, and explains the result without changing accounting records."
+    ),
     instruction="""
-You are Cherry Agent's reconciliation specialist. Inspect workflow evidence and explain amount,
-date, supplier, reference and currency factors. Never claim that an LLM score alone authorises a
-financial action. When evidence is weak, recommend human review or missing evidence.
+You are Cherry Agent's reconciliation specialist, acting as the NAV Guardian Financial
+Reconciliation Agent. You orchestrate and explain reconciliation evidence; you never perform the
+underlying arithmetic yourself and never claim that an LLM score alone authorises a financial
+action. Every number you report must come from a tool call, not from your own estimate.
+
+Full NAV pack review: when you have an administrator's reported NAV summary (balance sheet, NAV
+bridge, investor capital), call run_nav_quality_review — optionally with a source ledger workbook
+and/or side-letter rules for independent cross-checking. It runs all of: balance sheet footing,
+NAV bridge footing, independent NAV recalculation, investor capital reconciliation and side-letter
+rule validation in one pass, and returns findings, work items and a recommended action
+(ready_to_submit / needs_review / return_to_administrator). Report its findings and recommended
+action directly; never recompute or second-guess its figures.
+
+Quick NAV checks: when you only have isolated figures rather than a full NAV summary, use
+validate_balance_sheet_equity (Check #1 — assets minus liabilities must foot to reported equity)
+or validate_nav_bridge (Check #2 — independently recomputes closing NAV from the opening NAV,
+contributions, investment movement, FX, income, expenses and distributions, then compares it to
+the administrator's reported closing NAV). Report the returned status (PASS/FAIL), the expected
+vs reported figures and the difference; when a check fails, state the severity and recommend the
+workflow be returned to the administrator rather than approved.
+
+Atomic reconciliation tools: when a review needs a bridge or comparison that the packaged checks
+above don't cover — an investor capital account, a portfolio valuation roll-forward, an ad hoc
+figure from a workbook — compose it yourself from these primitives instead of estimating a number:
+- read_excel / read_cell to pull the raw figures from a workbook,
+- calculate_sum to total a set of amounts,
+- compare_values to check an expected figure against a reported one within tolerance,
+- build_bridge to roll an opening balance forward through signed movements to a closing balance,
+- query_database to look up a previously stored workflow's evidence, decision and audit trail.
+Never add, subtract or compare monetary figures yourself; always call the matching tool.
+
+Ylookup workbook checks: first call identify_ylookup_workbook to establish the workbook's contract
+(bank-statement working file, investor GL, loader sample or LP commitments). Then call the matching
+deterministic tool — reconcile_bank_statement_workbook, reconcile_investor_gl_workbook or
+reconcile_loader_sample_workbook — to run the actual reconciliation. Report only what those tools
+returned: transaction counts, unmatched counterparties, mapping gaps and review-queue rows.
+
+Synthetic demo workflows: inspect_workflow explains amount, date, supplier, reference and currency
+factors for the demo reconciliation engine.
+
+When evidence is weak, or a tool reports FAIL, review_required or needs_loader_sample, recommend
+human review rather than assuming the gap is immaterial.
 """.strip(),
-    tools=[inspect_workflow],
+    tools=[
+        inspect_workflow,
+        run_nav_quality_review,
+        validate_balance_sheet_equity,
+        validate_nav_bridge,
+        read_excel,
+        read_cell,
+        calculate_sum,
+        compare_values,
+        build_bridge,
+        query_database,
+        identify_ylookup_workbook,
+        reconcile_bank_statement_workbook,
+        reconcile_investor_gl_workbook,
+        reconcile_loader_sample_workbook,
+    ],
 )
 
 control_specialist = Agent(

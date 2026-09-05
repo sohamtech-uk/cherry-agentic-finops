@@ -42,6 +42,73 @@ def _cell(row: tuple[Any, ...], indexes: dict[str, int], name: str) -> Any:
     return row[index]
 
 
+def _guidance_for_reason(reason: str) -> dict[str, Any]:
+    if reason == "Counterparty unresolved":
+        return {
+            "reason": reason,
+            "owner": "Fund operations",
+            "steps": [
+                "Review the bank narrative and reference against the Vendor, Legal Entity and Related Party master lists.",
+                "Confirm one canonical sender/beneficiary; do not resolve from amount similarity alone.",
+                "Record the selected master-data match in the staging/mapping layer and rerun the control.",
+            ],
+            "evidence_required": (
+                "Master-list record or independently verified supporting document showing the "
+                "counterparty identity."
+            ),
+            "completion_check": (
+                "Matched Sender/Beneficiary resolves to exactly one approved master-data record."
+            ),
+        }
+    if reason == "Project code unresolved":
+        return {
+            "reason": reason,
+            "owner": "Fund accounting",
+            "steps": [
+                "Use the transaction narrative, counterparty and deal context to search the Project Code Report.",
+                "Confirm the project belongs to the same legal entity and accounting period.",
+                "Apply the approved project-code mapping and rerun journal/control validation.",
+            ],
+            "evidence_required": "Approved project-code mapping or project accounting support.",
+            "completion_check": "Matched Project Code exists in the current Project Code Report.",
+        }
+    if reason in {"Position not in master list", "Position requires review"}:
+        return {
+            "reason": reason,
+            "owner": "Investment operations",
+            "steps": [
+                "Compare the proposed position with the Deal & Position Master List using legal entity, deal and instrument context.",
+                "If the position is genuinely new, route it through the controlled master-data onboarding process before use.",
+                "Update the approved position mapping and rerun the reconciliation control.",
+            ],
+            "evidence_required": "Approved position master record, deal support or controlled new-position approval.",
+            "completion_check": "Resolved Position matches an approved Deal & Position Master List entry.",
+        }
+    if reason == "Classification flagged Review":
+        return {
+            "reason": reason,
+            "owner": "Fund accounting",
+            "steps": [
+                "Review transaction type, narrative, counterparty, legal entity and related-party indicators.",
+                "Select the accounting classification supported by the source evidence and chart-of-accounts policy.",
+                "Regenerate the journal candidate and confirm debit/credit treatment balances.",
+            ],
+            "evidence_required": "Source transaction support and approved accounting-classification rationale.",
+            "completion_check": "Classification is no longer Review and the resulting journal treatment passes controls.",
+        }
+    return {
+        "reason": reason,
+        "owner": "Fund operations",
+        "steps": [
+            "Review the source row and supporting master data.",
+            "Record a supported resolution or retain the exception for human review.",
+            "Rerun the deterministic controls after the source or mapping is corrected.",
+        ],
+        "evidence_required": "Evidence supporting the selected reconciliation outcome.",
+        "completion_check": "The original exception no longer appears after controls are rerun.",
+    }
+
+
 def inspect_workbook(content: bytes, file_name: str) -> dict[str, Any]:
     """Identify the workbook contract without forcing every XLSX into LP commitments."""
 
@@ -149,8 +216,7 @@ def analyse_bank_statement_workbook(
         project_code_gaps = 0
         position_gaps = 0
         review_rows = 0
-        review_queue_rows = 0
-        sample_exceptions: list[dict[str, Any]] = []
+        exceptions: list[dict[str, Any]] = []
 
         for row_number, row in enumerate(
             staging.iter_rows(min_row=2, values_only=True),
@@ -161,7 +227,8 @@ def analyse_bank_statement_workbook(
             total_transactions += 1
             reasons: list[str] = []
 
-            if not _text(_cell(row, indexes, "Matched Sender/Beneficiary")):
+            matched_counterparty = _text(_cell(row, indexes, "Matched Sender/Beneficiary"))
+            if not matched_counterparty:
                 unmatched_counterparties += 1
                 reasons.append("Counterparty unresolved")
 
@@ -185,18 +252,26 @@ def analyse_bank_statement_workbook(
                 reasons.append("Classification flagged Review")
 
             if reasons:
-                review_queue_rows += 1
-                if len(sample_exceptions) < 8:
-                    narrative = _text(_cell(row, indexes, "Narrative"))
-                    sample_exceptions.append(
-                        {
-                            "row": row_number,
-                            "account_name": _text(_cell(row, indexes, "Account Name")),
-                            "currency": _text(_cell(row, indexes, "Currency")),
-                            "reasons": reasons,
-                            "narrative": narrative[:220],
-                        }
-                    )
+                exceptions.append(
+                    {
+                        "exception_id": f"BANK-ROW-{row_number}",
+                        "row": row_number,
+                        "account_name": _text(_cell(row, indexes, "Account Name")),
+                        "account_number": _text(_cell(row, indexes, "Account Number")),
+                        "currency": _text(_cell(row, indexes, "Currency")),
+                        "legal_entity": _text(_cell(row, indexes, "Matched Legal Entity")),
+                        "matched_counterparty": matched_counterparty,
+                        "matched_project_code": matched_project,
+                        "resolved_position": resolved_position,
+                        "classification": classification,
+                        "related_party_match": _text(_cell(row, indexes, "Related Party Match")),
+                        "reasons": reasons,
+                        "narrative": _text(_cell(row, indexes, "Narrative"))[:500],
+                        "reconciliation_guidance": [
+                            _guidance_for_reason(reason) for reason in reasons
+                        ],
+                    }
+                )
 
         journal_lines = 0
         for row in diu.iter_rows(min_row=2, values_only=True):
@@ -223,7 +298,7 @@ def analyse_bank_statement_workbook(
         return {
             "workflow": "bank_statements_to_journal_entries",
             "title": "Bank statements → journal entries",
-            "status": "review_required" if review_queue_rows else "ready",
+            "status": "review_required" if exceptions else "ready",
             "workbook": file_name,
             "pdf_count": len(pdf_file_names),
             "matched_statement_files": matched_statement_files,
@@ -235,11 +310,13 @@ def analyse_bank_statement_workbook(
             "project_code_gaps": project_code_gaps,
             "position_gaps": position_gaps,
             "review_rows": review_rows,
-            "review_queue_rows": review_queue_rows,
-            "sample_exceptions": sample_exceptions,
+            "review_queue_rows": len(exceptions),
+            "exceptions": exceptions,
+            "sample_exceptions": exceptions[:8],
             "message": (
                 "The organiser working file was accepted directly. Review gaps are surfaced as "
-                "workflow exceptions rather than treated as invalid input."
+                "workflow exceptions rather than treated as invalid input. Click an exception to "
+                "see its reconciliation steps and required evidence."
             ),
         }
     finally:

@@ -339,6 +339,9 @@ app/nav_quality_router.py                    NAV Quality Controller endpoint
 app/contracts.py                             contract evidence, precedence and NAV rule checks
 app/contract_tools.py                        constrained contract specialist tools
 app/contract_router.py                       contract ingestion, search and NAV APIs
+app/nav_reconciliation.py                    quick ad hoc balance-sheet/NAV-bridge checks
+app/reconciliation_tools.py                  atomic agent tools (read/sum/compare/bridge)
+agents/cherry_finops/agent.py                Google ADK agents (reconciliation_specialist and peers)
 app/fundops_studio.py                        Agent Studio microservice client
 app/static/                                  judge-facing control-room UI
 fixtures/private_markets/                    synthetic backup data
