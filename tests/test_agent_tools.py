@@ -10,16 +10,23 @@ from openpyxl import Workbook
 from app.agent_tools import (
     compare_dates,
     compare_periods,
+    detect_exposure_breaches,
+    detect_stale_prices,
+    detect_unsettled_trades,
     find_entity,
     find_section,
     get_nav_case_iterations,
     get_nav_iteration_metrics,
     identify_ylookup_workbook,
     inspect_workflow,
+    prioritise_exceptions,
     query_database,
     read_document,
+    reconcile_cash,
     reconcile_investor_gl_workbook,
     reconcile_loader_sample_workbook,
+    reconcile_positions,
+    reconcile_trades,
     run_finance_scenario,
     run_nav_quality_review,
 )
@@ -340,3 +347,152 @@ def test_run_nav_quality_review_with_ledger_produces_investor_root_cause(tmp_pat
         g["investor"] == "Investor A" and g["impact_amount"] == "1000000.00"
         for g in investor_groups
     )
+
+
+def _write_json(path: Path, payload: object) -> str:
+    path.write_text(json.dumps(payload))
+    return str(path)
+
+
+def test_reconcile_positions_tool_flags_a_break(tmp_path: Path) -> None:
+    internal_path = _write_json(
+        tmp_path / "internal-positions.json",
+        [{"fund": "Fund X", "security_id": "SEC1", "quantity": 100, "price": 10}],
+    )
+    external_path = _write_json(
+        tmp_path / "external-positions.json",
+        [{"fund": "Fund X", "security_id": "SEC1", "quantity": 90, "price": 10}],
+    )
+
+    result = reconcile_positions(internal_path, external_path)
+
+    assert result["matched_count"] == 0
+    assert result["breaks"][0]["break_type"] == "quantity_mismatch"
+    assert result["exceptions"][0]["category"] == "position"
+
+
+def test_reconcile_positions_tool_wraps_invalid_json(tmp_path: Path) -> None:
+    bad_path = tmp_path / "internal-positions.json"
+    bad_path.write_text("not json")
+    external_path = _write_json(tmp_path / "external-positions.json", [])
+
+    with pytest.raises(ValueError, match="Invalid internal positions"):
+        reconcile_positions(str(bad_path), external_path)
+
+
+def test_reconcile_cash_tool_flags_a_break(tmp_path: Path) -> None:
+    internal_path = _write_json(
+        tmp_path / "internal-cash.json",
+        [{"fund": "Fund X", "account": "ACC1", "currency": "USD", "balance": 1000}],
+    )
+    external_path = _write_json(
+        tmp_path / "external-cash.json",
+        [{"fund": "Fund X", "account": "ACC1", "currency": "USD", "balance": 900}],
+    )
+
+    result = reconcile_cash(internal_path, external_path)
+
+    assert result["breaks"][0]["break_type"] == "balance_mismatch"
+
+
+def test_reconcile_trades_tool_flags_a_break(tmp_path: Path) -> None:
+    trade = {
+        "trade_id": "T1",
+        "fund": "Fund X",
+        "security_id": "SEC1",
+        "side": "buy",
+        "quantity": 100,
+        "price": 10,
+        "trade_date": "2026-06-01",
+    }
+    internal_path = _write_json(tmp_path / "internal-trades.json", [trade])
+    external_path = _write_json(tmp_path / "external-trades.json", [{**trade, "side": "sell"}])
+
+    result = reconcile_trades(internal_path, external_path)
+
+    assert result["breaks"][0]["break_type"] == "side_mismatch"
+
+
+def test_detect_stale_prices_tool_flags_a_high_severity_finding(tmp_path: Path) -> None:
+    prices_path = _write_json(
+        tmp_path / "prices.json",
+        [{"security_id": "SEC1", "price": 10, "price_date": "2026-05-01"}],
+    )
+
+    result = detect_stale_prices(prices_path, "2026-06-30", max_age_days=3)
+
+    assert result["findings"][0]["severity"] == "high"
+    assert result["exceptions"][0]["category"] == "stale_price"
+
+
+def test_detect_unsettled_trades_tool_flags_an_overdue_trade(tmp_path: Path) -> None:
+    trades_path = _write_json(
+        tmp_path / "trades.json",
+        [
+            {
+                "trade_id": "T1",
+                "fund": "Fund X",
+                "security_id": "SEC1",
+                "side": "buy",
+                "quantity": 100,
+                "price": 10,
+                "trade_date": "2026-06-01",
+                "settlement_date": "2026-06-01",
+                "status": "unsettled",
+            }
+        ],
+    )
+
+    result = detect_unsettled_trades(trades_path, "2026-06-30", grace_days=3)
+
+    assert result["findings"][0]["severity"] == "high"
+    assert result["exceptions"][0]["category"] == "unsettled_trade"
+
+
+def test_detect_exposure_breaches_tool_flags_a_breach(tmp_path: Path) -> None:
+    positions_path = _write_json(
+        tmp_path / "positions.json",
+        [{"fund": "Fund X", "security_id": "SEC1", "quantity": 1, "price": 15}],
+    )
+    limits_path = _write_json(
+        tmp_path / "limits.json",
+        [{"label": "Single position cap", "scope": "single_position", "max_percent_of_nav": 10}],
+    )
+
+    result = detect_exposure_breaches(positions_path, "100", limits_path)
+
+    assert result["breaches"][0]["key"] == "SEC1"
+    assert result["exceptions"][0]["category"] == "exposure_breach"
+
+
+def test_detect_exposure_breaches_tool_wraps_zero_nav(tmp_path: Path) -> None:
+    positions_path = _write_json(tmp_path / "positions.json", [])
+    limits_path = _write_json(tmp_path / "limits.json", [])
+
+    with pytest.raises(ValueError, match="Could not compute exposure breaches"):
+        detect_exposure_breaches(positions_path, "0", limits_path)
+
+
+def test_prioritise_exceptions_tool_ranks_by_severity_and_impact() -> None:
+    exceptions = [
+        {
+            "category": "cash",
+            "code": "c1",
+            "title": "a",
+            "detail": "",
+            "severity": "warning",
+            "impact_amount": 1_000_000,
+        },
+        {
+            "category": "cash",
+            "code": "c2",
+            "title": "b",
+            "detail": "",
+            "severity": "high",
+            "impact_amount": 10,
+        },
+    ]
+
+    result = prioritise_exceptions(exceptions)
+
+    assert [item["code"] for item in result["exceptions"]] == ["c2", "c1"]

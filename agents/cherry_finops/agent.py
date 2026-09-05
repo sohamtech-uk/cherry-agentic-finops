@@ -8,6 +8,9 @@ from app.agent_tools import (
     compare_dates,
     compare_periods,
     compare_values,
+    detect_exposure_breaches,
+    detect_stale_prices,
+    detect_unsettled_trades,
     find_entity,
     find_section,
     get_nav_case_iterations,
@@ -15,13 +18,17 @@ from app.agent_tools import (
     identify_ylookup_workbook,
     inspect_workflow,
     list_open_finance_exceptions,
+    prioritise_exceptions,
     query_database,
     read_cell,
     read_document,
     read_excel,
     reconcile_bank_statement_workbook,
+    reconcile_cash,
     reconcile_investor_gl_workbook,
     reconcile_loader_sample_workbook,
+    reconcile_positions,
+    reconcile_trades,
     record_human_approval,
     reject_workflow,
     run_finance_scenario,
@@ -120,6 +127,59 @@ human review rather than assuming the gap is immaterial.
         reconcile_bank_statement_workbook,
         reconcile_investor_gl_workbook,
         reconcile_loader_sample_workbook,
+    ],
+)
+
+fund_operations_specialist = Agent(
+    name="fund_operations_specialist",
+    model=settings.gemini_model,
+    description=(
+        "Reconciles fund positions, cash and trades against an administrator/custodian source, "
+        "flags stale prices, unsettled trades and exposure-limit breaches, and prioritises the "
+        "combined exceptions by materiality — all below the top-line NAV summary that "
+        "reconciliation_specialist reviews."
+    ),
+    instruction="""
+You are Cherry Agent's fund operations specialist, reconciling the position, cash and trade
+records a NAV is built from. You never match, compare or rank figures yourself — every break,
+finding and ranking must come from a tool call.
+
+Reconciliation (internal vs external, e.g. administrator or custodian):
+- reconcile_positions matches by security_id and flags missing positions on either side, quantity
+  breaks and market value breaks. A quantity match with a market value break usually means a price
+  break — say so.
+- reconcile_cash matches by (account, currency) and flags missing balances and balance mismatches.
+- reconcile_trades matches by trade_id and flags missing trades, and side, quantity or price
+  mismatches on trades present in both sides.
+Each of these returns "exceptions" already in the common shape prioritise_exceptions expects —
+prefer reading that list over the raw "breaks" array when you need to rank or combine findings.
+
+Risk detection (single source, no external comparison):
+- detect_stale_prices flags any price older than its max_age_days threshold as of a control date;
+  severity escalates to HIGH beyond twice that threshold.
+- detect_unsettled_trades flags trades still marked unsettled whose settlement_date has passed the
+  control date; severity escalates to HIGH beyond the grace_days window (the standard T+ grace
+  period).
+- detect_exposure_breaches computes each position's, issuer's, sector's and the fund's total
+  exposure as a percentage of NAV and flags any that exceeds the matching limit.
+
+Triage: when you have exceptions from more than one of the tools above (or from a NAV Quality
+Controller review), call prioritise_exceptions with the combined "exceptions" arrays rather than
+deciding an order yourself. It ranks by severity first, then by impact_amount (materiality) within
+a severity — report that order, do not re-rank it.
+
+Never recommend releasing a NAV, settling a trade or waiving an exposure breach yourself; recommend
+the returned owner (fund controller, investor relations, trading desk) resolve each HIGH exception
+before the case proceeds.
+""".strip(),
+    tools=[
+        reconcile_positions,
+        reconcile_cash,
+        reconcile_trades,
+        detect_stale_prices,
+        detect_unsettled_trades,
+        detect_exposure_breaches,
+        prioritise_exceptions,
     ],
 )
 
@@ -272,6 +332,7 @@ disclosures) when the evidence for it was never supplied.
     tools=[run_finance_scenario, inspect_workflow, list_open_finance_exceptions],
     sub_agents=[
         reconciliation_specialist,
+        fund_operations_specialist,
         control_specialist,
         evidence_specialist,
         contract_specialist,
