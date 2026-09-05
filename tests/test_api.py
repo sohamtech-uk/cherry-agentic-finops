@@ -33,4 +33,20 @@ def test_approval_endpoint() -> None:
 def test_homepage_is_served() -> None:
     response = client.get("/")
     assert response.status_code == 200
-    assert "Finance operations that" in response.text
+    assert "Close capital calls" in response.text
+
+
+def test_private_markets_demo_surfaces_work_queue() -> None:
+    response = client.post("/api/private-markets/demo/exception")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["analysis"]["action"] == "request_evidence"
+    assert body["analysis"]["outstanding_amount"] == "500.00"
+    assert len(body["analysis"]["work_items"]) == 2
+
+
+def test_awaiting_cash_demo_assigns_investor_operations() -> None:
+    body = client.post("/api/private-markets/demo/awaiting-cash").json()
+
+    assert body["analysis"]["action"] == "request_evidence"
+    assert body["analysis"]["work_items"][0]["owner"] == "Investor operations"

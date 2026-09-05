@@ -3,322 +3,91 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Cherry Agent turns bills and receipts into governed, audit-ready finance workflows.">
-  <title>Cherry Agent — Autonomous Finance Ops</title>
+  <meta name="description" content="Cherry FundOps reconciles capital calls across notices, commitment workbooks and fund cash.">
+  <title>Cherry FundOps — Capital call control room</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2216%22 fill=%22%23bdf28d%22/><text x=%2232%22 y=%2243%22 text-anchor=%22middle%22 font-size=%2236%22 font-family=%22Arial%22 font-weight=%22700%22 fill=%22%23123c32%22>C</text></svg>">
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-  <div class="ambient ambient-one"></div>
-  <div class="ambient ambient-two"></div>
-
   <header class="topbar">
-    <a class="brand" href="/" aria-label="Cherry Agent home">
-      <span class="brand-mark" aria-hidden="true">
-        <svg viewBox="0 0 64 64" role="img">
-          <path d="M33 29C34 16 43 9 52 8" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
-          <path d="M32 28C27 16 18 12 10 13" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
-          <path d="M43 11c5-7 11-7 15-5-2 7-8 11-15 5Z" fill="currentColor"/>
-          <circle cx="20" cy="41" r="12" fill="currentColor"/>
-          <circle cx="45" cy="42" r="12" fill="currentColor"/>
-        </svg>
-      </span>
-      <span><strong>Cherry</strong> Agent</span>
-    </a>
-    <nav class="topnav" aria-label="Primary navigation">
-      <a href="#workspace">Workspace</a>
-      <a href="#architecture">Architecture</a>
-      <a href="/api/docs" target="_blank" rel="noreferrer">API</a>
-    </nav>
-    <div class="cloud-state" id="cloud-state">
-      <span class="status-dot"></span>
-      <span>Loading environment…</span>
-    </div>
+    <a class="brand" href="#top" aria-label="Cherry FundOps home"><span class="brand-mark" aria-hidden="true">C</span><span>Cherry <strong>FundOps</strong></span></a>
+    <nav aria-label="Primary navigation"><a href="#control-room">Control room</a><a href="#workflow">Workflow</a><a href="#upload">Analyse files</a><a href="/api/docs" target="_blank" rel="noreferrer">API</a></nav>
+    <div class="environment" id="cloud-state"><i></i><span>Checking environment</span></div>
   </header>
 
-  <main>
+  <main id="top">
     <section class="hero">
       <div class="hero-copy">
-        <p class="eyebrow">Google All Things Agentic · Taskmaster</p>
-        <h1>Finance operations that <span>finish the work.</span></h1>
-        <p class="hero-lead">
-          Bills and receipts become categorised, reconciled and audit-ready—automatically when
-          controls permit, and with a human decision when they do not.
-        </p>
-        <div class="hero-actions">
-          <button class="button button-primary" data-scenario="autonomous">
-            <span class="button-icon">▶</span> Run autonomous demo
-          </button>
-          <button class="button button-secondary" data-scenario="approval">Test approval control</button>
-        </div>
-        <div class="trust-row" aria-label="Technology and safety boundaries">
-          <span>Gemini 3.7 Flash</span>
-          <span>Google ADK</span>
-          <span>Cloud Run</span>
-          <span>No payment initiation</span>
-        </div>
+        <p class="eyebrow">Ylookup × Encode · Private markets track</p>
+        <h1>Close capital calls<br><em>before they become fund risk.</em></h1>
+        <p class="hero-lead">One control room reads the notice, checks the LP ledger, matches fund cash and routes every exception to the right owner—with evidence attached.</p>
+        <div class="hero-actions"><button class="button primary" data-scenario="exception">Run live control check <span>→</span></button><a class="button secondary" href="#workflow">See the workflow</a></div>
+        <div class="proof-row"><span><b>3</b> source systems reconciled</span><span><b>0</b> payment permissions</span><span><b>&lt;5s</b> to triage</span></div>
       </div>
-
-      <div class="hero-visual" aria-hidden="true">
-        <div class="agent-orbit">
-          <div class="orbit orbit-one"></div>
-          <div class="orbit orbit-two"></div>
-          <div class="agent-core">
-            <div class="agent-face"><i></i><i></i></div>
-            <span>CHERRY</span>
-          </div>
-          <div class="orbit-node node-a">PDF</div>
-          <div class="orbit-node node-b">BANK</div>
-          <div class="orbit-node node-c">✓</div>
-          <div class="orbit-node node-d">AUDIT</div>
-        </div>
-        <div class="mini-card mini-card-left">
-          <span class="mini-label">Incoming invoice</span>
-          <strong>£2,450.00</strong>
-          <small>INV-98214</small>
-        </div>
-        <div class="mini-card mini-card-right">
-          <span class="mini-label">Agent outcome</span>
-          <strong class="success-text">Auto-reconciled</strong>
-          <small>98% evidence confidence</small>
+      <div class="hero-terminal" role="group" aria-label="Example control result">
+        <div class="terminal-bar"><span></span><span></span><span></span><small>CASE CPGF-2026-03-LP001</small></div>
+        <div class="terminal-body">
+          <p><span>01</span> Notice extracted <b>98%</b></p><p><span>02</span> Commitment arithmetic <b class="good">PASS</b></p><p><span>03</span> Bank instructions <b class="bad">CHANGED</b></p><p><span>04</span> Cash receipt <b class="warn">£500 SHORT</b></p>
+          <div class="terminal-result"><i></i><div><small>CONTROL DECISION</small><strong>Hold &amp; route exceptions</strong></div></div>
         </div>
       </div>
     </section>
 
-    <section class="workflow-ribbon" aria-label="Autonomous workflow">
-      <div class="ribbon-step active"><span>1</span><div><strong>Understand</strong><small>Gemini extraction</small></div></div>
-      <i></i>
-      <div class="ribbon-step"><span>2</span><div><strong>Categorise</strong><small>Accounting context</small></div></div>
-      <i></i>
-      <div class="ribbon-step"><span>3</span><div><strong>Reconcile</strong><small>Evidence scoring</small></div></div>
-      <i></i>
-      <div class="ribbon-step"><span>4</span><div><strong>Govern</strong><small>Risk and approval</small></div></div>
-      <i></i>
-      <div class="ribbon-step"><span>5</span><div><strong>Evidence</strong><small>Hash-chained audit</small></div></div>
-    </section>
+    <section class="source-strip" aria-label="Evidence flow"><span>Capital call PDF</span><i>+</i><span>LP commitment workbook</span><i>+</i><span>Bank cash feed</span><i>→</i><strong>One governed case</strong></section>
 
-    <section class="workspace-section" id="workspace">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">Live agent workspace</p>
-          <h2>One event. One governed outcome.</h2>
-        </div>
-        <div class="scenario-switcher" role="group" aria-label="Demo scenarios">
-          <button data-scenario="autonomous" class="scenario-chip active">Autonomous</button>
-          <button data-scenario="approval" class="scenario-chip">Approval</button>
-          <button data-scenario="exception" class="scenario-chip">Exception</button>
-        </div>
+    <section class="control-room" id="control-room">
+      <div class="section-head">
+        <div><p class="eyebrow">Live control room</p><h2>See the break. Know the next move.</h2></div>
+        <div class="scenario-tabs" role="group" aria-label="Demo cases"><button class="active" data-scenario="exception">Control break</button><button data-scenario="awaiting-cash">Awaiting cash</button><button data-scenario="clean">Clean close</button></div>
       </div>
 
-      <div class="empty-state" id="empty-state">
-        <div class="empty-icon">✦</div>
-        <h3>Start a finance workflow</h3>
-        <p>Run a scenario to see the agent reason through evidence, controls and state transitions.</p>
-        <button class="button button-primary" data-scenario="autonomous">Run the winning demo</button>
-      </div>
-
-      <div class="workspace hidden" id="workspace-panel">
-        <div class="metric-grid">
-          <article class="metric-card">
-            <span>Workflow</span>
-            <strong id="metric-workflow">—</strong>
-            <small id="metric-source">—</small>
-          </article>
-          <article class="metric-card">
-            <span>Document confidence</span>
-            <strong id="metric-confidence">—</strong>
-            <small>Gemini structured extraction</small>
-          </article>
-          <article class="metric-card">
-            <span>Best bank match</span>
-            <strong id="metric-match">—</strong>
-            <small>Deterministic evidence score</small>
-          </article>
-          <article class="metric-card accent">
-            <span>Current state</span>
-            <strong id="metric-status">—</strong>
-            <small id="metric-control">—</small>
-          </article>
+      <div class="dashboard" id="dashboard" aria-live="polite">
+        <div class="case-bar">
+          <div><span class="case-label">Active case</span><h3 id="case-title">Loading case…</h3><p id="case-subtitle">Reconciling fund evidence</p></div>
+          <div class="case-actions"><span class="decision-badge" id="decision-badge">Analysing</span><button class="icon-button" id="download-review" title="Download review brief" aria-label="Download review brief" disabled>↓</button></div>
         </div>
 
-        <div class="workspace-grid">
-          <article class="panel document-panel">
-            <div class="panel-header">
-              <div>
-                <span class="panel-kicker">Document Agent</span>
-                <h3>Invoice & receipt understanding</h3>
-              </div>
-              <span class="pill pill-good" id="extraction-source">Extracted</span>
-            </div>
-            <div class="document-preview">
-              <div class="document-paper">
-                <div class="paper-brand">
-                  <div class="paper-logo">C</div>
-                  <div><strong id="doc-supplier">Supplier</strong><small>Supplier invoice</small></div>
-                </div>
-                <div class="paper-title">INVOICE</div>
-                <div class="paper-meta">
-                  <span>Invoice no.<strong id="doc-number">—</strong></span>
-                  <span>Issue date<strong id="doc-date">—</strong></span>
-                  <span>Due date<strong id="doc-due">—</strong></span>
-                </div>
-                <div class="paper-lines">
-                  <div><span>Description</span><span>Net</span></div>
-                  <div><strong id="doc-category">Business services</strong><strong id="doc-subtotal">—</strong></div>
-                </div>
-                <div class="paper-totals">
-                  <span>VAT <strong id="doc-tax">—</strong></span>
-                  <span class="paper-total">Total <strong id="doc-total">—</strong></span>
-                </div>
-              </div>
-            </div>
-            <div class="extraction-grid">
-              <div><span>Suggested category</span><strong id="extract-category">—</strong></div>
-              <div><span>VAT treatment</span><strong id="extract-vat">—</strong></div>
-              <div><span>Payment reference</span><strong id="extract-reference">—</strong></div>
-              <div><span>Validation</span><strong class="success-text">Required fields passed</strong></div>
+        <div class="metrics">
+          <article><span>Call amount</span><strong id="metric-expected">—</strong><small>Notice vs ledger</small></article><article><span>Cash received</span><strong id="metric-received">—</strong><small id="metric-progress">— funded</small></article><article id="outstanding-card"><span>Outstanding</span><strong id="metric-outstanding">—</strong><small id="metric-variance">— variance</small></article><article><span>Time to due date</span><strong id="metric-due">—</strong><small id="metric-due-date">—</small></article>
+        </div>
+
+        <div class="dashboard-grid">
+          <article class="panel notice-panel">
+            <div class="panel-head"><div><span>01 · Document intelligence</span><h3>Capital call notice</h3></div><b class="tag good" id="extraction-confidence">—</b></div>
+            <div class="notice-card">
+              <div class="notice-brand"><div class="fund-monogram">CP</div><div><strong id="notice-fund">—</strong><small>Capital call notice</small></div></div><div class="notice-number"><small>NOTICE</small><strong id="notice-id">—</strong></div>
+              <div class="notice-grid"><div><small>Investor</small><strong id="notice-investor">—</strong></div><div><small>Due date</small><strong id="notice-due">—</strong></div><div><small>Current call</small><strong id="notice-amount">—</strong></div><div><small>Payment reference</small><strong id="notice-reference">—</strong></div></div>
+              <div class="bank-box"><span>Payment instructions</span><div><strong id="notice-bank">—</strong><b id="notice-account">—</b></div></div>
             </div>
           </article>
 
-          <article class="panel decision-panel" id="decision-panel">
-            <div class="panel-header">
-              <div>
-                <span class="panel-kicker">Risk & Approval Agent</span>
-                <h3>Bounded autonomy decision</h3>
-              </div>
-              <span class="pill" id="decision-pill">Pending</span>
-            </div>
-            <div class="decision-graphic">
-              <div class="score-ring" id="score-ring">
-                <span id="risk-score">—</span><small>risk</small>
-              </div>
-              <div class="decision-copy">
-                <h4 id="decision-title">Waiting for workflow</h4>
-                <p id="decision-control">The policy engine will determine the permitted next action.</p>
-              </div>
-            </div>
-            <ul class="reason-list" id="reason-list"></ul>
-            <div class="approval-form hidden" id="approval-form">
-              <label>Human approver
-                <input id="approver-name" value="Srinivasan Arumugam" maxlength="120">
-              </label>
-              <label>Approval note
-                <textarea id="approval-note" rows="3">Reviewed the invoice, bank match and control reasons.</textarea>
-              </label>
-              <div class="approval-actions">
-                <button class="button button-primary" id="approve-button">Approve & reconcile</button>
-                <button class="button button-danger" id="reject-button">Reject</button>
-              </div>
-            </div>
-            <div class="evidence-action hidden" id="evidence-action">
-              <p>Automation stopped safely. Add the missing or corrected evidence before retrying.</p>
-              <button class="button button-secondary" id="reject-exception-button">Close as exception</button>
-            </div>
-            <a class="button button-ghost hidden" id="download-evidence" href="#">Download evidence pack</a>
-          </article>
-
-          <article class="panel reconciliation-panel">
-            <div class="panel-header">
-              <div>
-                <span class="panel-kicker">Reconciliation Agent</span>
-                <h3>Ranked bank candidates</h3>
-              </div>
-              <span class="pill" id="candidate-count">0 candidates</span>
-            </div>
-            <div class="candidate-list" id="candidate-list"></div>
-          </article>
-
-          <article class="panel audit-panel">
-            <div class="panel-header">
-              <div>
-                <span class="panel-kicker">Evidence Agent</span>
-                <h3>Append-only audit trail</h3>
-              </div>
-              <span class="pill pill-good" id="chain-status">Hash chain valid</span>
-            </div>
-            <div class="timeline" id="audit-timeline"></div>
+          <article class="panel findings-panel"><div class="panel-head"><div><span>02 · Deterministic controls</span><h3>Control findings</h3></div><b class="tag" id="finding-count">—</b></div><div class="finding-list" id="finding-list"></div></article>
+          <article class="panel work-panel"><div class="panel-head"><div><span>03 · Exception routing</span><h3>Next-best work queue</h3></div><b class="tag" id="task-count">—</b></div><div class="task-list" id="task-list"></div></article>
+          <article class="panel ledger-panel">
+            <div class="panel-head"><div><span>04 · LP ledger</span><h3>Commitment position</h3></div><b class="tag good" id="ledger-status">—</b></div>
+            <div class="commitment-total"><span>Total commitment</span><strong id="total-commitment">—</strong></div><div class="commitment-bar"><i id="called-bar"></i><i id="current-bar"></i></div>
+            <div class="bar-legend"><span><i class="called"></i>Called before <b id="called-before">—</b></span><span><i class="current"></i>Current call <b id="current-call">—</b></span><span><i class="remaining"></i>Remaining <b id="remaining-call">—</b></span></div>
+            <div class="evidence-summary"><span>Matched cash evidence</span><strong id="matched-transactions">No matching transaction</strong></div>
           </article>
         </div>
       </div>
     </section>
 
-    <section class="upload-section">
-      <div class="upload-copy">
-        <p class="eyebrow">Use your own evidence</p>
-        <h2>Process a real invoice with Gemini.</h2>
-        <p>
-          Upload a PDF or image and supply sandbox bank candidates. Real extraction is enabled when
-          the Cloud Run service has Vertex AI access; the demo never pretends synthetic data is real.
-        </p>
-      </div>
-      <form class="upload-card" id="upload-form">
-        <label class="dropzone" for="document-input">
-          <span class="drop-icon">⇧</span>
-          <strong>Select an invoice or receipt</strong>
-          <small>PDF, PNG, JPEG or WebP · maximum 12 MB</small>
-          <input id="document-input" name="document" type="file" accept="application/pdf,image/png,image/jpeg,image/webp" required>
-        </label>
-        <label>Candidate bank transactions (JSON)
-          <textarea id="transactions-input" rows="7">[{"transaction_id":"sandbox-001","booking_date":"2026-08-22","amount":2450,"currency":"GBP","direction":"debit","description":"OFFICE SOLUTIONS INV-98214","merchant_name":"Office Solutions Co.","reference":"INV-98214"}]</textarea>
-        </label>
-        <button class="button button-primary" type="submit">Process with Cherry Agent</button>
-        <p class="form-message" id="upload-message"></p>
-      </form>
+    <section class="workflow-section" id="workflow">
+      <div class="section-head compact"><div><p class="eyebrow">Designed for fund operations</p><h2>From fragmented evidence to controlled close.</h2></div></div>
+      <div class="workflow-grid"><article><b>01</b><span>Understand</span><h3>Read every notice</h3><p>Gemini converts PDFs and images into schema-validated fund data with confidence and warnings.</p></article><article><b>02</b><span>Reconcile</span><h3>Cross-check the books</h3><p>Deterministic rules compare commitments, historical controls and booked cash—down to the penny.</p></article><article><b>03</b><span>Control</span><h3>Stop silent risk</h3><p>Changed banking details, ledger breaks and weak evidence block automation by design.</p></article><article><b>04</b><span>Route</span><h3>Give work an owner</h3><p>Every exception becomes an explicit task for treasury, investor operations or fund accounting.</p></article></div>
     </section>
 
-    <section class="architecture-section" id="architecture">
-      <div class="section-heading centered">
-        <div>
-          <p class="eyebrow">Google Cloud architecture</p>
-          <h2>Agent intelligence surrounded by reliable controls.</h2>
-          <p class="section-lead">Models understand context. Code, state and permissions govern action.</p>
-        </div>
-      </div>
-      <div class="architecture-map">
-        <div class="architecture-column">
-          <span class="architecture-label">Events</span>
-          <div class="architecture-box">Bills & receipts</div>
-          <div class="architecture-box">Bank feeds</div>
-          <div class="architecture-box">Human decisions</div>
-        </div>
-        <div class="architecture-arrow">→</div>
-        <div class="architecture-center">
-          <span class="architecture-label">Cherry Agent Orchestrator</span>
-          <div class="architecture-core">
-            <strong>Google ADK</strong>
-            <small>Gemini 3.7 Flash</small>
-          </div>
-          <div class="specialist-grid">
-            <span>Document</span><span>Categorisation</span><span>Reconciliation</span>
-            <span>Risk</span><span>Month-end</span><span>Evidence</span>
-          </div>
-        </div>
-        <div class="architecture-arrow">→</div>
-        <div class="architecture-column">
-          <span class="architecture-label">Outcomes</span>
-          <div class="architecture-box">Auto-reconciled</div>
-          <div class="architecture-box">Approval queue</div>
-          <div class="architecture-box">Audit evidence</div>
-        </div>
-      </div>
-      <div class="cloud-services">
-        <span>Cloud Run</span><span>Firestore</span><span>Pub/Sub</span><span>Cloud Storage</span><span>Vertex AI</span>
-      </div>
+    <section class="upload-section" id="upload">
+      <div class="upload-copy"><p class="eyebrow">Bring your own evidence</p><h2>Turn three files into one review-ready case.</h2><p>Upload a notice, commitment/control workbook and cash export. AI reads the document; code owns the financial decision boundary.</p><ul><li>PDF, PNG, JPEG or WebP notice</li><li>XLSX commitment workbook</li><li>UTF-8 CSV cash export</li></ul></div>
+      <form class="upload-card" id="upload-form"><label><span>Capital call notice</span><input id="capital-call-input" type="file" accept="application/pdf,image/png,image/jpeg,image/webp" required></label><label><span>LP commitments &amp; controls</span><input id="commitments-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required></label><label><span>Fund cash transactions</span><input id="cash-input" type="file" accept=".csv,text/csv" required></label><label><span>Control date</span><input id="as-of-input" type="date" value="2026-09-05"></label><button class="button primary" type="submit">Analyse private-markets case <span>→</span></button><p class="form-message" id="upload-message">Your files remain inside the configured service environment.</p></form>
     </section>
+
+    <section class="boundary"><div><span>Decision boundary</span><h2>AI interprets evidence.<br>Controls decide what can proceed.</h2></div><p>Cherry FundOps is decision support and reconciliation infrastructure. It never initiates a payment, and changed bank instructions always require independent verification.</p></section>
   </main>
 
-  <footer>
-    <div class="brand footer-brand"><span class="brand-mark small">●●</span><span><strong>Cherry</strong> Agent</span></div>
-    <p>Built by Soham London CIC for Google All Things Agentic.</p>
-    <p>Accounting workflow assistance only. No payment initiation or tax advice.</p>
-  </footer>
-
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <div class="loading-overlay hidden" id="loading-overlay">
-    <div class="loader"></div>
-    <strong>Cherry Agent is working…</strong>
-    <span>Understand → categorise → reconcile → govern → evidence</span>
-  </div>
-
+  <footer><a class="brand" href="#top"><span class="brand-mark">C</span><span>Cherry <strong>FundOps</strong></span></a><p>Built for Rebuild Private Markets · Ylookup × Encode</p><p>Synthetic demo data · No payment initiation</p></footer>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div><div class="loading hidden" id="loading"><div class="loader"></div><strong>Reconciling the case</strong><span>Notice → commitment → cash → controls</span></div>
   <script src="/static/app.js" defer></script>
 </body>
 </html>

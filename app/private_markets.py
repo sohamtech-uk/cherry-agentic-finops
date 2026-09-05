@@ -55,6 +55,12 @@ class FindingSeverity(StrEnum):
     HIGH = "high"
 
 
+class WorkItemPriority(StrEnum):
+    CRITICAL = "critical"
+    HIGH = "high"
+    NORMAL = "normal"
+
+
 class CapitalCallExtraction(BaseModel):
     document_type: Literal["capital_call", "distribution_notice", "unknown"] = "capital_call"
     fund_name: str
@@ -189,6 +195,14 @@ class PrivateMarketsFinding(BaseModel):
     observed: str | None = None
 
 
+class PrivateMarketsWorkItem(BaseModel):
+    code: str
+    priority: WorkItemPriority
+    owner: str
+    title: str
+    instruction: str
+
+
 class PrivateMarketsAnalysis(BaseModel):
     action: PrivateMarketsAction
     fund_name: str
@@ -197,9 +211,18 @@ class PrivateMarketsAnalysis(BaseModel):
     expected_amount: Decimal
     received_amount: Decimal
     variance_amount: Decimal
+    outstanding_amount: Decimal
+    funding_progress_percent: Decimal
+    total_commitment: Decimal | None = None
+    called_before_current: Decimal | None = None
+    remaining_commitment: Decimal | None = None
+    days_to_due: int | None = None
     due_date: date | None = None
     matched_transaction_ids: list[str] = Field(default_factory=list)
     findings: list[PrivateMarketsFinding] = Field(default_factory=list)
+    work_items: list[PrivateMarketsWorkItem] = Field(default_factory=list)
+    controls_passed: int = 0
+    exceptions_open: int = 0
     controls_summary: str
     financial_boundary: str = (
         "Decision support and reconciliation only; this service never initiates a payment."
@@ -413,6 +436,13 @@ def _matching_cash(
     for transaction in transactions:
         if transaction.direction != "credit" or transaction.currency != call.currency:
             continue
+        if transaction.status and transaction.status.upper() not in {
+            "BOOKED",
+            "CLEARED",
+            "RECONCILED",
+            "SETTLED",
+        }:
+            continue
         haystack = " ".join(
             filter(
                 None,
@@ -436,6 +466,30 @@ def analyse_private_markets_case(
 ) -> PrivateMarketsAnalysis:
     findings: list[PrivateMarketsFinding] = []
     commitment = _find_commitment(call, dataset.commitments)
+
+    if call.confidence < 85:
+        findings.append(
+            PrivateMarketsFinding(
+                code="extraction.low_confidence",
+                severity=FindingSeverity.HIGH,
+                title="Document extraction needs review",
+                detail=(
+                    f"Extraction confidence is {call.confidence}%. The notice must be checked "
+                    "against the source document before a control decision can complete."
+                ),
+                expected="85% or higher",
+                observed=f"{call.confidence}%",
+            )
+        )
+    elif call.warnings:
+        findings.append(
+            PrivateMarketsFinding(
+                code="extraction.warnings_present",
+                severity=FindingSeverity.WARNING,
+                title="Extraction contains warnings",
+                detail="; ".join(call.warnings),
+            )
+        )
 
     if commitment is None:
         findings.append(
@@ -508,7 +562,24 @@ def analyse_private_markets_case(
         ),
         None,
     )
-    if approved_bank and call.account_last4:
+    if approved_bank and (not call.account_last4 or not call.sort_code):
+        findings.append(
+            PrivateMarketsFinding(
+                code="bank.instructions_incomplete",
+                severity=FindingSeverity.HIGH,
+                title="Banking instructions are incomplete",
+                detail=(
+                    "The notice does not contain enough banking evidence to compare it with the "
+                    "approved fund record. Independent verification is required."
+                ),
+                expected=(
+                    f"{approved_bank.bank_name or 'approved bank'} / "
+                    f"****{approved_bank.account_last4 or 'unknown'}"
+                ),
+                observed="Incomplete notice instructions",
+            )
+        )
+    elif approved_bank:
         changed_account = (
             approved_bank.account_last4 is not None
             and approved_bank.account_last4 != call.account_last4
@@ -518,7 +589,12 @@ def analyse_private_markets_case(
             and call.sort_code
             and approved_bank.sort_code.replace("-", "") != call.sort_code.replace("-", "")
         )
-        if changed_account or changed_sort:
+        changed_beneficiary = bool(
+            approved_bank.beneficiary
+            and call.beneficiary
+            and approved_bank.beneficiary.casefold() != call.beneficiary.casefold()
+        )
+        if changed_account or changed_sort or changed_beneficiary:
             findings.append(
                 PrivateMarketsFinding(
                     code="bank.instructions_changed",
@@ -544,13 +620,16 @@ def analyse_private_markets_case(
                     detail="The account details on the notice match the approved fund record.",
                 )
             )
-    elif not approved_bank:
+    else:
         findings.append(
             PrivateMarketsFinding(
                 code="bank.approved_record_missing",
-                severity=FindingSeverity.WARNING,
+                severity=FindingSeverity.HIGH,
                 title="No approved banking record available",
-                detail="Bank instructions cannot be independently compared with the supplied data.",
+                detail=(
+                    "Bank instructions cannot be independently compared with the supplied data. "
+                    "Do not release funds until an approved record is obtained."
+                ),
             )
         )
 
@@ -607,15 +686,107 @@ def analyse_private_markets_case(
             )
         )
 
+    all_codes = {finding.code for finding in findings}
     high_codes = {finding.code for finding in findings if finding.severity == FindingSeverity.HIGH}
-    if "bank.instructions_changed" in high_codes:
-        action = PrivateMarketsAction.REQUIRE_APPROVAL
-    elif high_codes:
+    evidence_blockers = high_codes - {"bank.instructions_changed"}
+    if evidence_blockers:
         action = PrivateMarketsAction.REQUEST_EVIDENCE
+    elif "bank.instructions_changed" in high_codes:
+        action = PrivateMarketsAction.REQUIRE_APPROVAL
     elif any(finding.severity == FindingSeverity.WARNING for finding in findings):
         action = PrivateMarketsAction.REQUEST_EVIDENCE
     else:
         action = PrivateMarketsAction.AUTO_RECONCILE
+
+    work_items: list[PrivateMarketsWorkItem] = []
+    if "bank.instructions_changed" in high_codes or "bank.instructions_incomplete" in high_codes:
+        work_items.append(
+            PrivateMarketsWorkItem(
+                code="verify_bank_instructions",
+                priority=WorkItemPriority.CRITICAL,
+                owner="Treasury control",
+                title="Verify bank instructions out of band",
+                instruction=(
+                    "Call the fund administrator on an independently sourced number and record "
+                    "the verifier, timestamp and approved account before any payment release."
+                ),
+            )
+        )
+    if "bank.approved_record_missing" in high_codes:
+        work_items.append(
+            PrivateMarketsWorkItem(
+                code="obtain_approved_bank_record",
+                priority=WorkItemPriority.CRITICAL,
+                owner="Treasury control",
+                title="Obtain the approved bank record",
+                instruction="Attach a dual-approved banking record before comparing the notice.",
+            )
+        )
+    if "cash.short_receipt" in high_codes or "cash.missing" in all_codes:
+        work_items.append(
+            PrivateMarketsWorkItem(
+                code="resolve_cash_shortfall",
+                priority=WorkItemPriority.HIGH,
+                owner="Investor operations",
+                title="Resolve the outstanding contribution",
+                instruction=(
+                    "Confirm whether the variance is a bank fee or underpayment, then request the "
+                    "balance or attach supporting evidence."
+                ),
+            )
+        )
+    if "cash.over_receipt" in high_codes:
+        work_items.append(
+            PrivateMarketsWorkItem(
+                code="resolve_cash_overage",
+                priority=WorkItemPriority.HIGH,
+                owner="Fund accounting",
+                title="Resolve the cash overage",
+                instruction="Confirm allocation and refund treatment before posting the receipt.",
+            )
+        )
+    if high_codes & {
+        "commitment.not_found",
+        "commitment.call_amount_mismatch",
+        "commitment.remaining_math_mismatch",
+    }:
+        work_items.append(
+            PrivateMarketsWorkItem(
+                code="review_commitment_ledger",
+                priority=WorkItemPriority.HIGH,
+                owner="Fund accounting",
+                title="Review the commitment ledger",
+                instruction="Correct or evidence the LP commitment schedule before reconciliation.",
+            )
+        )
+    if "extraction.low_confidence" in high_codes:
+        work_items.append(
+            PrivateMarketsWorkItem(
+                code="review_extraction",
+                priority=WorkItemPriority.HIGH,
+                owner="Fund operations",
+                title="Review extracted notice fields",
+                instruction="Compare the highlighted fields with the source notice and correct them.",
+            )
+        )
+
+    outstanding = money(max(call.current_call - received, Decimal("0")))
+    progress = Decimal("0")
+    if call.current_call:
+        progress = min(
+            Decimal("100"),
+            (received / call.current_call * Decimal("100")).quantize(Decimal("0.01")),
+        )
+    remaining_commitment = (
+        money(
+            commitment.total_commitment - commitment.called_before_current - commitment.current_call
+        )
+        if commitment
+        else call.remaining_after_current
+    )
+    days_to_due = (
+        (call.due_date - as_of_date).days if call.due_date is not None and as_of_date else None
+    )
 
     return PrivateMarketsAnalysis(
         action=action,
@@ -625,9 +796,23 @@ def analyse_private_markets_case(
         expected_amount=call.current_call,
         received_amount=received,
         variance_amount=variance,
+        outstanding_amount=outstanding,
+        funding_progress_percent=progress,
+        total_commitment=commitment.total_commitment if commitment else call.total_commitment,
+        called_before_current=(
+            commitment.called_before_current if commitment else call.called_before_current
+        ),
+        remaining_commitment=remaining_commitment,
+        days_to_due=days_to_due,
         due_date=call.due_date,
         matched_transaction_ids=[transaction.transaction_id for transaction in cash_matches],
         findings=findings,
+        work_items=work_items,
+        controls_passed=sum(finding.severity == FindingSeverity.PASS for finding in findings),
+        exceptions_open=sum(
+            finding.severity in {FindingSeverity.HIGH, FindingSeverity.WARNING}
+            for finding in findings
+        ),
         controls_summary=(
             "AI extracts the notice; deterministic commitment, bank-instruction and cash controls "
             "decide whether the case can reconcile, needs approval, or needs more evidence."
