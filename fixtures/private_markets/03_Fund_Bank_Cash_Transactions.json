@@ -1,0 +1,37 @@
+{
+  "transactions": [
+    {
+      "transaction_id": "TXN-2026-0904-001",
+      "booking_date": "2026-09-04",
+      "direction": "CREDIT",
+      "amount_gbp": "875000.00",
+      "currency": "GBP",
+      "counterparty": "Northbridge Family Office",
+      "reference": "NCGFIII-CALL-2026-03 / LP-002",
+      "description": "Capital contribution - Northbridge",
+      "status": "BOOKED"
+    },
+    {
+      "transaction_id": "TXN-2026-0904-002",
+      "booking_date": "2026-09-04",
+      "direction": "CREDIT",
+      "amount_gbp": "1000000.00",
+      "currency": "GBP",
+      "counterparty": "Horizon Community Foundation",
+      "reference": "NCGFIII-CALL-2026-03 / LP-004",
+      "description": "Capital contribution - Horizon",
+      "status": "BOOKED"
+    },
+    {
+      "transaction_id": "TXN-2026-0905-003",
+      "booking_date": "2026-09-05",
+      "direction": "CREDIT",
+      "amount_gbp": "1249500.00",
+      "currency": "GBP",
+      "counterparty": "Oakfield Pension Trust",
+      "reference": "NCGFIII-CALL-2026-03 / LP-001",
+      "description": "Capital contribution - Oakfield",
+      "status": "BOOKED"
+    }
+  ]
+}
