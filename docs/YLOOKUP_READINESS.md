@@ -1,120 +1,109 @@
-# Ylookup × Encode readiness — 4 September 2026
+# Ylookup × Encode readiness — 5 September 2026
 
-This branch is **pre-hackathon preparation**, not the final Rebuild Private Markets submission.
-The final problem should still be selected after the 5 September kickoff and fund-manager interviews.
+Cherry FundOps is ready to use as the **private-markets control layer**, while Cherry Money remains a
+separate pre-existing financial system of record. The final hackathon problem should still be
+validated with fund managers before claiming event-specific functionality.
 
-## Frozen baseline
+## Frozen baselines
 
-The repository state before this preparation is preserved on:
+- `baseline/pre-ylookup-2026-09-04` — original Cherry Agent baseline.
+- `baseline/pre-hardening-2026-09-05` — control-room baseline at
+  `22f4461ee793eb9d9ab83828f9992a76c0be3ef6`.
 
-- `baseline/pre-ylookup-2026-09-04`
+These baselines make the pre-existing/event-built boundary auditable.
 
-The readiness work is isolated on:
-
-- `prep/ylookup-readiness-2026-09-04`
-
-This makes it straightforward to disclose what existed before the event and what is built during the
-hackathon itself.
-
-## What this readiness branch adds
-
-The goal is to remove plumbing risk without locking the team into a specific fund-manager problem.
-It adds reusable private-markets primitives that can support capital-call reconciliation, exception
-control or related fund-operations workflows:
+## Current FundOps capability
 
 - schema-validated Gemini extraction for capital-call/distribution notices;
 - XLSX ingestion for LP commitments and approved banking controls;
-- UTF-8 CSV ingestion for fund cash/bank transactions;
-- deterministic commitment arithmetic;
-- deterministic notice-to-cash reconciliation;
-- changed bank-instruction detection;
-- explicit `auto_reconcile`, `require_approval` and `request_evidence` outcomes;
-- tests for the synthetic backup scenario;
-- a standalone API route that does **not** write to Cherry Money and never initiates payments.
+- UTF-8 CSV ingestion for fund cash transactions;
+- strict commitment arithmetic and over-call prevention;
+- fail-closed approved-bank validation;
+- reference-bound cash reconciliation;
+- changed-bank, short/over/missing cash and duplicate-ID controls;
+- owned work queue for treasury, investor operations and fund accounting;
+- public synthetic control-break, awaiting-cash and clean-close demos;
+- protected real three-file upload path;
+- SHA-256 evidence metadata for uploaded inputs and analysis;
+- optional read-only Cherry Money finance snapshot;
+- no payment initiation or authorisation.
 
-## API
-
-### Health
-
-```text
-GET /api/private-markets/health
-```
-
-### Analyse a private-markets case
+## Endpoints
 
 ```text
+GET  /api/private-markets/health
+POST /api/private-markets/demo/exception
+POST /api/private-markets/demo/awaiting-cash
+POST /api/private-markets/demo/clean
 POST /api/private-markets/analyse
+GET  /api/private-markets/cherry-money/snapshot
 ```
 
-Multipart fields:
+Real-data endpoints are protected in production with `CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN`, supplied
+by the client as `X-Cherry-Demo-Token`.
 
-| Field | Required | Description |
-| --- | --- | --- |
-| `commitments` | yes | LP commitment/control workbook (`.xlsx`) |
-| `cash` | yes | fund cash/bank transaction CSV |
-| `capital_call` | one of | capital-call/distribution PDF or image |
-| `capital_call_json` | one of | structured JSON fallback when AI extraction is unavailable |
-| `as_of_date` | no | `YYYY-MM-DD` date for due-date controls |
+## Cherry Money as the base
 
-Example using Gemini extraction:
+If organisers confirm reuse is allowed, the architecture is:
 
-```bash
-curl -X POST http://localhost:8080/api/private-markets/analyse \
-  -F 'capital_call=@fixtures/private_markets/01_Capital_Call_Notice_2026-03_Oakfield.pdf;type=application/pdf' \
-  -F 'commitments=@fixtures/private_markets/02_LP_Commitments_and_Controls.xlsx' \
-  -F 'cash=@fixtures/private_markets/03_Fund_Bank_Cash_Transactions.csv;type=text/csv' \
-  -F 'as_of_date=2026-09-05'
+```text
+Cherry Money (pre-existing)
+  accounting / bank / company-scoped financial data
+                 |
+                 | authenticated read-only bridge
+                 v
+Cherry FundOps / Cherry Agent (pre-existing control layer)
+  Gemini extraction + strict deterministic controls
+                 |
+                 v
+Hackathon-specific workflow
+  problem validated with fund managers + Ylookup/event data/APIs
 ```
 
-For an offline/demo fallback, send the same workbook and CSV with a schema-conformant
-`capital_call_json` form field instead of the PDF.
+Cherry Money's existing `/api/webmcp/bootstrap` bridge can provide a bounded read-only finance
+snapshot. FundOps does not use the legacy write helper in the private-markets route.
 
-## Expected synthetic control findings
+## Synthetic control-break scenario
 
-The bundled Cedar Peak / Oakfield fixture intentionally contains two important exceptions:
+- LP: Oakfield Pension Trust;
+- total commitment: GBP 5,000,000;
+- previously called: GBP 2,750,000;
+- current call: GBP 1,250,000;
+- remaining after call: GBP 1,000,000;
+- approved account ending: `2381`;
+- current notice account ending: `9437`;
+- strongly referenced cash: GBP 1,249,500;
+- short receipt: GBP 500.
 
-1. the current notice uses account ending `9437`, while the approved fund control record uses
-   account ending `2381` → **require human approval / independent verification**;
-2. Oakfield is expected to contribute GBP 1,250,000 but the cash CSV contains GBP 1,249,500 →
-   **GBP 500 short-receipt exception**.
+Expected result: **request evidence** because a changed payment destination and a cash shortfall
+cannot be resolved by approval alone. Treasury verifies payment instructions and investor operations
+resolves the outstanding contribution.
 
-The commitment arithmetic itself reconciles to GBP 1,000,000 remaining after the current call.
+## Morning checklist
 
-## Product upgrade
+1. Run `python -m pip install -e ".[dev]"`.
+2. Run `make ylookup-fixtures`.
+3. Run `ruff check . && ruff format --check .`.
+4. Run `mypy app agents`.
+5. Run `pytest`.
+6. Start `uvicorn app.api:app --reload --port 8080`.
+7. Check `/health` and `/api/private-markets/health`.
+8. Run all three synthetic demo scenarios.
+9. Confirm real uploads are token-protected before using organiser files.
+10. Ask organisers whether Cherry Money + Cherry Agent may be disclosed pre-existing infrastructure.
+11. Interview fund managers and select one problem before building event-specific functionality.
 
-The main application is now a dedicated capital-call control room for the private-markets route.
-It turns a notice, LP commitment workbook and fund cash export into one governed case with:
+## Questions for organisers
 
-- an immediately visible control decision;
-- deterministic commitment, bank-instruction and cash findings;
-- a next-best work queue with explicit owners;
-- one-click synthetic control-break, awaiting-cash and clean-close cases;
-- a downloadable JSON review brief;
-- a real three-file upload path when Gemini is configured.
-
-The original invoice workflow APIs remain available for backwards compatibility, but the judge-facing
-experience now leads with the fund-manager problem.
-
-The product still deliberately does not add:
-
-- payment initiation;
-- writes to the existing Cherry Money product;
-- production fund/customer data;
-- an assumed Ylookup API integration before organisers confirm what is available;
-- liquidity forecasting without validated source data.
-
-## Tomorrow morning
-
-After the kickoff and interviews:
-
-1. choose one validated problem;
-2. record the user, current workflow, pain, success metric and demo moment;
-3. create a hackathon branch from the agreed starting point;
-4. keep the frozen baseline branch unchanged;
-5. build the visible product layer and event-specific workflow during the hackathon;
-6. update the reuse/pre-existing-work disclosure before submission.
+- May Cherry Money be used as a disclosed pre-existing accounting/open-banking base?
+- May Cherry Agent/FundOps be used as a disclosed pre-existing control framework?
+- What must be materially new during the hackathon?
+- Is Ylookup API/SDK access available, or only datasets/interviews?
+- Which sponsor model/cloud credits are available?
+- Is sponsor technology required or rewarded in judging?
 
 ## Financial boundary
 
-AI may extract and explain evidence. Deterministic controls decide reconciliation/approval states.
-An identified human remains responsible for approval, and this service does not initiate payments.
+AI interprets evidence. Deterministic controls decide whether evidence is sufficient. Human reviewers
+remain responsible for independent verification where required. Cherry FundOps does not execute
+money movement.
