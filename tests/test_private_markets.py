@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from io import BytesIO
 
 from openpyxl import Workbook
@@ -97,7 +98,7 @@ def test_fixture_case_flags_changed_bank_and_short_receipt() -> None:
 
     analysis = analyse_private_markets_case(call, dataset, cash, as_of_date=date(2026, 9, 5))
 
-    assert analysis.action == PrivateMarketsAction.REQUIRE_APPROVAL
+    assert analysis.action == PrivateMarketsAction.REQUEST_EVIDENCE
     assert analysis.expected_amount == 1_250_000
     assert analysis.received_amount == 1_249_500
     assert analysis.variance_amount == -500
@@ -106,6 +107,12 @@ def test_fixture_case_flags_changed_bank_and_short_receipt() -> None:
     assert "commitment.remaining_math_valid" in codes
     assert "bank.instructions_changed" in codes
     assert "cash.short_receipt" in codes
+    assert analysis.outstanding_amount == 500
+    assert analysis.funding_progress_percent == Decimal("99.96")
+    assert {item.code for item in analysis.work_items} == {
+        "verify_bank_instructions",
+        "resolve_cash_shortfall",
+    }
 
 
 def test_exact_match_can_auto_reconcile_when_bank_details_match() -> None:
@@ -136,4 +143,33 @@ def test_exact_match_can_auto_reconcile_when_bank_details_match() -> None:
     assert {finding.code for finding in analysis.findings} >= {
         "bank.instructions_match",
         "cash.exact_match",
+    }
+    assert analysis.work_items == []
+
+
+def test_low_confidence_and_incomplete_bank_details_block_automation() -> None:
+    dataset = parse_commitment_workbook(make_workbook())
+    cash = parse_cash_csv(
+        b"transaction_id,booking_date,direction,amount_gbp,currency,counterparty,reference,description,status\n"
+        b"TXN-1,2026-09-05,CREDIT,1250000.00,GBP,Oakfield Pension Trust,"
+        b"NCGFIII-CALL-2026-03 / LP-001,Capital contribution,BOOKED\n"
+    )
+    call = CapitalCallExtraction(
+        fund_name="Cedar Peak Growth Fund III LP",
+        investor_name="Oakfield Pension Trust",
+        lp_reference="LP-001",
+        notice_id="NCGFIII-CALL-2026-03",
+        due_date=date(2026, 9, 6),
+        current_call=1_250_000,
+        account_last4=None,
+        confidence=64,
+        source="fixture",
+    )
+
+    analysis = analyse_private_markets_case(call, dataset, cash)
+
+    assert analysis.action == PrivateMarketsAction.REQUEST_EVIDENCE
+    assert {finding.code for finding in analysis.findings} >= {
+        "extraction.low_confidence",
+        "bank.instructions_incomplete",
     }

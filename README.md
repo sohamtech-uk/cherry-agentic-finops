@@ -2,29 +2,30 @@
   <img src="docs/images/hero.jpg" alt="Cherry Agent autonomous finance operations" width="920">
 </p>
 
-# Cherry Agent — Autonomous Finance Ops
+# Cherry FundOps — Capital Call Control Room
 
 [![CI](https://github.com/sohamtech-uk/cherry-agentic-finops/actions/workflows/ci.yml/badge.svg)](https://github.com/sohamtech-uk/cherry-agentic-finops/actions/workflows/ci.yml)
 
-Cherry Agent turns bills, receipts and bank-feed events into governed finance workflows:
+Cherry FundOps turns capital-call notices, LP commitment workbooks and bank cash exports into a
+single governed fund-operations case:
 
-**understand → categorise → reconcile → approve when needed → create audit evidence**
+**extract → cross-check → reconcile → surface exceptions → route the next action**
 
-It is a new hackathon implementation for **Google All Things Agentic**, built with **Gemini 3.5
-Flash**, **Google Agent Development Kit (ADK)**, **FastAPI** and **Google Cloud**. The application
-works locally with explicitly labelled synthetic scenarios. Real PDF/image uploads use Gemini when
-Vertex AI credentials are available.
+The judge-facing product is built for the **Rebuild Private Markets: Ylookup × Encode AI Hackathon**.
+It uses **Gemini**, **FastAPI** and deterministic finance controls. The application works locally
+with explicitly labelled synthetic cases. Real PDF/image uploads use Gemini when Vertex AI
+credentials are available.
 
-## The winning demonstration
+## The demonstration
 
 | Scenario | What the judges see | Outcome |
 |---|---|---|
-| Autonomous | Exact amount, date, supplier, reference and currency; value remains below policy threshold | Automatically reconciled |
-| Approval | Strong evidence, but a £12,500 transaction crosses the configured financial threshold | Paused for an identified human |
-| Exception | Supplier/reference match but bank amount differs materially from the evidence | Automation stops and requests evidence |
+| Control break | A notice changes approved bank instructions and booked cash is £500 short | Payment path stays blocked; treasury and investor-ops tasks are created |
+| Awaiting cash | The notice and banking record agree but no booked receipt exists | Case remains open for investor operations |
+| Clean close | Notice, commitment arithmetic, approved bank record and cash agree | Ready to reconcile |
 
-The distinction matters: **Gemini understands context, while deterministic controls grant or deny
-financial authority.** Cherry Agent never initiates a payment.
+The distinction matters: **Gemini understands documents, while deterministic controls decide what
+can proceed.** Cherry FundOps never initiates a payment.
 
 ## Architecture
 

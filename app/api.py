@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -63,14 +63,14 @@ async def security_headers(request, call_next):  # type: ignore[no-untyped-def]
 
 
 @app.exception_handler(WorkflowNotFound)
-async def workflow_not_found_handler(_, exc: WorkflowNotFound) -> JSONResponse:
+async def workflow_not_found_handler(_: Request, exc: WorkflowNotFound) -> JSONResponse:
     return JSONResponse(
         status_code=404, content={"detail": f"Workflow {exc.args[0]} was not found."}
     )
 
 
 @app.exception_handler(InvalidWorkflowAction)
-async def invalid_workflow_action_handler(_, exc: InvalidWorkflowAction) -> JSONResponse:
+async def invalid_workflow_action_handler(_: Request, exc: InvalidWorkflowAction) -> JSONResponse:
     return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 

@@ -19,7 +19,7 @@ class EventPublisher:
         if self._publisher is not None or not self._settings.google_cloud_project:
             return
         try:
-            from google.cloud import pubsub_v1
+            import google.cloud.pubsub_v1 as pubsub_v1  # type: ignore[import-untyped]
         except ImportError:
             logger.warning("Pub/Sub package unavailable; event publishing is disabled.")
             return
@@ -51,7 +51,7 @@ class EvidenceStorage:
         if not self._settings.cloud_mode or not self._settings.evidence_bucket:
             return None
         try:
-            from google.cloud import storage
+            import google.cloud.storage as storage  # type: ignore[import-untyped]
         except ImportError:  # pragma: no cover
             logger.warning("Cloud Storage package unavailable; evidence remains downloadable only.")
             return None

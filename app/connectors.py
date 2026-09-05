@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -35,4 +35,4 @@ class CherryMoneyConnector:
                 f"{self._base_url}/expenseAdd", json=payload, headers=headers
             )
             response.raise_for_status()
-            return response.json()
+            return cast(dict[str, Any], response.json())

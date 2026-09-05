@@ -9,9 +9,13 @@ from pydantic import ValidationError
 
 from app.config import get_settings
 from app.private_markets import (
+    ApprovedBankDetails,
     CapitalCallExtraction,
+    FundCashTransaction,
     GeminiCapitalCallExtractor,
     GeminiPrivateMarketsUnavailable,
+    LPCommitment,
+    PrivateMarketsDataset,
     analyse_private_markets_case,
     parse_cash_csv,
     parse_commitment_workbook,
@@ -22,6 +26,77 @@ extractor = GeminiCapitalCallExtractor(settings)
 router = APIRouter(prefix="/api/private-markets", tags=["private-markets"])
 
 
+def _demo_case(
+    scenario: str,
+) -> tuple[CapitalCallExtraction, PrivateMarketsDataset, list[FundCashTransaction]]:
+    if scenario not in {"exception", "clean", "awaiting-cash"}:
+        raise ValueError("Scenario must be exception, clean, or awaiting-cash.")
+
+    call = CapitalCallExtraction(
+        fund_name="Cedar Peak Growth Fund III LP",
+        investor_name="Oakfield Pension Trust",
+        lp_reference="LP-001",
+        notice_id="NCGFIII-CALL-2026-03",
+        issue_date=date(2026, 8, 28),
+        due_date=date(2026, 9, 6),
+        currency="GBP",
+        total_commitment=5_000_000,
+        called_before_current=2_750_000,
+        current_call=1_250_000,
+        remaining_after_current=1_000_000,
+        beneficiary="Cedar Peak Growth Fund III LP",
+        bank_name="Cedar Demo Bank plc" if scenario != "exception" else "Harbour Demo Bank plc",
+        sort_code="00-00-00" if scenario != "exception" else "99-99-99",
+        account_last4="2381" if scenario != "exception" else "9437",
+        payment_reference="NCGFIII-CALL-2026-03 / LP-001",
+        purpose="Portfolio acquisition funding and fund expenses",
+        confidence=98,
+        source="fixture",
+    )
+    dataset = PrivateMarketsDataset(
+        commitments=[
+            LPCommitment(
+                lp_id="LP-001",
+                lp_name="Oakfield Pension Trust",
+                total_commitment=5_000_000,
+                called_before_current=2_750_000,
+                current_call=1_250_000,
+                remaining_after_current=1_000_000,
+                due_date=date(2026, 9, 6),
+                call_notice_id="NCGFIII-CALL-2026-03",
+                call_status="RECEIVED" if scenario == "clean" else "OPEN",
+            )
+        ],
+        approved_bank_details=[
+            ApprovedBankDetails(
+                fund_id="FUND-001",
+                fund_name="Cedar Peak Growth Fund III LP",
+                beneficiary="Cedar Peak Growth Fund III LP",
+                bank_name="Cedar Demo Bank plc",
+                sort_code="00-00-00",
+                account_last4="2381",
+                approval_status="APPROVED",
+            )
+        ],
+    )
+    transactions: list[FundCashTransaction] = []
+    if scenario != "awaiting-cash":
+        transactions.append(
+            FundCashTransaction(
+                transaction_id="TXN-2026-0905-003",
+                booking_date=date(2026, 9, 5),
+                direction="credit",
+                amount=1_250_000 if scenario == "clean" else 1_249_500,
+                currency="GBP",
+                counterparty="Oakfield Pension Trust",
+                reference="NCGFIII-CALL-2026-03 / LP-001",
+                description="Capital contribution - Oakfield",
+                status="BOOKED",
+            )
+        )
+    return call, dataset, transactions
+
+
 @router.get("/health")
 async def private_markets_health() -> dict[str, object]:
     return {
@@ -30,6 +105,33 @@ async def private_markets_health() -> dict[str, object]:
         "accepted_commitment_format": "xlsx",
         "accepted_cash_format": "utf-8 csv",
         "financial_boundary": "Decision support only; no payment initiation.",
+    }
+
+
+@router.post("/demo/{scenario}")
+async def private_markets_demo(scenario: str) -> dict[str, object]:
+    try:
+        call, dataset, transactions = _demo_case(scenario)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    analysis = analyse_private_markets_case(
+        call,
+        dataset,
+        transactions,
+        as_of_date=date(2026, 9, 5),
+    )
+    return {
+        "case_id": "CPGF-2026-03-LP001",
+        "scenario": scenario,
+        "synthetic": True,
+        "source_files": [
+            "Capital call notice",
+            "LP commitment workbook",
+            "Fund bank cash feed",
+        ],
+        "extraction": call.model_dump(mode="json"),
+        "analysis": analysis.model_dump(mode="json"),
+        "transactions": [transaction.model_dump(mode="json") for transaction in transactions],
     }
 
 

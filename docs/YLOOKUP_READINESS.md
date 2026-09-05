@@ -80,18 +80,28 @@ The bundled Cedar Peak / Oakfield fixture intentionally contains two important e
 
 The commitment arithmetic itself reconciles to GBP 1,000,000 remaining after the current call.
 
-## What is deliberately NOT built tonight
+## Product upgrade
 
-To preserve tomorrow's discovery work, this branch does not decide the final product or judging
-story. In particular it does not add:
+The main application is now a dedicated capital-call control room for the private-markets route.
+It turns a notice, LP commitment workbook and fund cash export into one governed case with:
 
-- a dedicated FundFlow judge UI;
-- a final workflow around a problem not yet validated with fund managers;
+- an immediately visible control decision;
+- deterministic commitment, bank-instruction and cash findings;
+- a next-best work queue with explicit owners;
+- one-click synthetic control-break, awaiting-cash and clean-close cases;
+- a downloadable JSON review brief;
+- a real three-file upload path when Gemini is configured.
+
+The original invoice workflow APIs remain available for backwards compatibility, but the judge-facing
+experience now leads with the fund-manager problem.
+
+The product still deliberately does not add:
+
 - payment initiation;
 - writes to the existing Cherry Money product;
 - production fund/customer data;
 - an assumed Ylookup API integration before organisers confirm what is available;
-- a final liquidity-forecasting feature.
+- liquidity forecasting without validated source data.
 
 ## Tomorrow morning
 
