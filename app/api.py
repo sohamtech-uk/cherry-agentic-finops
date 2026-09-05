@@ -17,6 +17,7 @@ from app.document_ai import GeminiDocumentExtractor, GeminiUnavailable
 from app.models import ApprovalRequest, BankTransaction, RejectionRequest
 from app.private_markets_integration_router import router as private_markets_integration_router
 from app.private_markets_router import router as private_markets_router
+from app.session_router import router as session_router
 from app.workflow import InvalidWorkflowAction, WorkflowNotFound
 from app.ylookup_router import router as ylookup_router
 
@@ -53,6 +54,7 @@ app.add_middleware(
 app.include_router(private_markets_router)
 app.include_router(private_markets_integration_router)
 app.include_router(ylookup_router)
+app.include_router(session_router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
