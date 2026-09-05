@@ -58,8 +58,28 @@ function downloadReview() {
   if (!state.case) return; const blob = new Blob([JSON.stringify(state.case, null, 2)], { type: "application/json" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${state.case.case_id || "private-markets-case"}-review.json`; link.click(); URL.revokeObjectURL(link.href); toast("Review brief downloaded with findings and assigned work.");
 }
 async function uploadEvidence(event) {
-  event.preventDefault(); const form = new FormData(); form.append("capital_call", $("#capital-call-input").files[0]); form.append("commitments", $("#commitments-input").files[0]); form.append("cash", $("#cash-input").files[0]); if ($("#as-of-input").value) form.append("as_of_date", $("#as-of-input").value); $("#upload-message").textContent = "Extracting notice and running deterministic controls…"; loading(true);
-  try { const result = await api("/api/private-markets/analyse", { method: "POST", body: form }); renderCase({ ...result, case_id: `UPLOAD-${Date.now()}`, synthetic: false, transactions: [] }); $("#upload-message").textContent = "Case created successfully."; $("#control-room").scrollIntoView({ behavior: "smooth" }); toast("Uploaded evidence analysed."); } catch (error) { $("#upload-message").textContent = error.message; toast(error.message, true); } finally { loading(false); }
+  event.preventDefault();
+  const form = new FormData();
+  form.append("capital_call", $("#capital-call-input").files[0]);
+  form.append("commitments", $("#commitments-input").files[0]);
+  form.append("cash", $("#cash-input").files[0]);
+  if ($("#as-of-input").value) form.append("as_of_date", $("#as-of-input").value);
+  const token = $("#upload-token")?.value.trim();
+  const headers = token ? { "X-Cherry-Demo-Token": token } : {};
+  $("#upload-message").textContent = "Extracting notice and running strict deterministic controls…";
+  loading(true);
+  try {
+    const result = await api("/api/private-markets/analyse", { method: "POST", body: form, headers });
+    renderCase({ ...result, synthetic: false, transactions: [] });
+    $("#upload-message").textContent = `Case ${result.case_id} created with evidence hashes.`;
+    $("#control-room").scrollIntoView({ behavior: "smooth" });
+    toast("Uploaded evidence analysed with strict controls.");
+  } catch (error) {
+    $("#upload-message").textContent = error.message;
+    toast(error.message, true);
+  } finally {
+    loading(false);
+  }
 }
 function bindEvents() { $$('[data-scenario]').forEach((button) => button.addEventListener("click", () => runScenario(button.dataset.scenario))); $("#download-review").addEventListener("click", downloadReview); $("#upload-form").addEventListener("submit", uploadEvidence); }
 async function initialise() { bindEvents(); await loadConfig(); await runScenario("exception", false); }
