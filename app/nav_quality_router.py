@@ -23,6 +23,7 @@ from app.nav_quality import (
     review_nav_quality,
     sha256_hex,
 )
+from app.nav_review_history import get_nav_review_history_store
 
 settings = get_settings()
 router = APIRouter(prefix="/api/nav-quality", tags=["nav-quality"])
@@ -73,11 +74,40 @@ async def nav_quality_health() -> dict[str, Any]:
             "side_letter_rule_validation",
         ],
         "exception_grouping": "root_causes ranked by impact_amount (materiality), highest first",
+        "iteration_tracking": (
+            "Each /review submission is recorded as one round for its (legal_entity, period_end) "
+            "case; see /cases/{legal_entity}/{period_end} and /metrics."
+        ),
         "financial_boundary": (
             "Decision support only; this service never posts a journal entry or amends the "
             "official NAV."
         ),
     }
+
+
+@router.get("/cases/{legal_entity}/{period_end}")
+async def nav_case_iterations(legal_entity: str, period_end: str) -> dict[str, Any]:
+    """Return how many review rounds this fund/period has taken so far, and — once it reaches
+    ready_to_submit — how many rounds it took to close. Measures the actual iteration count for
+    this case rather than asserting one."""
+
+    summary = get_nav_review_history_store().case_history(legal_entity, period_end)
+    if summary is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No review history for {legal_entity!r} / {period_end!r}.",
+        )
+    return summary.model_dump(mode="json")
+
+
+@router.get("/metrics")
+async def nav_iteration_metrics() -> dict[str, Any]:
+    """Aggregate iteration metrics across every fund/period reviewed through this service: how
+    many rounds cases typically take to reach ready_to_submit, and how many rounds open cases
+    have taken so far. This is how the "3-7 iterations down to 1-2" claim gets measured against
+    real usage instead of asserted in a pitch."""
+
+    return get_nav_review_history_store().metrics().model_dump(mode="json")
 
 
 @router.post("/review")
@@ -237,11 +267,28 @@ async def review_nav_pack(
     if rules_content is not None:
         sources.append({"kind": "side_letter_rules", "file_name": rules_name, "sha256": rules_hash})
 
+    round_ = get_nav_review_history_store().record_round(
+        legal_entity=summary.legal_entity,
+        period_end=summary.period_end.isoformat(),
+        action=report.action,
+        controls_passed=report.controls_passed,
+        exceptions_open=report.exceptions_open,
+        case_id=case_id,
+    )
+
     return {
         "case_id": case_id,
         "legal_entity": summary.legal_entity,
         "ledger_supplied": ledger is not None,
         "side_letter_rules_supplied": bool(rules),
+        "iteration": {
+            "round_number": round_.round_number,
+            "prior_rounds": round_.round_number - 1,
+            "note": (
+                "Round 1 reaching ready_to_submit is the target this service exists to hit; "
+                "later rounds mean earlier submissions for this fund/period were returned."
+            ),
+        },
         "contract_rule_source": (
             "source_backed_contract_documents"
             if use_contract_documents

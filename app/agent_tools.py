@@ -21,6 +21,7 @@ from app.nav_quality import (
 )
 from app.nav_reconciliation import validate_balance_sheet_equity as _validate_balance_sheet_equity
 from app.nav_reconciliation import validate_nav_bridge as _validate_nav_bridge
+from app.nav_review_history import get_nav_review_history_store
 from app.reconciliation_tools import build_bridge as _build_bridge
 from app.reconciliation_tools import calculate_sum as _calculate_sum
 from app.reconciliation_tools import compare_values as _compare_values
@@ -327,9 +328,11 @@ def run_nav_quality_review(
     and side-letter rule validation, in one deterministic pass. Returns a case_id, the review
     (findings, work items and a recommended action — ready_to_submit / needs_review /
     return_to_administrator), root_causes (the same findings grouped by underlying cause and
-    ranked by materiality — read this instead of the flat finding list when triaging), and
-    per-input evidence hashes. Never a correction; report what the tool found rather than
-    recomputing or regrouping any of it yourself.
+    ranked by materiality — read this instead of the flat finding list when triaging), an
+    iteration.round_number for this fund/period (this submission is recorded automatically; use
+    get_nav_case_iterations for the full history), and per-input evidence hashes. Never a
+    correction; report what the tool found rather than recomputing or regrouping any of it
+    yourself.
 
     Use validate_balance_sheet_equity / validate_nav_bridge instead when you only have isolated
     figures rather than a full NAV summary and optional source ledger.
@@ -381,12 +384,24 @@ def run_nav_quality_review(
     root_causes = group_exceptions_by_root_cause(report)
     summary_hash = sha256_hex(summary_content)
     case_id = build_case_id(summary_hash, ledger_hash or "NO_LEDGER", rules_hash or "NO_RULES")
+    round_ = get_nav_review_history_store().record_round(
+        legal_entity=summary.legal_entity,
+        period_end=summary.period_end.isoformat(),
+        action=report.action,
+        controls_passed=report.controls_passed,
+        exceptions_open=report.exceptions_open,
+        case_id=case_id,
+    )
 
     return {
         "case_id": case_id,
         "legal_entity": summary.legal_entity,
         "ledger_supplied": ledger is not None,
         "side_letter_rules_supplied": bool(rules),
+        "iteration": {
+            "round_number": round_.round_number,
+            "prior_rounds": round_.round_number - 1,
+        },
         "review": report.model_dump(mode="json"),
         "root_causes": [group.model_dump(mode="json") for group in root_causes],
         "evidence": {
@@ -480,3 +495,34 @@ def compare_dates(current_document_path: str, prior_document_path: str) -> dict[
         _read_file_bytes(prior_document_path),
         prior_path.name,
     )
+
+
+def get_nav_case_iterations(legal_entity: str, period_end: str) -> dict[str, Any]:
+    """Return how many NAV review rounds this fund/period has taken so far through
+    run_nav_quality_review, and — once it reaches ready_to_submit — how many rounds it took to
+    close. This measures the actual iteration count for one case; it is not an estimate.
+
+    Args:
+        legal_entity: The fund/legal entity name exactly as reported in the NAV summary.
+        period_end: The reporting period end date (ISO format), exactly as reported.
+    """
+
+    summary = get_nav_review_history_store().case_history(legal_entity, period_end)
+    if summary is None:
+        return {
+            "legal_entity": legal_entity,
+            "period_end": period_end,
+            "found": False,
+            "message": "No review has been recorded for this fund/period yet.",
+        }
+    return {"found": True, **summary.model_dump(mode="json")}
+
+
+def get_nav_iteration_metrics() -> dict[str, Any]:
+    """Return aggregate NAV review iteration metrics across every fund/period reviewed so far:
+    how many rounds cases typically take to reach ready_to_submit, and how many rounds currently
+    open cases have taken. Use this to answer "how many iterations does NAV review actually take"
+    from recorded submissions rather than asserting a target figure.
+    """
+
+    return get_nav_review_history_store().metrics().model_dump(mode="json")

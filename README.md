@@ -273,6 +273,22 @@ with the same `X-Cherry-Demo-Token` policy as the other private-markets evidence
 This ships as a standalone endpoint (see `/api/docs`); it is not yet wired into the shared
 auto-detect upload form described above.
 
+### Iteration tracking
+
+The sponsor call named the KPI directly: a draft NAV "takes 3-7 iterations to reach an acceptable
+version." That number is a claim about real usage, not something a review engine can assert about
+itself — so `app/nav_review_history.py` measures it instead. Every `/review` submission is recorded
+as one round for its `(legal_entity, period_end)` case, and the response includes an `iteration`
+block (`round_number`, `prior_rounds`).
+
+```text
+GET /api/nav-quality/cases/{legal_entity}/{period_end}   -- one case's full round history
+GET /api/nav-quality/metrics                             -- rounds-to-close across every case
+```
+
+In-memory only, matching `app.contracts.ContractRepository`'s scope: this is demo/session state,
+not a system of record.
+
 ## Statement Review Agent
 
 A deterministic reviewer for the "prior-period text and dates get mechanically rolled forward"
@@ -368,6 +384,8 @@ app/private_markets_router.py                legacy/demo and Cherry Money routes
 app/private_markets_integration_router.py    PDF + Excel + JSON orchestration
 app/nav_quality.py                           NAV Quality Controller schemas, GL parser and checks
 app/nav_quality_router.py                    NAV Quality Controller endpoint
+app/nav_exceptions.py                        root-cause grouping of NAV review findings
+app/nav_review_history.py                    NAV review iteration/round tracking
 app/contracts.py                             contract evidence, precedence and NAV rule checks
 app/contract_tools.py                        constrained contract specialist tools
 app/contract_router.py                       contract ingestion, search and NAV APIs

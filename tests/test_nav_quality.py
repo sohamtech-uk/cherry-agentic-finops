@@ -20,8 +20,18 @@ from app.nav_quality import (
     parse_side_letter_rules,
     review_nav_quality,
 )
+from app.nav_review_history import get_nav_review_history_store
 
 client = TestClient(app)
+
+
+def setup_function() -> None:
+    get_nav_review_history_store().clear()
+
+
+def teardown_function() -> None:
+    get_nav_review_history_store().clear()
+
 
 _GL_HEADER = [None] * 43
 _GL_HEADER[1] = "Static Date"
@@ -775,3 +785,138 @@ def test_group_exceptions_by_root_cause_warning_only_group_stays_warning() -> No
 
     assert len(groups) == 1
     assert groups[0].severity == "warning"
+
+
+def _submit_review(summary_bytes: bytes) -> dict[str, object]:
+    response = client.post(
+        "/api/nav-quality/review",
+        files={"nav_summary": ("nav-summary.json", summary_bytes, "application/json")},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_review_endpoint_records_the_first_round() -> None:
+    summary_bytes = json.dumps(
+        {
+            "legal_entity": "Fund X",
+            "period_end": "2026-06-30",
+            "total_assets": 5_000_000,
+            "total_liabilities": 150_000,
+            "reported_equity": 4_850_000,
+            "opening_nav": 4_700_000,
+            "contributions": 250_000,
+            "distributions": 100_000,
+            "income": 10_000,
+            "expenses": 10_000,
+            "closing_nav": 4_850_000,
+        }
+    ).encode()
+
+    body = _submit_review(summary_bytes)
+
+    assert body["iteration"] == {
+        "round_number": 1,
+        "prior_rounds": 0,
+        "note": body["iteration"]["note"],
+    }
+
+
+def test_resubmitting_the_same_case_increments_the_round() -> None:
+    clean_bytes = json.dumps(
+        {
+            "legal_entity": "Fund Y",
+            "period_end": "2026-06-30",
+            "total_assets": 5_000_000,
+            "total_liabilities": 150_000,
+            "reported_equity": 4_850_000,
+            "opening_nav": 4_700_000,
+            "contributions": 250_000,
+            "distributions": 100_000,
+            "income": 10_000,
+            "expenses": 10_000,
+            "closing_nav": 4_850_000,
+        }
+    ).encode()
+    broken_bytes = json.dumps(
+        {
+            "legal_entity": "Fund Y",
+            "period_end": "2026-06-30",
+            "total_assets": 5_000_000,
+            "total_liabilities": 150_000,
+            "reported_equity": 4_000_000,
+            "opening_nav": 4_700_000,
+            "contributions": 250_000,
+            "distributions": 100_000,
+            "income": 10_000,
+            "expenses": 10_000,
+            "closing_nav": 4_850_000,
+        }
+    ).encode()
+
+    first = _submit_review(broken_bytes)
+    second = _submit_review(clean_bytes)
+
+    assert first["iteration"]["round_number"] == 1
+    assert second["iteration"]["round_number"] == 2
+    assert second["iteration"]["prior_rounds"] == 1
+
+
+def test_case_iterations_endpoint_reports_full_history() -> None:
+    summary_bytes = json.dumps(
+        {
+            "legal_entity": "Fund Z",
+            "period_end": "2026-06-30",
+            "total_assets": 5_000_000,
+            "total_liabilities": 150_000,
+            "reported_equity": 4_850_000,
+            "opening_nav": 4_700_000,
+            "contributions": 250_000,
+            "distributions": 100_000,
+            "income": 10_000,
+            "expenses": 10_000,
+            "closing_nav": 4_850_000,
+        }
+    ).encode()
+    _submit_review(summary_bytes)
+
+    response = client.get("/api/nav-quality/cases/Fund Z/2026-06-30")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["rounds_submitted"] == 1
+    assert body["closed"] is True
+    assert body["rounds_to_close"] == 1
+
+
+def test_case_iterations_endpoint_404s_for_unknown_case() -> None:
+    response = client.get("/api/nav-quality/cases/Unknown Fund/2026-06-30")
+
+    assert response.status_code == 404
+
+
+def test_metrics_endpoint_aggregates_tracked_cases() -> None:
+    summary_bytes = json.dumps(
+        {
+            "legal_entity": "Fund M",
+            "period_end": "2026-06-30",
+            "total_assets": 5_000_000,
+            "total_liabilities": 150_000,
+            "reported_equity": 4_850_000,
+            "opening_nav": 4_700_000,
+            "contributions": 250_000,
+            "distributions": 100_000,
+            "income": 10_000,
+            "expenses": 10_000,
+            "closing_nav": 4_850_000,
+        }
+    ).encode()
+    _submit_review(summary_bytes)
+
+    response = client.get("/api/nav-quality/metrics")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["tracked_cases"] >= 1
+    assert body["closed_cases"] >= 1
+    assert body["average_rounds_to_close"] is not None
