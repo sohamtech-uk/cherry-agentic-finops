@@ -55,17 +55,22 @@ class ControlPlanEntry:
     tool_name: str | None = None
 
 
+ControlExecutor = Callable[
+    [list[EvidenceItem], ControlPlanEntry],
+    tuple[dict[str, Any], list[ExceptionItem]],
+]
+
+
 @dataclass(frozen=True)
 class ControlDefinition:
     control_id: str
     name: str
     source_type: str
-    required_roles: tuple[str, str]
-    tool_name: str
-    executor: Callable[
-        [list[EvidenceItem], ControlPlanEntry],
-        tuple[dict[str, Any], list[ExceptionItem]],
-    ]
+    required_evidence: tuple[str, ...]
+    required_roles: tuple[str, str] | None = None
+    tool_name: str | None = None
+    executor: ControlExecutor | None = None
+    version: str = "1.0"
 
 
 def _role_from_filename(filename: str) -> str | None:
@@ -158,10 +163,7 @@ def _statement_executor(
 
 def _reconciliation_executor(
     parser: Callable[[bytes], list[Any]], reconciler: Callable[..., Any]
-) -> Callable[
-    [list[EvidenceItem], ControlPlanEntry],
-    tuple[dict[str, Any], list[ExceptionItem]],
-]:
+) -> ControlExecutor:
     def execute(
         items: list[EvidenceItem], plan: ControlPlanEntry
     ) -> tuple[dict[str, Any], list[ExceptionItem]]:
@@ -177,52 +179,108 @@ def _reconciliation_executor(
 
 CONTROL_CATALOGUE: tuple[ControlDefinition, ...] = (
     ControlDefinition(
+        "CTRL-NAV-001",
+        "NAV footing / bridge reconciliation",
+        "nav_workbook",
+        ("nav_workbook",),
+    ),
+    ControlDefinition(
+        "CTRL-INV-001",
+        "Investor capital reconciliation",
+        "investor_gl",
+        ("investor_gl", "nav_workbook"),
+    ),
+    ControlDefinition(
+        "CTRL-COMMIT-001",
+        "Commitment / capital-call arithmetic",
+        "lp_commitments",
+        ("lp_commitments", "capital_call_notice"),
+    ),
+    ControlDefinition(
+        "CTRL-BANK-WORK-001",
+        "Bank statement to journal-entry reconciliation",
+        "bank_statement_working_file",
+        ("bank_statement_working_file", "bank_statement"),
+    ),
+    ControlDefinition(
+        "CTRL-LOAD-001",
+        "Loader contract validation",
+        "loader_template",
+        ("loader_template",),
+    ),
+    ControlDefinition(
+        "CTRL-CALL-001",
+        "Capital-call / commitment cross-check",
+        "capital_call_notice",
+        ("capital_call_notice", "lp_commitments"),
+    ),
+    ControlDefinition(
+        "CTRL-LPA-001",
+        "Governing-document rule extraction",
+        "lpa",
+        ("lpa",),
+    ),
+    ControlDefinition(
+        "CTRL-SIDE-001",
+        "Side-letter rule validation",
+        "side_letter",
+        ("side_letter", "lpa"),
+    ),
+    ControlDefinition(
+        "CTRL-BANK-001",
+        "Bank statement cash reconciliation",
+        "bank_statement",
+        ("bank_statement", "cash_transactions"),
+    ),
+    ControlDefinition(
         "CTRL-STMT-001",
         "Period-over-period statement comparison",
         "financial_statement",
-        ("prior", "current"),
-        "compare_financial_statements",
-        _statement_executor,
+        ("financial_statement",),
+        required_roles=("prior", "current"),
+        tool_name="compare_financial_statements",
+        executor=_statement_executor,
+    ),
+    ControlDefinition(
+        "CTRL-REPORT-001",
+        "Investor reporting cross-check",
+        "investor_report",
+        ("investor_report", "investor_gl"),
     ),
     ControlDefinition(
         "CTRL-POS-001",
         "Position reconciliation",
         "positions",
-        ("internal", "external"),
-        "reconcile_positions",
-        _reconciliation_executor(parse_positions, reconcile_positions),
+        ("positions",),
+        required_roles=("internal", "external"),
+        tool_name="reconcile_positions",
+        executor=_reconciliation_executor(parse_positions, reconcile_positions),
     ),
     ControlDefinition(
         "CTRL-TRD-001",
         "Trade reconciliation",
         "trades",
-        ("internal", "external"),
-        "reconcile_trades",
-        _reconciliation_executor(parse_trades, reconcile_trades),
+        ("trades",),
+        required_roles=("internal", "external"),
+        tool_name="reconcile_trades",
+        executor=_reconciliation_executor(parse_trades, reconcile_trades),
+    ),
+    ControlDefinition(
+        "CTRL-BANK-TXN-001",
+        "Cash transaction matching",
+        "bank_transactions",
+        ("bank_transactions", "cash_transactions"),
     ),
     ControlDefinition(
         "CTRL-CASH-001",
         "Cash reconciliation",
         "cash_transactions",
-        ("internal", "external"),
-        "reconcile_cash",
-        _reconciliation_executor(parse_cash_balances, reconcile_cash),
+        ("cash_transactions",),
+        required_roles=("internal", "external"),
+        tool_name="reconcile_cash",
+        executor=_reconciliation_executor(parse_cash_balances, reconcile_cash),
     ),
 )
-
-KNOWN_UNWIRED_CONTROLS = {
-    "nav_workbook": "NAV footing / bridge reconciliation",
-    "investor_gl": "Investor capital reconciliation",
-    "lp_commitments": "Commitment / capital-call arithmetic",
-    "bank_statement_working_file": "Bank statement to journal-entry reconciliation",
-    "loader_template": "Loader contract validation",
-    "capital_call_notice": "Capital-call / commitment cross-check",
-    "lpa": "Governing-document rule extraction",
-    "side_letter": "Side-letter rule validation",
-    "bank_statement": "Cash reconciliation",
-    "investor_report": "Investor reporting cross-check",
-    "bank_transactions": "Cash transaction matching",
-}
 
 
 class ControlPlanningAgent:
@@ -238,13 +296,39 @@ class ControlPlanningAgent:
             candidates = by_type.get(definition.source_type, [])
             if not candidates:
                 continue
+
+            if definition.executor is None or definition.required_roles is None:
+                missing_types = [
+                    evidence_type
+                    for evidence_type in definition.required_evidence
+                    if evidence_type not in by_type
+                ]
+                missing = [*missing_types, "registered deterministic execution adapter"]
+                plans.append(
+                    ControlPlanEntry(
+                        definition.control_id,
+                        definition.version,
+                        definition.name,
+                        [item.source["id"] for item in candidates],
+                        {},
+                        list(definition.required_evidence),
+                        "needs_evidence",
+                        "The control catalogue recognises this evidence type and its applicable "
+                        "control, but a registered deterministic adapter is not available yet.",
+                        1.0,
+                        missing_evidence=missing,
+                        tool_name=definition.tool_name,
+                    )
+                )
+                continue
+
             paired = _pair(candidates, definition.required_roles)
             if paired:
                 selected, roles, confidence, reason = paired
                 plans.append(
                     ControlPlanEntry(
                         definition.control_id,
-                        "1.0",
+                        definition.version,
                         definition.name,
                         [item.source["id"] for item in selected],
                         roles,
@@ -264,7 +348,7 @@ class ControlPlanningAgent:
                 plans.append(
                     ControlPlanEntry(
                         definition.control_id,
-                        "1.0",
+                        definition.version,
                         definition.name,
                         [item.source["id"] for item in candidates],
                         {},
@@ -275,32 +359,6 @@ class ControlPlanningAgent:
                         1.0,
                         missing_evidence=missing,
                         tool_name=definition.tool_name,
-                    )
-                )
-
-        registered_types = {definition.source_type for definition in CONTROL_CATALOGUE}
-        for source_type, candidates in by_type.items():
-            if (
-                source_type in registered_types
-                or source_type.startswith("unknown")
-                or source_type == "unknown"
-            ):
-                continue
-            control = KNOWN_UNWIRED_CONTROLS.get(source_type)
-            if control:
-                plans.append(
-                    ControlPlanEntry(
-                        f"CTRL-PENDING-{source_type.upper().replace('_', '-')}",
-                        "0",
-                        control,
-                        [item.source["id"] for item in candidates],
-                        {},
-                        [source_type],
-                        "needs_evidence",
-                        "The agent recognised the applicable control, but no registered "
-                        "deterministic adapter can consume this evidence shape yet.",
-                        1.0,
-                        missing_evidence=["registered deterministic execution adapter"],
                     )
                 )
         return plans
@@ -352,8 +410,11 @@ def run_analysis(files: list[tuple[str, bytes, str | None]]) -> dict[str, Any]:
             continue
         selected = [item_by_id[source_id] for source_id in plan.source_ids]
         run_id = _lineage_id(plan.control_id, *plan.source_ids)
+        definition = catalogue[plan.control_id]
+        if definition.executor is None:
+            raise RuntimeError(f"{plan.control_id} was marked ready without an executor")
         try:
-            output, generated = catalogue[plan.control_id].executor(selected, plan)
+            output, generated = definition.executor(selected, plan)
             generated = attach_evidence(generated, sources=_evidence_sources(selected))
             plan.status = "executed"
             runs.append(
