@@ -9,8 +9,9 @@ Target hostname: **`finops.cherrymoney.co.uk`**
 - `cherrymoney.co.uk` must be verified in Google Search Console for custom-domain mapping;
 - the domain's **DNS control panel** must be accessible.
 
-FTP access is not used by Cloud Run and cannot create the required CNAME/A/AAAA records. Do not put
-an FTP password, service-account key or API key in GitHub.
+FTP access is not used by Cloud Run and cannot create the required CNAME/A/AAAA records. Never
+commit an FTP password, service-account key or API key. Runtime credentials belong in protected
+GitHub environment secrets only.
 
 ## First deployment from Cloud Shell
 
@@ -70,6 +71,33 @@ After the first deployment, configure GitHub repository environment variables:
 
 The workflow `.github/workflows/deploy.yml` uses short-lived Workload Identity Federation tokens.
 It intentionally avoids long-lived service-account JSON keys.
+
+The production environment must also contain the `GOOGLE_API_KEY` secret. The workflow deploys
+the same restricted-IAM runtime configuration as `scripts/deploy-gcplab.sh`:
+
+- `GOOGLE_GENAI_USE_VERTEXAI=false`;
+- `GOOGLE_API_KEY` is passed to Cloud Run without being printed;
+- `CHERRY_PERSISTENCE_BACKEND=memory`;
+- no custom runtime service account, Firestore, bucket or Pub/Sub dependency is required.
+
+`GOOGLE_API_KEY` authenticates Gemini requests only. It cannot authenticate a GitHub runner to
+Artifact Registry or Cloud Run. The three `GCP_*` variables must describe an identity that can
+access the same project named by `GCP_PROJECT_ID`. If the project is
+`priv-mkt-hack26lon-3730`, a provider and deployment service account from another project do not
+automatically grant access to it. The workflow now checks this explicitly before building.
+
+Temporary `gcplab.me` accounts may block the IAM policy changes needed to create Workload Identity
+Federation. In that case, automated GitHub deployment cannot be enabled with an API key alone;
+continue using the authenticated Cloud Shell deployment:
+
+```bash
+git pull origin main
+if [ -z "${GOOGLE_API_KEY:-}" ]; then
+  read -rsp "Gemini API key: " GOOGLE_API_KEY; echo
+  export GOOGLE_API_KEY
+fi
+bash scripts/deploy-gcplab.sh priv-mkt-hack26lon-3730 europe-west1
+```
 
 ## Post-deployment checks
 
