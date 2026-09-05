@@ -270,10 +270,21 @@
     return `<span class="fm-pill ok">${esc(label)}</span>`;
   }
 
-  function controlPlanStatusPill(status) {
-    if (status === "executed") return '<span class="fm-pill ok">Executed</span>';
-    if (status === "needs_pairing") return '<span class="fm-pill review">Needs pairing</span>';
-    return '<span class="fm-pill review">Not yet available</span>';
+  function controlPlanStatusPill(entry) {
+    if (entry.status === "executed") return '<span class="fm-pill ok">Executed</span>';
+    if (entry.status === "ready") return '<span class="fm-pill ok">Ready</span>';
+    if (entry.status === "failed") return '<span class="fm-pill error">Failed</span>';
+    if (entry.status === "needs_pairing") {
+      return '<span class="fm-pill review">Needs pairing</span>';
+    }
+    if (entry.status === "needs_evidence") {
+      const missing = entry.missing_evidence || [];
+      if (missing.includes("registered deterministic execution adapter")) {
+        return '<span class="fm-pill review">Adapter pending</span>';
+      }
+      return '<span class="fm-pill review">Awaiting evidence</span>';
+    }
+    return '<span class="fm-pill review">Needs review</span>';
   }
 
   function renderAnalysis() {
@@ -312,7 +323,7 @@
 <div class="fm-plan-row">
   <span class="fm-plan-file" title="${esc(entry.filename)}">${esc(entry.filename)}</span>
   <span class="fm-plan-control">${esc(entry.control)}</span>
-  ${controlPlanStatusPill(entry.status)}
+  ${controlPlanStatusPill(entry)}
 </div>`)
       .join("");
 
@@ -334,7 +345,7 @@
     <summary>Control plan (${(plan || []).length} recognised source${(plan || []).length === 1 ? "" : "s"})</summary>
     <div class="fm-plan-grid">${planRows}</div>
   </details>
-  <div class="fm-boundary">Deterministic tools produced every figure and comparison above; no LLM decided a pass/fail. Controls marked "not yet available" never ran — they are not silent passes.</div>
+  <div class="fm-boundary">Deterministic tools produced every figure and comparison above; no LLM decided a pass/fail. Controls awaiting evidence or an adapter never ran — they are not silent passes.</div>
 </div>`;
   }
 

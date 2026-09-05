@@ -29,6 +29,7 @@ from app.fund_reconciliation import (
 )
 from app.private_markets import FindingSeverity
 from app.statement_tools import compare_dates, compare_periods
+from app.ylookup_datasets import analyse_investor_gl_workbook, analyse_loader_sample
 
 PlanStatus = Literal["ready", "executed", "needs_evidence", "manual_review", "failed"]
 
@@ -177,6 +178,37 @@ def _reconciliation_executor(
     return execute
 
 
+def _single_source_executor(
+    analyser: Callable[[bytes, str], dict[str, Any]],
+    *,
+    failure_code: str,
+    failure_title: str,
+) -> ControlExecutor:
+    def execute(
+        items: list[EvidenceItem], plan: ControlPlanEntry
+    ) -> tuple[dict[str, Any], list[ExceptionItem]]:
+        item = items[0]
+        output = analyser(item.content, item.source["filename"])
+        exceptions: list[ExceptionItem] = []
+        if output.get("status") == "review_required":
+            exceptions.append(
+                ExceptionItem(
+                    category="data_quality",
+                    code=failure_code,
+                    key=plan.control_id,
+                    title=failure_title,
+                    detail=(
+                        "The deterministic workbook contract check found missing or invalid "
+                        "required fields."
+                    ),
+                    severity=FindingSeverity.WARNING,
+                )
+            )
+        return output, exceptions
+
+    return execute
+
+
 CONTROL_CATALOGUE: tuple[ControlDefinition, ...] = (
     ControlDefinition(
         "CTRL-NAV-001",
@@ -186,9 +218,15 @@ CONTROL_CATALOGUE: tuple[ControlDefinition, ...] = (
     ),
     ControlDefinition(
         "CTRL-INV-001",
-        "Investor capital reconciliation",
+        "Investor GL source validation",
         "investor_gl",
-        ("investor_gl", "nav_workbook"),
+        ("investor_gl",),
+        tool_name="analyse_investor_gl_workbook",
+        executor=_single_source_executor(
+            analyse_investor_gl_workbook,
+            failure_code="investor_gl.contract_invalid",
+            failure_title="Investor GL source validation failed",
+        ),
     ),
     ControlDefinition(
         "CTRL-COMMIT-001",
@@ -207,6 +245,12 @@ CONTROL_CATALOGUE: tuple[ControlDefinition, ...] = (
         "Loader contract validation",
         "loader_template",
         ("loader_template",),
+        tool_name="analyse_loader_sample",
+        executor=_single_source_executor(
+            analyse_loader_sample,
+            failure_code="loader.contract_invalid",
+            failure_title="Loader contract validation failed",
+        ),
     ),
     ControlDefinition(
         "CTRL-CALL-001",
@@ -295,6 +339,27 @@ class ControlPlanningAgent:
         for definition in CONTROL_CATALOGUE:
             candidates = by_type.get(definition.source_type, [])
             if not candidates:
+                continue
+
+            if definition.executor is not None and definition.required_roles is None:
+                selected = [candidates[0]]
+                plans.append(
+                    ControlPlanEntry(
+                        definition.control_id,
+                        definition.version,
+                        definition.name,
+                        [selected[0].source["id"]],
+                        {},
+                        list(definition.required_evidence),
+                        "ready",
+                        (
+                            "A recognised source is sufficient for this deterministic "
+                            "single-source control."
+                        ),
+                        1.0,
+                        tool_name=definition.tool_name,
+                    )
+                )
                 continue
 
             if definition.executor is None or definition.required_roles is None:
