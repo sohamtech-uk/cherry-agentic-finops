@@ -71,7 +71,10 @@ async def analyse_ylookup_dataset(
     if len(pdf_uploads) > MAX_PDF_FILES:
         raise HTTPException(status_code=413, detail=f"Maximum {MAX_PDF_FILES} PDFs per batch.")
     if len(workbook_uploads) > MAX_EXCEL_FILES:
-        raise HTTPException(status_code=413, detail=f"Maximum {MAX_EXCEL_FILES} Excel files per batch.")
+        raise HTTPException(
+            status_code=413,
+            detail=f"Maximum {MAX_EXCEL_FILES} Excel files per batch.",
+        )
 
     max_bytes = settings.max_upload_mb * 1024 * 1024
     pdf_items: list[tuple[str, bytes]] = []
