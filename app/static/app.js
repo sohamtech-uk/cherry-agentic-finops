@@ -37,8 +37,9 @@ function renderTasks(tasks, action) {
 }
 function renderCase(payload) {
   state.case = payload; const extraction = payload.extraction; const analysis = payload.analysis; const code = extraction.currency; const [actionLabel, actionClass] = actionCopy(analysis.action);
+  const studioStatus = payload.agent_studio?.status ? ` · Agent Studio ${titleise(payload.agent_studio.status)}` : "";
   $("#case-title").textContent = `${extraction.investor_name || "Unknown investor"} · ${extraction.notice_id || "Unreferenced notice"}`;
-  $("#case-subtitle").textContent = `${extraction.fund_name} · ${payload.synthetic ? "Synthetic demonstration" : "Uploaded evidence"}`;
+  $("#case-subtitle").textContent = `${extraction.fund_name} · ${payload.synthetic ? "Synthetic demonstration" : "Uploaded evidence"}${studioStatus}`;
   $("#decision-badge").textContent = actionLabel; $("#decision-badge").className = `decision-badge ${actionClass}`;
   $("#metric-expected").textContent = money(analysis.expected_amount, code); $("#metric-received").textContent = money(analysis.received_amount, code); $("#metric-progress").textContent = `${analysis.funding_progress_percent}% funded`; $("#metric-outstanding").textContent = money(analysis.outstanding_amount, code); $("#metric-variance").textContent = `${money(analysis.variance_amount, code)} net variance`; $("#outstanding-card").classList.toggle("metric-alert", Number(analysis.outstanding_amount) > 0);
   const due = analysis.days_to_due; $("#metric-due").textContent = due == null ? "—" : due < 0 ? `${Math.abs(due)}d overdue` : due === 0 ? "Due today" : `${due} day${due === 1 ? "" : "s"}`; $("#metric-due-date").textContent = dateLabel(analysis.due_date);
@@ -62,18 +63,19 @@ async function uploadEvidence(event) {
   const form = new FormData();
   form.append("capital_call", $("#capital-call-input").files[0]);
   form.append("commitments", $("#commitments-input").files[0]);
-  form.append("cash", $("#cash-input").files[0]);
+  form.append("fund_json", $("#cash-input").files[0]);
   if ($("#as-of-input").value) form.append("as_of_date", $("#as-of-input").value);
   const token = $("#upload-token")?.value.trim();
   const headers = token ? { "X-Cherry-Demo-Token": token } : {};
-  $("#upload-message").textContent = "Extracting notice and running strict deterministic controls…";
+  $("#upload-message").textContent = "Processing PDF, Excel and JSON through Cherry controls and Agent Studio…";
   loading(true);
   try {
-    const result = await api("/api/private-markets/analyse", { method: "POST", body: form, headers });
+    const result = await api("/api/private-markets/analyse-integrated", { method: "POST", body: form, headers });
     renderCase({ ...result, synthetic: false, transactions: [] });
-    $("#upload-message").textContent = `Case ${result.case_id} created with evidence hashes.`;
+    const studio = result.agent_studio?.status || "not_configured";
+    $("#upload-message").textContent = `Case ${result.case_id} created. Agent Studio: ${titleise(studio)}.`;
     $("#control-room").scrollIntoView({ behavior: "smooth" });
-    toast("Uploaded evidence analysed with strict controls.");
+    toast(`PDF + Excel + JSON analysed · Agent Studio ${titleise(studio)}.`);
   } catch (error) {
     $("#upload-message").textContent = error.message;
     toast(error.message, true);
