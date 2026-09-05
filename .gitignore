@@ -17,3 +17,5 @@ artifacts/
 crash.log
 .idea/
 .vscode/
+.vercel/
+.env.local
