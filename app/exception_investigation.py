@@ -38,6 +38,8 @@ _OWNER_BY_CATEGORY: dict[str, str] = {
     "exposure_breach": "Portfolio manager / risk",
     "management_fee": "Investor relations",
     "expense_allocation": "Fund controller",
+    "statement": "Fund reporting / fund controller",
+    "data_quality": "Fund operations",
 }
 
 _ACTION_BY_CATEGORY: dict[str, str] = {
@@ -63,6 +65,14 @@ _ACTION_BY_CATEGORY: dict[str, str] = {
     "expense_allocation": (
         "Reclassify the expense to the entity named in the fund manager's expected allocation "
         "schedule."
+    ),
+    "statement": (
+        "Compare the changed disclosure and repeated dates with supporting period evidence, then "
+        "confirm or correct the current-period statement before release."
+    ),
+    "data_quality": (
+        "Supply or correct the evidence named by the control plan, then rerun the deterministic "
+        "control before making a financial decision."
     ),
 }
 
@@ -91,7 +101,11 @@ class Investigation(BaseModel):
 
 
 def investigate_exception(
-    exceptions: list[ExceptionItem], *, code: str | None = None, key: str | None = None
+    exceptions: list[ExceptionItem],
+    *,
+    code: str | None = None,
+    key: str | None = None,
+    target_exception: ExceptionItem | None = None,
 ) -> Investigation:
     """Investigate one exception from a combined exception queue: the highest-priority one by
     default, or a specific one selected by its code or key.
@@ -107,7 +121,11 @@ def investigate_exception(
         raise ValueError("No exceptions supplied to investigate.")
 
     ranked = prioritise_exceptions(exceptions)
-    if code is not None:
+    if target_exception is not None:
+        target = next((item for item in ranked if item is target_exception), None)
+        if target is None:
+            raise ValueError("The target exception was not supplied in the exception queue.")
+    elif code is not None:
         target = next((item for item in ranked if item.code == code), None)
         if target is None:
             raise ValueError(f"No exception with code {code!r} was supplied.")

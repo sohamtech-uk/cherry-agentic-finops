@@ -14,14 +14,10 @@ def test_fund_manager_health_declares_the_pipeline_stages() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["stage"] == "classification"
+    assert body["stage"] == "end_to_end_control_pipeline"
     assert "agent_determines_required_controls" in body["pipeline"]
-    assert body["implemented_stages"] == [
-        "multiple_files",
-        "file_classification",
-        "canonical_data_room",
-    ]
-    assert "agent_determines_required_controls" in body["partially_implemented_stages"]
+    assert "agent_determines_required_controls" in body["implemented_stages"]
+    assert "agentic_investigation" in body["implemented_stages"]
 
 
 def test_classify_endpoint_returns_a_source_inventory() -> None:
@@ -102,7 +98,7 @@ def test_analyse_endpoint_flags_statement_differences() -> None:
     assert body["fund_name"] == "Northstar Growth Fund III"
     assert body["status"] == "review_required"
     assert body["issues_found"] == 1
-    assert body["issues"][0]["id"] == "ISS-STMT-DIFF"
+    assert body["issues"][0]["code"] == "statement.period_text_changed"
     assert all(entry["status"] == "executed" for entry in body["control_plan"])
 
 
@@ -116,9 +112,9 @@ def test_analyse_endpoint_reports_unimplemented_controls_honestly() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "clean"
-    assert body["issues"] == []
-    assert body["control_plan"][0]["status"] == "not_yet_available"
+    assert body["status"] == "insufficient_evidence"
+    assert body["issues"][0]["category"] == "data_quality"
+    assert body["control_plan"][0]["status"] == "needs_evidence"
 
 
 def test_analyse_endpoint_rejects_empty_batch() -> None:

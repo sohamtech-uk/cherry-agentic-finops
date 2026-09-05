@@ -111,6 +111,8 @@ class ExceptionItem(BaseModel):
         "exposure_breach",
         "management_fee",
         "expense_allocation",
+        "statement",
+        "data_quality",
     ]
     code: str
     key: str | None = None
