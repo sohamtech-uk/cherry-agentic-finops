@@ -317,6 +317,40 @@ def test_api_exposes_packet_contract_and_records_simulated_decision() -> None:
     assert outcome["audit"]["chain_valid"] is True
 
 
+def test_clean_multi_invoice_demo_posts_only_to_fresh_simulated_state() -> None:
+    response = client.post("/api/controller-review/demo/clean-multi-invoice")
+
+    assert response.status_code == 200
+    body = response.json()
+    outcome = body["outcome"]
+    assert body["boundary"] == (
+        "SIMULATED — no Cherry Money production write or payment initiation"
+    )
+    assert outcome["receipt"] == {
+        "receipt_id": "RCPT-1041",
+        "settlement_status": "BOOKED",
+        "allocation_status": "APPLIED",
+        "applied_amount": "12400.00",
+        "unapplied_amount": "0.00",
+    }
+    assert [(item["invoice_id"], item["amount"]) for item in outcome["applications"]] == [
+        ("INV-2208", "10000.00"),
+        ("INV-2214", "2400.00"),
+    ]
+    assert outcome["application"] == {
+        "status": "POSTED_SIMULATED",
+        "application_kind": "MULTI_INVOICE",
+        "residual_kind": "NONE",
+    }
+    assert all(item["state"] == "CLOSED" for item in outcome["invoices"])
+    assert outcome["production_write_performed"] is False
+    assert [event["event_type"] for event in outcome["audit_events"]] == [
+        "EVIDENCE_LINKED",
+        "CONTROLS_PASSED",
+        "CASH_APPLIED",
+    ]
+
+
 def test_api_rejects_client_supplied_authority() -> None:
     get_controller_review_service().reset_demo()
     payload = decision_request().model_dump(mode="json")
@@ -339,3 +373,5 @@ def test_controller_review_page_is_served() -> None:
     assert response.status_code == 200
     assert "A decision, not a confidence score." in response.text
     assert "NO PRODUCTION WRITES" in response.text
+    assert "RCPT-1041" in response.text
+    assert "RCPT-1042" in response.text

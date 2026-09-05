@@ -83,6 +83,7 @@ function renderPacket(packet) {
   $("#policy-clauses").innerHTML = packet.policy.clauses.map((item) => `<div class="policy-clause"><b>Clause ${escapeHtml(item.clause)}</b><p>${escapeHtml(item.requirement)}</p></div>`).join("");
   $("#control-list").innerHTML = packet.control_checks.map((item) => `<div class="control ${item.outcome === "PASS" ? "" : "failed"}"><b>${escapeHtml(item.outcome)} · ${escapeHtml(item.code)}</b><small>${escapeHtml(item.explanation)}</small></div>`).join("");
   $("#evidence-list").innerHTML = packet.evidence.map((item) => `<div class="evidence-item"><div class="evidence-type">${escapeHtml(label(item.source_type))}</div><div><code>${escapeHtml(item.source_system)} / ${escapeHtml(item.source_object_id)} · ${escapeHtml(item.locator)}</code><p>${escapeHtml(item.supports)}</p><code class="hash">SHA-256 · ${escapeHtml(item.source_sha256)}</code></div></div>`).join("");
+  $("#audit-list").innerHTML = packet.audit_events.map((event) => `<div class="audit-item"><span>${event.sequence}</span><div><b>${escapeHtml(label(event.action))}</b><p>${escapeHtml(JSON.stringify(event.details))}</p><code>${escapeHtml(event.event_hash)}</code></div></div>`).join("");
   renderActions(packet.allowed_actions);
   updateConditionalFields();
 
@@ -94,6 +95,25 @@ function renderPacket(packet) {
     $("#decision-result").classList.remove("hidden");
   } else {
     $("#decision-result").classList.add("hidden");
+  }
+}
+
+async function runCleanScenario() {
+  const button = $("#run-clean");
+  button.disabled = true;
+  button.textContent = "Running controls…";
+  try {
+    const response = await api("/api/controller-review/demo/clean-multi-invoice", { method: "POST" });
+    const outcome = response.outcome;
+    const allocations = outcome.applications.map((item) => `${item.invoice_id} ${money(item.amount)}`).join(" + ");
+    $("#clean-result").classList.add("complete");
+    $("#clean-result").innerHTML = `<span class="status-dot"></span><div><small>${escapeHtml(outcome.application.status)} · ${escapeHtml(outcome.application.application_kind)}</small><strong>${escapeHtml(allocations)}</strong><p>Receipt residual ${escapeHtml(money(outcome.receipt.unapplied_amount))} · ${outcome.audit_events.length} hash-linked audit events · SIMULATED only</p></div>`;
+    button.textContent = "Run again from fresh simulated state";
+  } catch (error) {
+    showMessage(error.message);
+    button.textContent = "Retry deterministic application";
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -139,11 +159,12 @@ async function submitDecision(event) {
 }
 
 async function initialise() {
+  $("#reset-demo").addEventListener("click", resetDemo);
+  $("#run-clean").addEventListener("click", runCleanScenario);
+  $("#decision-form").addEventListener("submit", submitDecision);
   try {
     await Promise.all([loadReviewers(), loadPacket()]);
   } catch (error) { showMessage(error.message); }
-  $("#reset-demo").addEventListener("click", resetDemo);
-  $("#decision-form").addEventListener("submit", submitDecision);
 }
 
 document.addEventListener("DOMContentLoaded", initialise);

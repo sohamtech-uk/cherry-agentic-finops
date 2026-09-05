@@ -228,16 +228,21 @@ class ReviewDecisionRequest(BaseModel):
 
     @model_validator(mode="after")
     def require_action_details(self) -> ReviewDecisionRequest:
-        if self.action in {
-            ReviewAction.APPROVE_WRITE_OFF,
-            ReviewAction.CREATE_DISPUTE,
-        } and not (self.reason_code or "").strip():
+        if (
+            self.action
+            in {
+                ReviewAction.APPROVE_WRITE_OFF,
+                ReviewAction.CREATE_DISPUTE,
+            }
+            and not (self.reason_code or "").strip()
+        ):
             raise ValueError(f"reason_code is required for {self.action}.")
         if self.action == ReviewAction.CREATE_DISPUTE and not (self.dispute_owner or "").strip():
             raise ValueError("dispute_owner is required for create_dispute.")
-        if self.action == ReviewAction.REQUEST_EVIDENCE and not (
-            self.requested_evidence or ""
-        ).strip():
+        if (
+            self.action == ReviewAction.REQUEST_EVIDENCE
+            and not (self.requested_evidence or "").strip()
+        ):
             raise ValueError("requested_evidence is required for request_evidence.")
         return self
 
@@ -494,8 +499,7 @@ def build_short_pay_packet(short_pay_gbp: Decimal | str = "500") -> ControllerRe
     case_id = f"CA-05-RCPT-1042-{int(short_pay)}"
     source_payloads = {
         "bank": (
-            f"SYNTHETIC_BANK|TX-1042|2026-09-05|Northstar Retail Ltd|"
-            f"{receipt_amount}|GBP|BOOKED|v2"
+            f"SYNTHETIC_BANK|TX-1042|2026-09-05|Northstar Retail Ltd|{receipt_amount}|GBP|BOOKED|v2"
         ),
         "remittance": (
             f"Northstar Retail Ltd|CUST-0042|INV-2208|{receipt_amount}|"
@@ -685,12 +689,14 @@ def evaluate_fundamental_controls(packet: ControllerReviewPacket) -> list[Contro
     current = packet.remaining_ar_state
     proposed = packet.proposed_after_valid_decision
     exact_identity = f"({receipt.source_system}, {receipt.source_transaction_id})"
-    current_equation = money(
-        current.cash_applied + current.authorised_adjustment + current.open_balance
-    ) == current.invoice_balance_before
-    proposed_equation = money(
-        proposed.cash_applied + proposed.authorised_adjustment + proposed.open_balance
-    ) == proposed.invoice_balance_before
+    current_equation = (
+        money(current.cash_applied + current.authorised_adjustment + current.open_balance)
+        == current.invoice_balance_before
+    )
+    proposed_equation = (
+        money(proposed.cash_applied + proposed.authorised_adjustment + proposed.open_balance)
+        == proposed.invoice_balance_before
+    )
     checks = [
         (
             "NO_DUPLICATE_RECEIPT",
@@ -749,9 +755,7 @@ def evaluate_fundamental_controls(packet: ControllerReviewPacket) -> list[Contro
             "INVOICE_BALANCE_VALID",
             (
                 match.proposed_cash_application <= match.invoice_open_balance_before
-                and money(
-                    match.invoice_open_balance_before - match.proposed_cash_application
-                )
+                and money(match.invoice_open_balance_before - match.proposed_cash_application)
                 == packet.amount_at_risk
                 and current_equation
                 and proposed_equation

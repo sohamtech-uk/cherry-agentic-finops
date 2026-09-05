@@ -5,6 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.cash_application.demo import clean_multi_invoice_demo
 from app.cash_application.eval_adapter import to_trial_outcome
 from app.cash_application.review import (
     ControllerReviewError,
@@ -68,9 +69,15 @@ async def controller_review_contract() -> dict[str, Any]:
 @router.get("/reviewers")
 async def list_reviewers() -> list[dict[str, Any]]:
     return [
-        reviewer.model_dump(mode="json")
-        for reviewer in get_controller_review_service().reviewers()
+        reviewer.model_dump(mode="json") for reviewer in get_controller_review_service().reviewers()
     ]
+
+
+@router.post("/demo/clean-multi-invoice")
+async def run_clean_multi_invoice_demo() -> dict[str, Any]:
+    """Apply RCPT-1041 to two evidenced invoices in a fresh simulated ledger."""
+
+    return clean_multi_invoice_demo()
 
 
 @router.get("/cases/{case_id}")
@@ -97,9 +104,7 @@ async def get_review_trial_outcome(
 
 
 @router.post("/cases/{case_id}/decisions")
-async def record_review_decision(
-    case_id: str, request: ReviewDecisionRequest
-) -> dict[str, Any]:
+async def record_review_decision(case_id: str, request: ReviewDecisionRequest) -> dict[str, Any]:
     try:
         packet = get_controller_review_service().decide(case_id, request)
     except ControllerReviewError as exc:

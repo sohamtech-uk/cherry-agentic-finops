@@ -17,6 +17,25 @@
   </header>
 
   <main>
+    <section class="scenario-strip" aria-label="Judge path">
+      <div><small>01 · STRAIGHT-THROUGH</small><b>RCPT-1041 · GBP 12,400</b><span>2 invoices · deterministic auto-apply</span></div>
+      <div><small>02 · CONTROLLER JUDGEMENT</small><b>RCPT-1042 · GBP 9,500</b><span>GBP 500 material short-pay</span></div>
+      <div><small>CONTROL BOUNDARY</small><b>Simulated state only</b><span>No payments or production writes</span></div>
+    </section>
+
+    <section class="panel clean-panel" id="clean-scenario">
+      <div class="clean-copy">
+        <p class="eyebrow">Scenario 1 · clean multi-invoice receipt</p>
+        <h2>Apply routine cash from evidence.</h2>
+        <p>Booked receipt <b>RCPT-1041</b> carries remittance for INV-2208 (GBP 10,000) and INV-2214 (GBP 2,400). Deterministic controls must foot every allocation before simulated posting.</p>
+        <button class="primary" id="run-clean" type="button">Run deterministic application</button>
+      </div>
+      <div class="clean-result" id="clean-result" aria-live="polite">
+        <span class="status-dot"></span>
+        <div><small>READY TO RUN</small><strong>GBP 12,400.00 booked</strong><p>Two open invoices · zero expected residual</p></div>
+      </div>
+    </section>
+
     <section class="page-heading">
       <div>
         <p class="eyebrow">Controller workbench · CA-05</p>
@@ -93,6 +112,11 @@
     <section class="panel evidence-panel">
       <div class="panel-title"><span>07</span><div><small>SOURCE LINEAGE</small><h2>Evidence locators &amp; hashes</h2></div></div>
       <div class="evidence-list" id="evidence-list"></div>
+    </section>
+
+    <section class="panel audit-panel">
+      <div class="panel-title"><span>08</span><div><small>TAMPER-EVIDENT RECORD</small><h2>Audit timeline</h2></div></div>
+      <div class="audit-list" id="audit-list"></div>
     </section>
 
     <section class="decision-panel panel">

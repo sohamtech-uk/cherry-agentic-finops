@@ -95,7 +95,7 @@ def _audit_chain_valid(events: list[dict[str, Any]]) -> bool:
     return True
 
 
-def run_case(case_input: CashApplicationCaseInput, trial_id: str) -> dict[str, Any]:
+def run_control_case(case_input: CashApplicationCaseInput, trial_id: str) -> dict[str, Any]:
     """Evaluate one case and return a stable, JSON-serialisable canonical outcome.
 
     This is an adapter only: all accounting decisions come from
