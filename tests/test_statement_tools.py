@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from app.statement_tools import (
@@ -31,79 +29,65 @@ Portfolio Company X completed a transaction on 2026-05-17.
 """
 
 
-def _write(path: Path, text: str) -> str:
-    path.write_text(text, encoding="utf-8")
-    return str(path)
-
-
-def test_read_document_returns_full_text(tmp_path: Path) -> None:
-    path = _write(tmp_path / "statement.txt", _CURRENT_STATEMENT)
-
-    result = read_document(path)
+def test_read_document_returns_full_text() -> None:
+    result = read_document(_CURRENT_STATEMENT.encode(), "statement.txt")
 
     assert result["document"] == "statement.txt"
     assert "Portfolio Company X" in result["text"]
 
 
-def test_read_document_missing_path_raises() -> None:
-    with pytest.raises(ValueError, match="does not exist"):
-        read_document("/nonexistent/statement.txt")
+def test_read_document_rejects_unsupported_format() -> None:
+    with pytest.raises(ValueError, match="must be PDF, TXT or Markdown"):
+        read_document(b"binary content", "statement.docx")
 
 
-def test_find_section_locates_named_heading(tmp_path: Path) -> None:
-    path = _write(tmp_path / "statement.txt", _CURRENT_STATEMENT)
-
-    result = find_section(path, "Subsequent Events")
+def test_find_section_locates_named_heading() -> None:
+    result = find_section(_CURRENT_STATEMENT.encode(), "statement.txt", "Subsequent Events")
 
     assert result["found"] is True
     assert "No subsequent events occurred" in result["text"]
     assert "Portfolio Company Investments" not in result["text"]
 
 
-def test_find_section_reports_not_found(tmp_path: Path) -> None:
-    path = _write(tmp_path / "statement.txt", _CURRENT_STATEMENT)
-
-    result = find_section(path, "Related Party Transactions")
+def test_find_section_reports_not_found() -> None:
+    result = find_section(
+        _CURRENT_STATEMENT.encode(), "statement.txt", "Related Party Transactions"
+    )
 
     assert result["found"] is False
 
 
-def test_find_entity_returns_every_occurrence(tmp_path: Path) -> None:
-    path = _write(tmp_path / "statement.txt", _CURRENT_STATEMENT)
-
-    result = find_entity(path, "Portfolio Company X")
+def test_find_entity_returns_every_occurrence() -> None:
+    result = find_entity(_CURRENT_STATEMENT.encode(), "statement.txt", "Portfolio Company X")
 
     assert result["occurrences"] == 1
     assert "controlled investment" in result["matches"][0]["context"]
 
 
-def test_compare_periods_reports_added_and_removed_lines(tmp_path: Path) -> None:
-    current_path = _write(tmp_path / "current.txt", _CURRENT_STATEMENT)
-    prior_path = _write(tmp_path / "prior.txt", _PRIOR_STATEMENT)
-
-    result = compare_periods(current_path, prior_path)
+def test_compare_periods_reports_added_and_removed_lines() -> None:
+    result = compare_periods(
+        _CURRENT_STATEMENT.encode(), "current.txt", _PRIOR_STATEMENT.encode(), "prior.txt"
+    )
 
     assert result["identical"] is False
     assert any("No subsequent events" in line for line in result["lines_added"])
     assert any("completed a transaction" in line for line in result["lines_removed"])
 
 
-def test_compare_periods_identical_documents(tmp_path: Path) -> None:
-    current_path = _write(tmp_path / "current.txt", _CURRENT_STATEMENT)
-    same_path = _write(tmp_path / "same.txt", _CURRENT_STATEMENT)
-
-    result = compare_periods(current_path, same_path)
+def test_compare_periods_identical_documents() -> None:
+    result = compare_periods(
+        _CURRENT_STATEMENT.encode(), "current.txt", _CURRENT_STATEMENT.encode(), "same.txt"
+    )
 
     assert result["identical"] is True
     assert result["lines_added"] == []
     assert result["lines_removed"] == []
 
 
-def test_compare_dates_flags_carried_forward_and_new_dates(tmp_path: Path) -> None:
-    current_path = _write(tmp_path / "current.txt", _CURRENT_STATEMENT)
-    prior_path = _write(tmp_path / "prior.txt", _PRIOR_STATEMENT)
-
-    result = compare_dates(current_path, prior_path)
+def test_compare_dates_flags_carried_forward_and_new_dates() -> None:
+    result = compare_dates(
+        _CURRENT_STATEMENT.encode(), "current.txt", _PRIOR_STATEMENT.encode(), "prior.txt"
+    )
 
     assert "2026-06-30" in result["dates_only_in_current"]
     assert "2026-03-31" in result["dates_only_in_prior"]

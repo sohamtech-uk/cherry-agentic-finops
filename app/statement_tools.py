@@ -8,8 +8,11 @@ and entity location are mechanical text operations with heuristics that can miss
 interpreting what a match means is left to the agent, and a "not found" result is evidence to
 investigate further, not proof that a section or entity is absent from the document.
 
-Reuses app.contracts.read_document_pages for PDF/TXT/Markdown extraction, exactly as the contract
-ingestion pipeline does, so both agents are reading documents the same way.
+Every function takes raw bytes plus a file name (PDF, TXT or Markdown), matching app.nav_quality
+and app.ylookup_datasets: this module never touches the filesystem itself, so it is equally usable
+from the agent tools (app.agent_tools reads the file) and from a REST upload endpoint. Reuses
+app.contracts.read_document_pages for extraction, exactly as the contract ingestion pipeline does,
+so both agents are reading documents the same way.
 """
 
 from __future__ import annotations
@@ -17,7 +20,6 @@ from __future__ import annotations
 import difflib
 import mimetypes
 import re
-from pathlib import Path
 from typing import Any
 
 from app.contracts import read_document_pages
@@ -34,29 +36,22 @@ _DATE_PATTERN = re.compile(
 )
 
 
-def _read_file_text(document_path: str) -> str:
-    path = Path(document_path)
-    if not path.is_file():
-        raise ValueError(f"Document path {document_path!r} does not exist.")
-    content = path.read_bytes()
-    mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    pages = read_document_pages(content, mime_type, path.name)
+def _extract_text(content: bytes, file_name: str) -> str:
+    mime_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+    pages = read_document_pages(content, mime_type, file_name)
     return "\n".join(text for _, text in pages)
 
 
-def read_document(document_path: str) -> dict[str, Any]:
+def read_document(content: bytes, file_name: str) -> dict[str, Any]:
     """Extract a document's full text (PDF, TXT or Markdown), for ad hoc inspection.
 
     Args:
-        document_path: Local path to the document.
+        content: Raw document bytes.
+        file_name: Original file name, used to detect PDF vs. text and included in the result.
     """
 
-    text = _read_file_text(document_path)
-    return {
-        "document": Path(document_path).name,
-        "character_count": len(text),
-        "text": text,
-    }
+    text = _extract_text(content, file_name)
+    return {"document": file_name, "character_count": len(text), "text": text}
 
 
 def _looks_like_heading(line: str) -> bool:
@@ -67,21 +62,22 @@ def _looks_like_heading(line: str) -> bool:
     return bool(words) and len(words) <= 12 and (stripped.isupper() or stripped.istitle())
 
 
-def find_section(document_path: str, heading: str) -> dict[str, Any]:
+def find_section(content: bytes, file_name: str, heading: str) -> dict[str, Any]:
     """Locate a named section by its heading and return the text from that heading up to the
     next heading-like line. This is a heuristic text search, not proof the section is absent if
     nothing is found — the heading may be phrased differently in this document.
 
     Args:
-        document_path: Local path to the document.
+        content: Raw document bytes.
+        file_name: Original file name, used to detect PDF vs. text and included in the result.
         heading: Section heading to search for, e.g. "Subsequent Events".
     """
 
-    lines = _read_file_text(document_path).splitlines()
+    lines = _extract_text(content, file_name).splitlines()
     needle = heading.casefold()
     start = next((i for i, line in enumerate(lines) if needle in line.casefold()), None)
     if start is None:
-        return {"document": Path(document_path).name, "heading": heading, "found": False}
+        return {"document": file_name, "heading": heading, "found": False}
 
     end = len(lines)
     for index in range(start + 1, len(lines)):
@@ -90,7 +86,7 @@ def find_section(document_path: str, heading: str) -> dict[str, Any]:
             break
 
     return {
-        "document": Path(document_path).name,
+        "document": file_name,
         "heading": heading,
         "found": True,
         "start_line": start + 1,
@@ -99,16 +95,19 @@ def find_section(document_path: str, heading: str) -> dict[str, Any]:
     }
 
 
-def find_entity(document_path: str, entity_name: str, context_chars: int = 160) -> dict[str, Any]:
+def find_entity(
+    content: bytes, file_name: str, entity_name: str, context_chars: int = 160
+) -> dict[str, Any]:
     """Find every mention of a named entity and return the surrounding text for each occurrence.
 
     Args:
-        document_path: Local path to the document.
+        content: Raw document bytes.
+        file_name: Original file name, used to detect PDF vs. text and included in the result.
         entity_name: Entity to search for, e.g. a portfolio company or investor name.
         context_chars: Characters of surrounding context to include on each side of a match.
     """
 
-    text = _read_file_text(document_path)
+    text = _extract_text(content, file_name)
     matches = []
     for match in re.finditer(re.escape(entity_name), text, flags=re.IGNORECASE):
         start = max(0, match.start() - context_chars)
@@ -116,30 +115,37 @@ def find_entity(document_path: str, entity_name: str, context_chars: int = 160) 
         matches.append({"offset": match.start(), "context": text[start:end].strip()})
 
     return {
-        "document": Path(document_path).name,
+        "document": file_name,
         "entity": entity_name,
         "occurrences": len(matches),
         "matches": matches,
     }
 
 
-def compare_periods(current_document_path: str, prior_document_path: str) -> dict[str, Any]:
+def compare_periods(
+    current_content: bytes,
+    current_file_name: str,
+    prior_content: bytes,
+    prior_file_name: str,
+) -> dict[str, Any]:
     """Line-diff a current-period document against the prior period's, to surface exactly what
     changed (or, just as importantly, what stayed identical and may be a stale carry-forward).
 
     Args:
-        current_document_path: Local path to the current-period document.
-        prior_document_path: Local path to the prior-period document.
+        current_content: Raw bytes of the current-period document.
+        current_file_name: Current-period document's original file name.
+        prior_content: Raw bytes of the prior-period document.
+        prior_file_name: Prior-period document's original file name.
     """
 
-    current_lines = _read_file_text(current_document_path).splitlines()
-    prior_lines = _read_file_text(prior_document_path).splitlines()
+    current_lines = _extract_text(current_content, current_file_name).splitlines()
+    prior_lines = _extract_text(prior_content, prior_file_name).splitlines()
     diff = list(
         difflib.unified_diff(
             prior_lines,
             current_lines,
-            fromfile=Path(prior_document_path).name,
-            tofile=Path(current_document_path).name,
+            fromfile=prior_file_name,
+            tofile=current_file_name,
             lineterm="",
         )
     )
@@ -147,8 +153,8 @@ def compare_periods(current_document_path: str, prior_document_path: str) -> dic
     removed = [line[1:] for line in diff if line.startswith("-") and not line.startswith("---")]
 
     return {
-        "prior_document": Path(prior_document_path).name,
-        "current_document": Path(current_document_path).name,
+        "prior_document": prior_file_name,
+        "current_document": current_file_name,
         "lines_added": added,
         "lines_removed": removed,
         "identical": not added and not removed,
@@ -156,24 +162,31 @@ def compare_periods(current_document_path: str, prior_document_path: str) -> dic
     }
 
 
-def compare_dates(current_document_path: str, prior_document_path: str) -> dict[str, Any]:
+def compare_dates(
+    current_content: bytes,
+    current_file_name: str,
+    prior_content: bytes,
+    prior_file_name: str,
+) -> dict[str, Any]:
     """Extract every date-like string from a current and a prior document and report which
     dates are new, which disappeared, and which are identical in both — an unchanged date is a
     candidate for a stale rolled-forward disclosure, not proof of one.
 
     Args:
-        current_document_path: Local path to the current-period document.
-        prior_document_path: Local path to the prior-period document.
+        current_content: Raw bytes of the current-period document.
+        current_file_name: Current-period document's original file name.
+        prior_content: Raw bytes of the prior-period document.
+        prior_file_name: Prior-period document's original file name.
     """
 
-    current_text = _read_file_text(current_document_path)
-    prior_text = _read_file_text(prior_document_path)
+    current_text = _extract_text(current_content, current_file_name)
+    prior_text = _extract_text(prior_content, prior_file_name)
     current_dates = {match.group(0) for match in _DATE_PATTERN.finditer(current_text)}
     prior_dates = {match.group(0) for match in _DATE_PATTERN.finditer(prior_text)}
 
     return {
-        "prior_document": Path(prior_document_path).name,
-        "current_document": Path(current_document_path).name,
+        "prior_document": prior_file_name,
+        "current_document": current_file_name,
         "dates_only_in_current": sorted(current_dates - prior_dates),
         "dates_only_in_prior": sorted(prior_dates - current_dates),
         "dates_in_both": sorted(current_dates & prior_dates),

@@ -337,7 +337,8 @@ def read_document(document_path: str) -> dict[str, Any]:
         document_path: Local path to the document.
     """
 
-    return _read_document(document_path)
+    path = Path(document_path)
+    return _read_document(_read_file_bytes(document_path), path.name)
 
 
 def find_section(document_path: str, heading: str) -> dict[str, Any]:
@@ -350,7 +351,8 @@ def find_section(document_path: str, heading: str) -> dict[str, Any]:
         heading: Section heading to search for, e.g. "Subsequent Events".
     """
 
-    return _find_section(document_path, heading)
+    path = Path(document_path)
+    return _find_section(_read_file_bytes(document_path), path.name, heading)
 
 
 def find_entity(document_path: str, entity_name: str, context_chars: int = 160) -> dict[str, Any]:
@@ -362,7 +364,8 @@ def find_entity(document_path: str, entity_name: str, context_chars: int = 160) 
         context_chars: Characters of surrounding context to include on each side of a match.
     """
 
-    return _find_entity(document_path, entity_name, context_chars)
+    path = Path(document_path)
+    return _find_entity(_read_file_bytes(document_path), path.name, entity_name, context_chars)
 
 
 def compare_periods(current_document_path: str, prior_document_path: str) -> dict[str, Any]:
@@ -375,7 +378,14 @@ def compare_periods(current_document_path: str, prior_document_path: str) -> dic
         prior_document_path: Local path to the prior-period document.
     """
 
-    return _compare_periods(current_document_path, prior_document_path)
+    current_path = Path(current_document_path)
+    prior_path = Path(prior_document_path)
+    return _compare_periods(
+        _read_file_bytes(current_document_path),
+        current_path.name,
+        _read_file_bytes(prior_document_path),
+        prior_path.name,
+    )
 
 
 def compare_dates(current_document_path: str, prior_document_path: str) -> dict[str, Any]:
@@ -388,4 +398,11 @@ def compare_dates(current_document_path: str, prior_document_path: str) -> dict[
         prior_document_path: Local path to the prior-period document.
     """
 
-    return _compare_dates(current_document_path, prior_document_path)
+    current_path = Path(current_document_path)
+    prior_path = Path(prior_document_path)
+    return _compare_dates(
+        _read_file_bytes(current_document_path),
+        current_path.name,
+        _read_file_bytes(prior_document_path),
+        prior_path.name,
+    )

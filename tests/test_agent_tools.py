@@ -7,9 +7,14 @@ import pytest
 from openpyxl import Workbook
 
 from app.agent_tools import (
+    compare_dates,
+    compare_periods,
+    find_entity,
+    find_section,
     identify_ylookup_workbook,
     inspect_workflow,
     query_database,
+    read_document,
     reconcile_investor_gl_workbook,
     reconcile_loader_sample_workbook,
     run_finance_scenario,
@@ -122,3 +127,70 @@ def test_run_nav_quality_review_flags_balance_sheet_mismatch(tmp_path: Path) -> 
 def test_run_nav_quality_review_missing_path_raises() -> None:
     with pytest.raises(ValueError, match="does not exist"):
         run_nav_quality_review("/nonexistent/nav-summary.json")
+
+
+_CURRENT_STATEMENT = """Subsequent Events
+No subsequent events occurred after 2026-06-30.
+"""
+
+_PRIOR_STATEMENT = """Subsequent Events
+Portfolio Company X completed a transaction on 2026-05-17.
+"""
+
+
+def test_read_document_reads_a_local_file(tmp_path: Path) -> None:
+    path = tmp_path / "statement.txt"
+    path.write_text(_CURRENT_STATEMENT)
+
+    result = read_document(str(path))
+
+    assert result["document"] == "statement.txt"
+    assert "No subsequent events" in result["text"]
+
+
+def test_read_document_missing_path_raises() -> None:
+    with pytest.raises(ValueError, match="does not exist"):
+        read_document("/nonexistent/statement.txt")
+
+
+def test_find_section_reads_a_local_file(tmp_path: Path) -> None:
+    path = tmp_path / "statement.txt"
+    path.write_text(_CURRENT_STATEMENT)
+
+    result = find_section(str(path), "Subsequent Events")
+
+    assert result["found"] is True
+
+
+def test_find_entity_reads_a_local_file(tmp_path: Path) -> None:
+    path = tmp_path / "statement.txt"
+    path.write_text(_CURRENT_STATEMENT)
+
+    result = find_entity(str(path), "2026-06-30")
+
+    assert result["occurrences"] == 1
+
+
+def test_compare_periods_reads_local_files(tmp_path: Path) -> None:
+    current_path = tmp_path / "current.txt"
+    current_path.write_text(_CURRENT_STATEMENT)
+    prior_path = tmp_path / "prior.txt"
+    prior_path.write_text(_PRIOR_STATEMENT)
+
+    result = compare_periods(str(current_path), str(prior_path))
+
+    assert result["identical"] is False
+    assert result["current_document"] == "current.txt"
+    assert result["prior_document"] == "prior.txt"
+
+
+def test_compare_dates_reads_local_files(tmp_path: Path) -> None:
+    current_path = tmp_path / "current.txt"
+    current_path.write_text(_CURRENT_STATEMENT)
+    prior_path = tmp_path / "prior.txt"
+    prior_path.write_text(_PRIOR_STATEMENT)
+
+    result = compare_dates(str(current_path), str(prior_path))
+
+    assert "2026-06-30" in result["dates_only_in_current"]
+    assert "2026-05-17" in result["dates_only_in_prior"]
