@@ -104,7 +104,8 @@ async def _agent_studio_result(payload: dict[str, Any]) -> dict[str, Any]:
 async def integration_health() -> dict[str, Any]:
     response: dict[str, Any] = {
         "status": "ok",
-        "input_contract": ["pdf[]", "excel[]", "json"],
+        "input_contract": ["pdf", "excel", "json"],
+        "input_multiplicity": {"pdf": "many", "excel": "many", "json": "one"},
         "max_pdf_files": MAX_PDF_FILES,
         "max_excel_files": MAX_EXCEL_FILES,
         "fundops_studio_configured": studio.configured,
@@ -335,5 +336,6 @@ async def analyse_integrated_private_markets_case(
             "action_counts": action_counts,
         },
         "cases": cases,
-        "input_contract": ["pdf[]", "excel[]", "json"],
+        "input_contract": ["pdf", "excel", "json"],
+        "input_multiplicity": {"pdf": "many", "excel": "many", "json": "one"},
     }
