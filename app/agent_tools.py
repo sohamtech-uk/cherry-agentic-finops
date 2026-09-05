@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.container import get_engine
 from app.exception_investigation import investigate_exception as _investigate_exception
 from app.fund_reconciliation import (
+    EvidenceSource,
     ExceptionItem,
     parse_administrator_expenses,
     parse_administrator_fees,
@@ -22,6 +23,9 @@ from app.fund_reconciliation import (
     parse_positions,
     parse_prices,
     parse_trades,
+)
+from app.fund_reconciliation import (
+    attach_evidence as _attach_evidence,
 )
 from app.fund_reconciliation import (
     detect_exposure_breaches as _detect_exposure_breaches,
@@ -185,6 +189,24 @@ def _parse_input_file(
         return parser(content)
     except (ValueError, ValidationError) as exc:
         raise ValueError(f"Invalid {kind.lower()} {file_path!r}: {exc}") from exc
+
+
+def _parse_input_file_with_evidence(
+    file_path: str, *, source_id: str, kind: str, extension: str, parser: Callable[[bytes], Any]
+) -> tuple[Any, EvidenceSource]:
+    """Like _parse_input_file, but also returns the EvidenceSource (filename and SHA-256 hash) for
+    the file just read, so the caller can stamp document lineage onto the exceptions this input
+    produces via app.fund_reconciliation.attach_evidence. Reads the file exactly once."""
+
+    content = _read_input_file(file_path, kind=kind, extension=extension)
+    try:
+        parsed = parser(content)
+    except (ValueError, ValidationError) as exc:
+        raise ValueError(f"Invalid {kind.lower()} {file_path!r}: {exc}") from exc
+    source = EvidenceSource(
+        source_id=source_id, filename=Path(file_path).name, sha256=sha256_hex(content)
+    )
+    return parsed, source
 
 
 def identify_ylookup_workbook(workbook_path: str) -> dict[str, Any]:
@@ -612,22 +634,27 @@ def reconcile_positions(
             export in the same shape.
     """
 
-    internal = _parse_input_file(
+    internal, internal_source = _parse_input_file_with_evidence(
         internal_positions_path,
+        source_id="internal_positions",
         kind="Internal positions",
         extension=".json",
         parser=parse_positions,
     )
-    external = _parse_input_file(
+    external, external_source = _parse_input_file_with_evidence(
         external_positions_path,
+        source_id="external_positions",
         kind="External positions",
         extension=".json",
         parser=parse_positions,
     )
     result = _reconcile_positions(internal, external)
+    exceptions = _attach_evidence(
+        result.to_exceptions(), sources=[internal_source, external_source]
+    )
     return {
         **result.model_dump(mode="json"),
-        "exceptions": [item.model_dump(mode="json") for item in result.to_exceptions()],
+        "exceptions": [item.model_dump(mode="json") for item in exceptions],
     }
 
 
@@ -641,22 +668,27 @@ def reconcile_cash(internal_cash_path: str, external_cash_path: str) -> dict[str
         external_cash_path: Local path to the external cash-balance export in the same shape.
     """
 
-    internal = _parse_input_file(
+    internal, internal_source = _parse_input_file_with_evidence(
         internal_cash_path,
+        source_id="internal_cash",
         kind="Internal cash balances",
         extension=".json",
         parser=parse_cash_balances,
     )
-    external = _parse_input_file(
+    external, external_source = _parse_input_file_with_evidence(
         external_cash_path,
+        source_id="external_cash",
         kind="External cash balances",
         extension=".json",
         parser=parse_cash_balances,
     )
     result = _reconcile_cash(internal, external)
+    exceptions = _attach_evidence(
+        result.to_exceptions(), sources=[internal_source, external_source]
+    )
     return {
         **result.model_dump(mode="json"),
-        "exceptions": [item.model_dump(mode="json") for item in result.to_exceptions()],
+        "exceptions": [item.model_dump(mode="json") for item in exceptions],
     }
 
 
@@ -672,16 +704,27 @@ def reconcile_trades(internal_trades_path: str, external_trades_path: str) -> di
         external_trades_path: Local path to the external trade export in the same shape.
     """
 
-    internal = _parse_input_file(
-        internal_trades_path, kind="Internal trades", extension=".json", parser=parse_trades
+    internal, internal_source = _parse_input_file_with_evidence(
+        internal_trades_path,
+        source_id="internal_trades",
+        kind="Internal trades",
+        extension=".json",
+        parser=parse_trades,
     )
-    external = _parse_input_file(
-        external_trades_path, kind="External trades", extension=".json", parser=parse_trades
+    external, external_source = _parse_input_file_with_evidence(
+        external_trades_path,
+        source_id="external_trades",
+        kind="External trades",
+        extension=".json",
+        parser=parse_trades,
     )
     result = _reconcile_trades(internal, external)
+    exceptions = _attach_evidence(
+        result.to_exceptions(), sources=[internal_source, external_source]
+    )
     return {
         **result.model_dump(mode="json"),
-        "exceptions": [item.model_dump(mode="json") for item in result.to_exceptions()],
+        "exceptions": [item.model_dump(mode="json") for item in exceptions],
     }
 
 
@@ -696,13 +739,18 @@ def detect_stale_prices(prices_path: str, as_of: str, max_age_days: int = 3) -> 
         max_age_days: Maximum age in days still treated as fresh.
     """
 
-    prices = _parse_input_file(prices_path, kind="Prices", extension=".json", parser=parse_prices)
+    prices, prices_source = _parse_input_file_with_evidence(
+        prices_path, source_id="prices", kind="Prices", extension=".json", parser=parse_prices
+    )
     findings = _detect_stale_prices(
         prices, as_of=date.fromisoformat(as_of), max_age_days=max_age_days
     )
+    exceptions = _attach_evidence(
+        [finding.to_exception() for finding in findings], sources=[prices_source]
+    )
     return {
         "findings": [finding.model_dump(mode="json") for finding in findings],
-        "exceptions": [finding.to_exception().model_dump(mode="json") for finding in findings],
+        "exceptions": [item.model_dump(mode="json") for item in exceptions],
     }
 
 
@@ -718,13 +766,18 @@ def detect_unsettled_trades(trades_path: str, as_of: str, grace_days: int = 3) -
         grace_days: Days past settlement_date still treated as a WARNING rather than HIGH.
     """
 
-    trades = _parse_input_file(trades_path, kind="Trades", extension=".json", parser=parse_trades)
+    trades, trades_source = _parse_input_file_with_evidence(
+        trades_path, source_id="trades", kind="Trades", extension=".json", parser=parse_trades
+    )
     findings = _detect_unsettled_trades(
         trades, as_of=date.fromisoformat(as_of), grace_days=grace_days
     )
+    exceptions = _attach_evidence(
+        [finding.to_exception() for finding in findings], sources=[trades_source]
+    )
     return {
         "findings": [finding.model_dump(mode="json") for finding in findings],
-        "exceptions": [finding.to_exception().model_dump(mode="json") for finding in findings],
+        "exceptions": [item.model_dump(mode="json") for item in exceptions],
     }
 
 
@@ -743,19 +796,30 @@ def detect_exposure_breaches(positions_path: str, nav: str, limits_path: str) ->
             issuer/sector for a targeted limit, or is omitted for a "no single X" rule.
     """
 
-    positions = _parse_input_file(
-        positions_path, kind="Positions", extension=".json", parser=parse_positions
+    positions, positions_source = _parse_input_file_with_evidence(
+        positions_path,
+        source_id="positions",
+        kind="Positions",
+        extension=".json",
+        parser=parse_positions,
     )
-    limits = _parse_input_file(
-        limits_path, kind="Exposure limits", extension=".json", parser=parse_exposure_limits
+    limits, limits_source = _parse_input_file_with_evidence(
+        limits_path,
+        source_id="exposure_limits",
+        kind="Exposure limits",
+        extension=".json",
+        parser=parse_exposure_limits,
     )
     try:
         breaches = _detect_exposure_breaches(positions, nav=Decimal(nav), limits=limits)
     except ValueError as exc:
         raise ValueError(f"Could not compute exposure breaches: {exc}") from exc
+    exceptions = _attach_evidence(
+        [breach.to_exception() for breach in breaches], sources=[positions_source, limits_source]
+    )
     return {
         "breaches": [breach.model_dump(mode="json") for breach in breaches],
-        "exceptions": [breach.to_exception().model_dump(mode="json") for breach in breaches],
+        "exceptions": [item.model_dump(mode="json") for item in exceptions],
     }
 
 
@@ -776,19 +840,27 @@ def validate_management_fees(fee_rules_path: str, administrator_fees_path: str) 
             basis_amount, reported_fee}.
     """
 
-    rules = _parse_input_file(
-        fee_rules_path, kind="Fee rules", extension=".json", parser=parse_fee_rules
+    rules, rules_source = _parse_input_file_with_evidence(
+        fee_rules_path,
+        source_id="fee_rules",
+        kind="Fee rules",
+        extension=".json",
+        parser=parse_fee_rules,
     )
-    administrator_fees = _parse_input_file(
+    administrator_fees, administrator_fees_source = _parse_input_file_with_evidence(
         administrator_fees_path,
+        source_id="administrator_fees",
         kind="Administrator fees",
         extension=".json",
         parser=parse_administrator_fees,
     )
     result = _validate_management_fees(rules, administrator_fees)
+    exceptions = _attach_evidence(
+        result.to_exceptions(), sources=[rules_source, administrator_fees_source]
+    )
     return {
         **result.model_dump(mode="json"),
-        "exceptions": [item.model_dump(mode="json") for item in result.to_exceptions()],
+        "exceptions": [item.model_dump(mode="json") for item in exceptions],
     }
 
 
@@ -812,22 +884,27 @@ def reconcile_expense_allocations(
             in the same shape, with allocated_category in place of expected_category.
     """
 
-    expected = _parse_input_file(
+    expected, expected_source = _parse_input_file_with_evidence(
         expected_allocations_path,
+        source_id="expected_expense_allocations",
         kind="Expected expense allocations",
         extension=".json",
         parser=parse_expected_expense_allocations,
     )
-    administrator = _parse_input_file(
+    administrator, administrator_source = _parse_input_file_with_evidence(
         administrator_expenses_path,
+        source_id="administrator_expenses",
         kind="Administrator expenses",
         extension=".json",
         parser=parse_administrator_expenses,
     )
     result = _reconcile_expense_allocations(expected, administrator)
+    exceptions = _attach_evidence(
+        result.to_exceptions(), sources=[expected_source, administrator_source]
+    )
     return {
         **result.model_dump(mode="json"),
-        "exceptions": [item.model_dump(mode="json") for item in result.to_exceptions()],
+        "exceptions": [item.model_dump(mode="json") for item in exceptions],
     }
 
 

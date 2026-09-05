@@ -5,7 +5,7 @@ from decimal import Decimal
 import pytest
 
 from app.exception_investigation import investigate_exception
-from app.fund_reconciliation import ExceptionItem
+from app.fund_reconciliation import EvidenceRef, ExceptionItem
 
 
 def _item(
@@ -141,3 +141,18 @@ def test_investigate_exception_impact_amount_is_decimal() -> None:
     result = investigate_exception([item])
 
     assert result.exception.impact_amount == Decimal("500.00")
+
+
+def test_investigate_exception_carries_document_lineage_through() -> None:
+    evidence_ref = EvidenceRef(
+        source_id="internal_cash", filename="internal.json", sha256="a" * 64, locator="ACC1"
+    )
+    target = _item("cash", "cash.balance_mismatch", key="ACC1", severity="high", impact_amount=500)
+    target.evidence.append(evidence_ref)
+    related = _item("trade", "trade.price_mismatch", key="ACC1", severity="high", impact_amount=100)
+    related.evidence.append(evidence_ref)
+
+    result = investigate_exception([target, related])
+
+    assert result.exception.evidence == [evidence_ref]
+    assert result.related_exceptions[0].evidence == [evidence_ref]
