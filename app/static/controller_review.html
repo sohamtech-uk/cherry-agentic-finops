@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Cherry CFO controller review for decision-ready cash application exceptions.">
+  <title>Cherry CFO — Controller review</title>
+  <link rel="stylesheet" href="/static/controller_review.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span>C</span> Cherry CFO</a>
+    <div class="top-actions">
+      <span class="simulation-badge">SIMULATED AR · NO PRODUCTION WRITES</span>
+      <button class="ghost" id="reset-demo" type="button">Reset £500 case</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="page-heading">
+      <div>
+        <p class="eyebrow">Controller workbench · CA-05</p>
+        <h1>A decision, not a confidence score.</h1>
+        <p id="case-summary">Loading the material short-pay exception…</p>
+      </div>
+      <div class="risk-card">
+        <span>Amount at risk</span>
+        <strong id="amount-risk">—</strong>
+        <small id="review-status">Awaiting packet</small>
+      </div>
+    </section>
+
+    <div class="alert hidden" id="message" role="status" aria-live="polite"></div>
+
+    <section class="accounting-grid" aria-label="Receipt and invoice match">
+      <article class="panel receipt-panel">
+        <div class="panel-title"><span>01</span><div><small>BOOKED CASH</small><h2>Receipt</h2></div></div>
+        <dl class="facts">
+          <div><dt>Receipt</dt><dd id="receipt-id">—</dd></div>
+          <div><dt>Transaction</dt><dd id="transaction-id">—</dd></div>
+          <div><dt>Payer</dt><dd id="payer">—</dd></div>
+          <div><dt>Booking date</dt><dd id="booking-date">—</dd></div>
+          <div class="wide"><dt>Booked amount</dt><dd id="receipt-amount">—</dd></div>
+        </dl>
+      </article>
+
+      <div class="flow-arrow" aria-hidden="true">→</div>
+
+      <article class="panel match-panel">
+        <div class="panel-title"><span>02</span><div><small>EVIDENCE-BACKED MATCH</small><h2>Customer &amp; invoice</h2></div></div>
+        <dl class="facts">
+          <div><dt>Customer</dt><dd id="customer">—</dd></div>
+          <div><dt>Invoice</dt><dd id="invoice-id">—</dd></div>
+          <div><dt>Open before</dt><dd id="invoice-before">—</dd></div>
+          <div><dt>Cash allocation</dt><dd id="cash-allocation">—</dd></div>
+          <div class="wide"><dt>Remittance claim</dt><dd id="reason-code">—</dd></div>
+        </dl>
+        <ul class="basis-list" id="match-basis"></ul>
+      </article>
+    </section>
+
+    <section class="ar-bridge panel">
+      <div class="panel-title"><span>03</span><div><small>REMAINING AR STATE</small><h2>Every pound stays visible</h2></div></div>
+      <div class="bridge-values">
+        <div><small>Invoice before</small><strong id="bridge-before">—</strong></div>
+        <b>−</b>
+        <div><small>Cash applied</small><strong id="bridge-cash">—</strong></div>
+        <b>−</b>
+        <div><small>Approved treatment</small><strong id="bridge-treatment">—</strong></div>
+        <b>=</b>
+        <div class="residual"><small>Still open</small><strong id="bridge-open">—</strong></div>
+      </div>
+      <p id="state-label">—</p>
+    </section>
+
+    <section class="detail-grid">
+      <article class="panel stop-panel">
+        <div class="panel-title"><span>04</span><div><small>WHY AUTOMATION STOPPED</small><h2>Policy exception</h2></div></div>
+        <div id="stop-reasons"></div>
+      </article>
+      <article class="panel policy-panel">
+        <div class="panel-title"><span>05</span><div><small>APPLICABLE POLICY</small><h2 id="policy-heading">—</h2></div></div>
+        <p id="policy-meta">—</p>
+        <div id="policy-clauses"></div>
+      </article>
+    </section>
+
+    <section class="panel controls-panel">
+      <div class="panel-title"><span>06</span><div><small>NON-OVERRIDABLE CONTROLS</small><h2>Approval still has boundaries</h2></div></div>
+      <div class="control-list" id="control-list"></div>
+    </section>
+
+    <section class="panel evidence-panel">
+      <div class="panel-title"><span>07</span><div><small>SOURCE LINEAGE</small><h2>Evidence locators &amp; hashes</h2></div></div>
+      <div class="evidence-list" id="evidence-list"></div>
+    </section>
+
+    <section class="decision-panel panel">
+      <div class="decision-copy">
+        <p class="eyebrow">Controller decision</p>
+        <h2>Choose the accounting outcome.</h2>
+        <p>Authority is read from the server-side reviewer register. Approval re-runs every fundamental control before simulated state can change.</p>
+      </div>
+      <form id="decision-form">
+        <label>Reviewer<select id="reviewer" required></select></label>
+        <fieldset>
+          <legend>Allowed action</legend>
+          <div class="action-grid" id="action-grid"></div>
+        </fieldset>
+        <label>Rationale<textarea id="rationale" rows="3" required placeholder="State the accounting reason for this decision."></textarea></label>
+        <div class="conditional-fields">
+          <label id="reason-field">Reason code<input id="decision-reason" value="DAMAGED_GOODS"></label>
+          <label id="owner-field" class="hidden">Dispute owner<input id="dispute-owner" value="Deductions team"></label>
+          <label id="evidence-field" class="hidden">Evidence required<input id="requested-evidence" value="Customer damage report and credit authorisation"></label>
+        </div>
+        <button class="primary" id="submit-decision" type="submit">Record simulated decision</button>
+        <small class="boundary">No action on this page initiates a payment, changes active policy or writes to a production ledger.</small>
+      </form>
+      <div class="decision-result hidden" id="decision-result"></div>
+    </section>
+  </main>
+
+  <script src="/static/controller_review.js" defer></script>
+</body>
+</html>
