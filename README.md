@@ -341,6 +341,7 @@ app/contract_tools.py                        constrained contract specialist too
 app/contract_router.py                       contract ingestion, search and NAV APIs
 app/nav_reconciliation.py                    quick ad hoc balance-sheet/NAV-bridge checks
 app/reconciliation_tools.py                  atomic agent tools (read/sum/compare/bridge)
+app/statement_tools.py                       statement-review agent tools (section/entity/period/date diff)
 agents/cherry_finops/agent.py                Google ADK agents (reconciliation_specialist and peers)
 app/fundops_studio.py                        Agent Studio microservice client
 app/static/                                  judge-facing control-room UI

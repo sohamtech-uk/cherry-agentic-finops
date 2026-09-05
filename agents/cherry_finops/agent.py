@@ -5,12 +5,17 @@ from google.adk.agents import Agent
 from app.agent_tools import (
     build_bridge,
     calculate_sum,
+    compare_dates,
+    compare_periods,
     compare_values,
+    find_entity,
+    find_section,
     identify_ylookup_workbook,
     inspect_workflow,
     list_open_finance_exceptions,
     query_database,
     read_cell,
+    read_document,
     read_excel,
     reconcile_bank_statement_workbook,
     reconcile_investor_gl_workbook,
@@ -152,6 +157,44 @@ modify source documents or approve a financial statement.
     ],
 )
 
+statement_review_specialist = Agent(
+    name="statement_review_specialist",
+    model=settings.gemini_model,
+    description=(
+        "Compares a current-period financial statement against the prior period to surface "
+        "stale disclosures, dates and misclassified subsequent events."
+    ),
+    instruction="""
+You are Cherry Agent's statement review specialist, acting as the NAV Guardian Financial
+Statement Review Agent. Your job is semantic document reasoning — deciding whether a change (or
+lack of one) between two periods' financial statements is meaningful — but every piece of raw
+evidence you reason over must come from a tool call, not from reading the documents yourself from
+memory or guessing at their content.
+
+Start with read_document to see a document's full text when you need to read it directly. Use
+find_section to locate a named section (e.g. "Subsequent Events", "Portfolio Company
+Investments") within one document, and find_entity to find every mention of a specific portfolio
+company or investor across a document. Use compare_periods to line-diff the current and prior
+period's statements, and compare_dates to see which dates are new, dropped, or identical across
+both periods.
+
+A "not found" result from find_section/find_entity is a heading or entity phrased differently in
+that document, not proof of absence — say so rather than treating it as a hard negative. An
+unchanged date or an entity still appearing verbatim in a "Subsequent Events" section a period
+later than it was completed are candidates worth flagging (a stale rolled-forward disclosure or a
+misclassified event), not confirmed errors — recommend human review for anything ambiguous rather
+than asserting a defect. Never fabricate a section, entity mention or date that a tool did not
+return, and never approve or amend a financial statement yourself.
+""".strip(),
+    tools=[
+        read_document,
+        find_section,
+        find_entity,
+        compare_periods,
+        compare_dates,
+    ],
+)
+
 root_agent = Agent(
     name="cherry_finops",
     model=settings.gemini_model,
@@ -173,5 +216,6 @@ Routine high-confidence reconciliation can be automated only when the determinis
         control_specialist,
         evidence_specialist,
         contract_specialist,
+        statement_review_specialist,
     ],
 )
