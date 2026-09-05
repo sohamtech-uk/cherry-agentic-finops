@@ -46,7 +46,9 @@ def test_two_financial_statements_are_compared_and_flagged() -> None:
 
 
 def test_unrecognised_source_type_is_not_yet_available() -> None:
-    positions = json.dumps([{"security_id": "ABC", "quantity": 100}]).encode()
+    positions = json.dumps(
+        [{"fund": "F1", "security_id": "ABC", "quantity": 100, "price": 10}]
+    ).encode()
 
     result = run_analysis([("positions.json", positions, "application/json")])
 

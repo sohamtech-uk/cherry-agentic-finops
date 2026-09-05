@@ -11,7 +11,10 @@ from typing import Any, Literal
 from pydantic import ValidationError
 
 from app.exception_investigation import investigate_exception
-from app.fund_manager_classification import ClassifiedSource, classify_sources
+from app.fund_manager_classification import (
+    ClassifiedSource,
+    classify_and_validate_sources,
+)
 from app.fund_reconciliation import (
     EvidenceSource,
     ExceptionItem,
@@ -319,12 +322,13 @@ def _evidence_sources(items: list[EvidenceItem]) -> list[EvidenceSource]:
 
 
 def run_analysis(files: list[tuple[str, bytes, str | None]]) -> dict[str, Any]:
-    sources = classify_sources(files)
-    items = [
+    sources = classify_and_validate_sources(files)
+    all_items = [
         EvidenceItem(source, content, content_type)
         for (_, content, content_type), source in zip(files, sources, strict=True)
     ]
-    item_by_id = {item.source["id"]: item for item in items}
+    items = [item for item in all_items if item.source["validation_status"] == "accepted"]
+    item_by_id = {item.source["id"]: item for item in all_items}
     plans = ControlPlanningAgent().plan(items)
     catalogue = {definition.control_id: definition for definition in CONTROL_CATALOGUE}
     runs: list[dict[str, Any]] = []
@@ -387,15 +391,15 @@ def run_analysis(files: list[tuple[str, bytes, str | None]]) -> dict[str, Any]:
             )
             exceptions.extend(attach_evidence([failure], sources=_evidence_sources(selected)))
 
-    for item in items:
-        if item.source["status"] == "processed":
+    for item in all_items:
+        if item.source["validation_status"] == "accepted":
             continue
         unknown = ExceptionItem(
             category="data_quality",
             code="evidence.unclassified",
             key=item.source["id"],
-            title=f"{item.source['filename']}: evidence could not be classified",
-            detail="; ".join(item.source["warnings"])
+            title=f"{item.source['filename']}: evidence was rejected",
+            detail="; ".join(item.source["validation_errors"])
             or ("No recognised evidence contract matched this source."),
             severity=FindingSeverity.WARNING,
         )

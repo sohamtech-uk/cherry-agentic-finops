@@ -31,6 +31,7 @@ import json
 from typing import Any, Literal
 
 from app.contracts import read_document_pages
+from app.fund_reconciliation import parse_cash_balances, parse_positions, parse_trades
 from app.ylookup_datasets import inspect_workbook
 
 SourceStatus = Literal["processed", "unknown", "unreadable"]
@@ -207,4 +208,51 @@ def classify_sources(
         source = classify_source(content, file_name, content_type)
         source["id"] = f"SRC-{index:02d}"
         sources.append(source)
+    return sources
+
+
+_STRICT_JSON_VALIDATORS = {
+    "positions": parse_positions,
+    "trades": parse_trades,
+    "cash_transactions": parse_cash_balances,
+}
+
+
+def classify_and_validate_sources(
+    files: list[tuple[str, bytes, str | None]],
+) -> list[ClassifiedSource]:
+    """Classify evidence and accept only sources that pass their input contract.
+
+    Rejected sources remain in the evidence manifest for lineage, but the control-planning agent
+    cannot select them. This is the shared agent tool behind both the classification endpoint and
+    the integrated analysis flow.
+    """
+
+    sources = classify_sources(files)
+    for source, (_, content, _) in zip(sources, files, strict=True):
+        errors: list[str] = []
+        if source["status"] != "processed":
+            errors.extend(source["warnings"] or ["No supported evidence type was identified."])
+        else:
+            validator = _STRICT_JSON_VALIDATORS.get(source["detected_type"])
+            if validator is not None and source["filename"].casefold().endswith(".json"):
+                try:
+                    records = validator(content)
+                    if not records:
+                        errors.append("The document contains no financial records.")
+                except (ValueError, TypeError) as exc:
+                    errors.append(f"Schema validation failed: {exc}")
+
+        accepted = not errors
+        source["validation_status"] = "accepted" if accepted else "rejected"
+        source["validation_errors"] = errors
+        source["agent_decision"] = {
+            "action": "accept" if accepted else "reject",
+            "reason": (
+                "Recognised evidence passed its registered deterministic input contract."
+                if accepted
+                else "Evidence was excluded from control planning because validation failed."
+            ),
+            "classifier": "fund-manager-classifier-v1",
+        }
     return sources
