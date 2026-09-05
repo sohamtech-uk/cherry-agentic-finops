@@ -287,7 +287,9 @@ def test_analyse_endpoint_rejects_empty_batch() -> None:
     assert response.status_code == 422
 
 
-def test_production_fund_manager_uses_server_side_token_only(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_production_fund_manager_uses_server_side_token_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(fund_manager_router.settings, "environment", "production")
     monkeypatch.setenv("CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN", "server-only-token")
     positions = json.dumps([{"security_id": "ABC", "quantity": 100}]).encode()
