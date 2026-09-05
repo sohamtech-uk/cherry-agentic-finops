@@ -392,9 +392,16 @@
       state.files = [];
       state.sources = null;
       state.analysis = null;
+      const tokenInput = q("#fm-demo-token");
+      if (tokenInput) tokenInput.value = "";
+      const fallbackTokenInput = q("#upload-token");
+      if (fallbackTokenInput) fallbackTokenInput.value = "";
+      const fileInput = q("#fm-file-input");
+      if (fileInput) fileInput.value = "";
       renderFileList();
       renderInventory();
       renderAnalysis();
+      notify("Selected files, analysis and upload token cleared.");
     });
 
     q("#fm-classify")?.addEventListener("click", classifySources);
