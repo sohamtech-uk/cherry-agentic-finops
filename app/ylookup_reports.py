@@ -85,9 +85,7 @@ def build_ylookup_excel_report(result: dict[str, Any]) -> bytes:
             "deal_count",
             "target_column_count",
         ]
-        metrics = ", ".join(
-            f"{key}={workflow[key]}" for key in metric_keys if key in workflow
-        )
+        metrics = ", ".join(f"{key}={workflow[key]}" for key in metric_keys if key in workflow)
         summary.append(
             [
                 workflow.get("title", workflow.get("workflow", "")),
