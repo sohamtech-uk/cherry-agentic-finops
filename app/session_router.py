@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import hmac
-import os
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter
 
 from app.config import get_settings
 from app.container import get_engine
@@ -14,46 +12,30 @@ settings = get_settings()
 router = APIRouter(prefix="/api/session", tags=["session"])
 
 
-def _require_clear_access(token: str | None) -> None:
-    expected = os.getenv("CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN", "").strip()
-    if settings.environment != "production" and not expected:
-        return
-    if not expected:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Memory clearing is disabled until the private-markets demo token is configured."
-            ),
-        )
-    if not token or not hmac.compare_digest(token, expected):
-        raise HTTPException(status_code=401, detail="Valid private-markets demo token required.")
-
-
 @router.post("/clear-memory")
-async def clear_memory(
-    x_cherry_demo_token: Annotated[
-        str | None,
-        Header(alias="X-Cherry-Demo-Token"),
-    ] = None,
-) -> dict[str, Any]:
-    """Clear ephemeral server workflow state for the hackathon memory deployment.
+async def clear_memory() -> dict[str, Any]:
+    """Clear only ephemeral server state; never require the upload token for a reset.
 
-    Private-markets and Ylookup upload endpoints process uploaded bytes request-by-request.
-    They do not persist the raw PDF/XLSX payloads in the in-memory workflow repository. This
-    endpoint clears any workflow records that are present in that repository. Persistent backends
-    such as Firestore are deliberately excluded so this button can never become a remote
-    database-delete operation.
+    Private-markets and Ylookup upload endpoints process uploaded bytes request-by-request and do not
+    retain the raw PDF/XLSX/JSON payloads. The browser clears selected files and rendered results
+    locally. On memory-backed deployments this endpoint also clears ephemeral workflow and parsed
+    contract state. Persistent backends such as Firestore are deliberately left untouched so the
+    reset action can never become an unauthenticated database-delete operation.
     """
 
-    _require_clear_access(x_cherry_demo_token)
     if settings.persistence_backend != "memory":
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Server persistence is not memory-backed. The Clear memory action is intentionally "
-                "restricted to ephemeral memory deployments and will not delete Firestore data."
+        return {
+            "status": "browser_reset_only",
+            "persistence_backend": settings.persistence_backend,
+            "cleared_workflow_records": 0,
+            "cleared_contract_documents": 0,
+            "persistent_records_deleted": False,
+            "raw_uploads_retained": False,
+            "message": (
+                "Browser-selected files and rendered analysis can be cleared without a token. "
+                "Persistent server workflow records were not deleted."
             ),
-        )
+        }
 
     engine = get_engine()
     cleared_workflow_records = len(engine.list())
@@ -64,6 +46,7 @@ async def clear_memory(
         "persistence_backend": settings.persistence_backend,
         "cleared_workflow_records": cleared_workflow_records,
         "cleared_contract_documents": cleared_contract_documents,
+        "persistent_records_deleted": False,
         "raw_uploads_retained": False,
         "message": (
             "Ephemeral workflow and parsed contract memory were cleared. Raw private-markets "
