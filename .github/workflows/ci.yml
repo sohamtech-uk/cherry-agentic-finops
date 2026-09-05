@@ -23,6 +23,8 @@ jobs:
         run: |
           ruff check .
           ruff format --check .
+      - name: Type check
+        run: mypy app agents
       - name: Test
         run: pytest
       - name: Compile
