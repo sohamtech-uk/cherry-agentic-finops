@@ -163,14 +163,17 @@ Return ONLY valid JSON, with no markdown fences, in this shape:
     }
   ],
   "investigations": [],
-  "recommended_human_action": "accept_and_close|review_missing_evidence|assign_and_monitor|request_evidence|escalate_immediately",
+  "recommended_human_action":
+    "accept_and_close|review_missing_evidence|assign_and_monitor|request_evidence|"
+    "escalate_immediately",
   "agent_summary": "short explanation of what the agent selected and why"
 }
 
 Set overall status from tool/control outcomes only:
 - clean: every applicable recognised control executed and tool outputs show no issue.
 - review_required: an executed tool returned a material exception or failure.
-- partially_evaluated: at least one control executed and at least one is awaiting evidence or adapter.
+- partially_evaluated: at least one control executed and at least one is awaiting evidence or
+  adapter.
 - insufficient_evidence: no substantive control could execute.
 """.strip(),
     tools=[
