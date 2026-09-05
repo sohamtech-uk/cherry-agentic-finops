@@ -1,190 +1,168 @@
-<p align="center">
-  <img src="docs/images/hero.jpg" alt="Cherry Agent autonomous finance operations" width="920">
-</p>
-
 # Cherry FundOps — Capital Call Control Room
 
 [![CI](https://github.com/sohamtech-uk/cherry-agentic-finops/actions/workflows/ci.yml/badge.svg)](https://github.com/sohamtech-uk/cherry-agentic-finops/actions/workflows/ci.yml)
 
-Cherry FundOps turns capital-call notices, LP commitment workbooks and bank cash exports into a
-single governed fund-operations case:
+Cherry FundOps turns a capital-call notice, LP commitment/control workbook and fund cash evidence
+into one governed private-markets case:
 
 **extract → cross-check → reconcile → surface exceptions → route the next action**
 
-The judge-facing product is built for the **Rebuild Private Markets: Ylookup × Encode AI Hackathon**.
-It uses **Gemini**, **FastAPI** and deterministic finance controls. The application works locally
-with explicitly labelled synthetic cases. Real PDF/image uploads use Gemini when Vertex AI
-credentials are available.
+The judge-facing experience is prepared for **Rebuild Private Markets: Ylookup × Encode AI
+Hackathon**. Gemini interprets documents; deterministic controls decide whether evidence is strong
+enough to close, needs more evidence or requires independent human verification.
 
-## The demonstration
+## Demo scenarios
 
-| Scenario | What the judges see | Outcome |
-|---|---|---|
-| Control break | A notice changes approved bank instructions and booked cash is £500 short | Payment path stays blocked; treasury and investor-ops tasks are created |
-| Awaiting cash | The notice and banking record agree but no booked receipt exists | Case remains open for investor operations |
-| Clean close | Notice, commitment arithmetic, approved bank record and cash agree | Ready to reconcile |
+| Scenario | What happens | Outcome |
+| --- | --- | --- |
+| Control break | Bank instructions change and booked cash is £500 short | Evidence required; treasury and investor-ops tasks are created |
+| Awaiting cash | Notice and approved bank record agree but no strongly referenced receipt exists | Case remains open for investor operations |
+| Clean close | Notice, commitment arithmetic, approved bank record and strongly referenced cash agree | Ready to reconcile |
 
-The distinction matters: **Gemini understands documents, while deterministic controls decide what
-can proceed.** Cherry FundOps never initiates a payment.
+Public synthetic demos are available at:
+
+```text
+POST /api/private-markets/demo/exception
+POST /api/private-markets/demo/awaiting-cash
+POST /api/private-markets/demo/clean
+```
 
 ## Architecture
 
-<p align="center">
-  <img src="docs/images/architecture.jpg" alt="Cherry Agent Google Cloud architecture" width="920">
-</p>
-
 ```mermaid
 flowchart LR
-  D[Bill / receipt] --> G[Gemini document extraction]
-  B[Bank-feed event] --> M[Deterministic candidate scoring]
-  G --> C[Category and VAT suggestion]
-  C --> M
-  M --> R[Risk policy]
-  R -->|High confidence + bounded value| A[Auto-reconcile]
-  R -->|High value / uncertainty| H[Human approval]
-  R -->|Material mismatch| E[Evidence exception]
-  A --> U[SHA-256 audit chain]
-  H --> U
-  E --> U
-  U --> Z[Evidence ZIP + Cloud Storage]
-  ADK[Google ADK orchestrator] --> M
-  ADK --> H
+  P[Capital-call PDF/image] --> G[Gemini structured extraction]
+  X[LP commitment/control XLSX] --> C[Strict deterministic controls]
+  B[Fund cash CSV or read-only Cherry Money snapshot] --> C
+  G --> C
+  C -->|all controls pass| R[Ready to reconcile]
+  C -->|changed bank instructions| H[Independent human verification]
+  C -->|missing/weak/mismatched evidence| E[Evidence required]
+  H --> W[Owned work queue]
+  E --> W
+  C --> A[SHA-256 evidence metadata]
 ```
 
-Google Cloud services:
+### Control principles
 
-- **Cloud Run** — public application and API
-- **Vertex AI / Gemini 3.7 Flash** — multimodal document understanding and agent reasoning
-- **Firestore** — durable workflow state
-- **Pub/Sub** — event-driven workflow notifications
-- **Cloud Storage** — versioned audit evidence packs
-- **Artifact Registry + Cloud Build** — container delivery
+- blank or unapproved banking metadata never counts as approval;
+- a capital call cannot exceed the LP commitment remaining before the call;
+- investor-name-only bank matches are weak evidence and cannot auto-reconcile;
+- automatic close requires strong call/LP reference evidence in booked cash;
+- duplicate transaction IDs are treated as a control break;
+- low-confidence document extraction requires review;
+- Cherry FundOps never authorises or executes a payment.
+
+## Cherry Money relationship
+
+Cherry Money is a separate, pre-existing accounting/open-banking product. If the organisers permit
+pre-existing infrastructure, FundOps can use Cherry Money as a **read-only financial system of
+record** through its authenticated WebMCP bridge.
+
+Configure:
+
+```env
+CHERRY_MONEY_API_URL=https://cherrymoney.co.uk
+CHERRY_MONEY_API_TOKEN=...
+```
+
+Then the protected endpoint:
+
+```text
+GET /api/private-markets/cherry-money/snapshot
+```
+
+reads the bounded company-scoped `/api/webmcp/bootstrap` projection. The private-markets route does
+not write to Cherry Money. See `PREEXISTING_CODE.md` for the exact reuse/baseline disclosure.
+
+## Real three-file analysis
+
+```text
+POST /api/private-markets/analyse
+```
+
+Multipart inputs:
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `capital_call` | one of | Capital-call/distribution PDF or image |
+| `capital_call_json` | one of | Structured fallback when Gemini is unavailable |
+| `commitments` | yes | LP commitment/control `.xlsx` |
+| `cash` | yes | UTF-8 fund cash `.csv` |
+| `as_of_date` | no | `YYYY-MM-DD` control date |
+
+In production, real uploads fail closed until `CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN` is configured.
+Clients send the same value as `X-Cherry-Demo-Token`. Synthetic demo endpoints remain public.
+
+The response includes SHA-256 hashes of each input plus the deterministic analysis so the review
+brief can be tied back to the evidence used for the decision.
 
 ## Run locally
 
-Python 3.11 or later is required.
+Python 3.11+ is required.
 
 ```bash
 git clone git@github.com:sohamtech-uk/cherry-agentic-finops.git
 cd cherry-agentic-finops
-
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
 cp .env.example .env
-
 uvicorn app.api:app --reload --port 8080
 ```
 
-Open <http://localhost:8080>.
+Open:
 
-Run quality checks:
+```text
+http://localhost:8080
+http://localhost:8080/api/docs
+http://localhost:8080/api/private-markets/health
+```
+
+Generate the synthetic backup fixtures:
+
+```bash
+make ylookup-fixtures
+```
+
+## Quality gates
 
 ```bash
 ruff check .
 ruff format --check .
+mypy app agents
 pytest
+python -m compileall -q app agents
 node --check app/static/app.js
+docker build --tag cherry-agent:test .
 ```
 
-Docker:
+CI runs the same lint/type/test/compile/browser/container checks on pull requests.
 
-```bash
-cp .env.example .env
-docker compose up --build
-```
+## Deployment
 
-## Run the Google ADK agent
-
-ADK discovers the application under `agents/cherry_finops`.
-
-```bash
-# Vertex AI
-export GOOGLE_GENAI_USE_VERTEXAI=true
-export GOOGLE_CLOUD_PROJECT=your-project-id
-export GOOGLE_CLOUD_LOCATION=global
-export CHERRY_GEMINI_MODEL=gemini-3.7-flash
-
-adk web agents
-```
-
-Useful prompts:
-
-- `Run the autonomous finance scenario and explain why automation was permitted.`
-- `Run the approval scenario. Which deterministic control stopped the workflow?`
-- `List the open month-end finance exceptions.`
-- `Approve workflow wf_... as Srinivasan after I explicitly confirm.`
-
-The control specialist is instructed never to infer approval. An identified human must explicitly
-approve a specific workflow.
-
-## Process a real document
-
-```bash
-curl -X POST http://localhost:8080/api/workflows \
-  -F 'document=@invoice.pdf;type=application/pdf' \
-  -F 'transactions_json=[{"transaction_id":"bank-001","booking_date":"2026-08-22","amount":2450,"currency":"GBP","direction":"debit","description":"OFFICE SOLUTIONS INV-98214","merchant_name":"Office Solutions Co.","reference":"INV-98214"}]'
-```
-
-With Google credentials configured, Gemini returns schema-validated finance data. Without Google
-credentials, the real-upload endpoint returns a clear `503`; it does not disguise synthetic data as
-an actual extraction.
-
-## Evidence and safety controls
-
-Every material transition is appended to a SHA-256 hash chain. The evidence endpoint produces a ZIP
-with the extracted document data, ranked candidates, policy decision, complete workflow and audit
-trail:
-
-```text
-GET /api/workflows/{workflow_id}/evidence
-```
-
-Silent automation is blocked by:
-
-- currency mismatch;
-- an already-reconciled bank transaction;
-- an amount variance above the configured tolerance;
-- insufficient reconciliation evidence;
-- low document-extraction confidence;
-- a transaction above the explicit approval threshold.
-
-The evidence pack is an operational record, not an external audit opinion or tax advice.
-
-## Deploy to the selected Google Cloud account
-
-The target is **`https://finops.cherrymoney.co.uk`**. The simplest first deployment is through the
-Cloud Shell of the Google account that owns the project:
-
-```bash
-git clone https://github.com/sohamtech-uk/cherry-agentic-finops.git
-cd cherry-agentic-finops
-bash scripts/deploy-cloudshell.sh YOUR_PROJECT_ID
-```
-
-The script enables APIs, creates the runtime identity, Artifact Registry, Firestore, Pub/Sub and the
-evidence bucket, builds the container and deploys Cloud Run in `europe-west1`. If domain ownership
-has already been verified, it creates the domain mapping and prints the exact DNS records.
-
-**DNS access is required for the final hostname. FTP credentials cannot add or change DNS records.**
-See [docs/DEPLOY_GCP.md](docs/DEPLOY_GCP.md).
+The existing deployment target is `https://finops.cherrymoney.co.uk` on Google Cloud Run. See
+`docs/DEPLOY_GCP.md` for deployment details.
 
 ## Repository map
 
 ```text
-app/                         FastAPI API, workflow engine and browser UI
-agents/cherry_finops/        Google ADK multi-agent application
-infra/terraform/             Reproducible Google Cloud infrastructure
-scripts/deploy-cloudshell.sh One-command first deployment from Cloud Shell
-tests/                       Matching, policy, audit, workflow and API tests
-docs/                        Architecture, deployment and demo script
+app/private_markets.py          Private-markets schemas, parsers and legacy analysis
+app/private_markets_strict.py   Fail-closed deterministic control policy
+app/private_markets_router.py   Demo, protected real analysis and read-only Cherry Money endpoint
+app/static/                     Judge-facing control-room UI
+fixtures/private_markets/       Synthetic backup data
+scripts/                        Fixture/deployment helpers
+tests/                          Controls, API and workflow tests
+docs/                           Readiness/deployment documentation
 ```
 
-## Relationship to Cherry Money
+## Reuse disclosure
 
-This is a new hackathon service. It does not copy the Cherry Money Laravel monolith or Terraform
-repository. Those repositories informed the domain model and integration boundary. The exact source
-revisions and reuse disclosure are in [PREEXISTING_CODE.md](PREEXISTING_CODE.md).
+The repository contains pre-existing Cherry Agent work and pre-event Ylookup preparation. The frozen
+pre-hardening state is preserved at `baseline/pre-hardening-2026-09-05` on commit
+`22f4461ee793eb9d9ab83828f9992a76c0be3ef6`. Do not represent that pre-existing work as code built
+after hackathon kickoff. See `PREEXISTING_CODE.md` for details.
 
 ## Licence
 
