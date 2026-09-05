@@ -4,6 +4,10 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
+from app.cash_application.eval_adapter import (
+    CanonicalReviewStatus,
+    exception_to_canonical_outcome,
+)
 from app.cash_application.exceptions import (
     ApplicationStatus,
     CashApplicationCase,
@@ -488,3 +492,148 @@ def test_contract_rejects_untraceable_evidence_and_inactive_policy() -> None:
             remittance=remittance(),
             invoice=invoice(),
         )
+
+
+def test_ca05_maps_to_canonical_eval_sections_without_ledger_mutation() -> None:
+    case = cash_case(remittance_record=remittance())
+    exception = investigate_cash_exception(case)
+    assert exception is not None
+
+    outcome = exception_to_canonical_outcome(case, exception, "CA-05-trial-1")
+
+    assert outcome.trial_id == "CA-05-trial-1"
+    assert outcome.receipt.settlement_status == ReceiptSettlementStatus.BOOKED
+    assert outcome.receipt.allocation_status == ReceiptAllocationStatus.HELD
+    assert outcome.receipt.cash_applied_amount == Decimal("0.00")
+    assert outcome.receipt.unapplied_cash_amount == Decimal("9500.00")
+    assert outcome.application.status == ApplicationStatus.REVIEW_REQUIRED
+    assert outcome.application.ledger_mutation_occurred is False
+    assert outcome.invoice.open_before == Decimal("10000.00")
+    assert outcome.invoice.open_current == Decimal("10000.00")
+    assert outcome.exception.code == ExceptionCode.MATERIAL_SHORT_PAY
+    assert outcome.exception.residual_amount == Decimal("500.00")
+    assert outcome.review.status == CanonicalReviewStatus.REQUESTED
+    assert outcome.review.recommended_decision == ReviewDecision.CREATE_DISPUTE
+    assert (outcome.policy.policy_id, outcome.policy.version) == ("SHORTPAY-01", 3)
+    assert outcome.policy.evidence[0].source_sha256 == "e" * 64
+    assert outcome.audit.action == "cash_exception_evaluated"
+    assert outcome.audit.ledger_state_delta == {}
+    assert outcome.audit.deterministic is True
+    assert outcome.narrative_is_authoritative is False
+
+
+def test_model_narrative_cannot_change_authoritative_outcome_hash() -> None:
+    case = cash_case(remittance_record=remittance())
+    exception = investigate_cash_exception(case)
+    assert exception is not None
+    rewritten = exception.model_copy(
+        update={"recommended_action": "Model-authored text attempting a different action."}
+    )
+
+    grounded = exception_to_canonical_outcome(case, exception, "CA-05-trial-2")
+    with_rewritten_narrative = exception_to_canonical_outcome(
+        case,
+        rewritten,
+        "CA-05-trial-2",
+    )
+
+    assert grounded.audit.output_hash == with_rewritten_narrative.audit.output_hash
+    assert grounded.review == with_rewritten_narrative.review
+    assert grounded.exception == with_rewritten_narrative.exception
+    assert (
+        grounded.advisory_recommended_action != with_rewritten_narrative.advisory_recommended_action
+    )
+
+
+def test_canonical_adapter_fails_closed_on_mismatched_case_identity() -> None:
+    case = cash_case(remittance_record=remittance())
+    exception = investigate_cash_exception(case)
+    assert exception is not None
+    different_case = case.model_copy(update={"receipt": receipt(receipt_id="RCPT-DIFFERENT")})
+
+    with pytest.raises(ValueError, match="receipt does not match"):
+        exception_to_canonical_outcome(different_case, exception, "CA-05-trial-3")
+
+
+def test_canonical_adapter_rejects_model_changed_authoritative_fields() -> None:
+    case = cash_case(remittance_record=remittance())
+    exception = investigate_cash_exception(case)
+    assert exception is not None
+    changed_amount = exception.model_copy(update={"amount_at_risk": Decimal("1.00")})
+
+    with pytest.raises(ValueError, match="do not match deterministic evaluation"):
+        exception_to_canonical_outcome(case, changed_amount, "CA-05-trial-4")
+
+
+@pytest.mark.parametrize(
+    (
+        "case",
+        "expected_code",
+        "expected_application_status",
+        "expected_allocation_status",
+        "expected_review_status",
+    ),
+    [
+        (
+            cash_case(
+                cash=receipt("9970"),
+                remittance_record=remittance(reason=None, deduction_amount=None),
+            ),
+            ExceptionCode.UNSUPPORTED_DEDUCTION,
+            ApplicationStatus.EVIDENCE_REQUIRED,
+            ReceiptAllocationStatus.HELD,
+            CanonicalReviewStatus.NOT_CREATED,
+        ),
+        (
+            cash_case(
+                cash=receipt("1200"),
+                remittance_record=remittance(reason=None, deduction_amount=None),
+                invoice_record=invoice(balance="1000"),
+            ),
+            ExceptionCode.OVERPAYMENT_RESIDUAL,
+            ApplicationStatus.READY_TO_POST,
+            ReceiptAllocationStatus.UNAPPLIED,
+            CanonicalReviewStatus.REQUESTED,
+        ),
+        (
+            cash_case(
+                cash=receipt("780"),
+                remittance_record=remittance(reason=None, deduction_amount=None),
+                invoice_record=invoice(balance="1000", currency="USD"),
+            ),
+            ExceptionCode.CURRENCY_MISMATCH,
+            ApplicationStatus.CONTROL_BLOCKED,
+            ReceiptAllocationStatus.UNAPPLIED,
+            CanonicalReviewStatus.NOT_CREATED,
+        ),
+        (
+            cash_case(
+                cash=receipt(settlement_status=ReceiptSettlementStatus.PENDING),
+                remittance_record=remittance(),
+            ),
+            ExceptionCode.INELIGIBLE_RECEIPT,
+            ApplicationStatus.CONTROL_BLOCKED,
+            ReceiptAllocationStatus.UNAPPLIED,
+            CanonicalReviewStatus.NOT_CREATED,
+        ),
+    ],
+    ids=["CA-06", "CA-09", "CA-10", "CA-11"],
+)
+def test_exception_cases_map_to_canonical_eval_states(
+    case: CashApplicationCase,
+    expected_code: ExceptionCode,
+    expected_application_status: ApplicationStatus,
+    expected_allocation_status: ReceiptAllocationStatus,
+    expected_review_status: CanonicalReviewStatus,
+) -> None:
+    exception = investigate_cash_exception(case)
+    assert exception is not None
+
+    outcome = exception_to_canonical_outcome(case, exception, f"{expected_code}-trial")
+
+    assert outcome.exception.code == expected_code
+    assert outcome.application.status == expected_application_status
+    assert outcome.receipt.allocation_status == expected_allocation_status
+    assert outcome.review.status == expected_review_status
+    assert outcome.application.ledger_mutation_occurred is False
+    assert outcome.audit.ledger_state_delta == {}
