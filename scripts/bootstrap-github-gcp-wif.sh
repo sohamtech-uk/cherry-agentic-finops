@@ -5,10 +5,12 @@ set -Eeuo pipefail
 # Run from Google Cloud Shell while authenticated to the target project.
 #
 # Usage:
-#   bash scripts/bootstrap-github-gcp-wif.sh YOUR_PROJECT_ID
+#   bash scripts/bootstrap-github-gcp-wif.sh [YOUR_PROJECT_ID]
+#
+# If PROJECT_ID is omitted, the script uses the currently selected gcloud project.
 #
 # Optional:
-#   DEPLOY_NOW=true bash scripts/bootstrap-github-gcp-wif.sh YOUR_PROJECT_ID
+#   DEPLOY_NOW=true bash scripts/bootstrap-github-gcp-wif.sh [YOUR_PROJECT_ID]
 #
 # If the GitHub CLI is authenticated, this script also writes the required
 # production Environment variables/secrets into sohamtech-uk/cherry-agentic-finops.
@@ -22,17 +24,22 @@ DEPLOY_SA_NAME="${GCP_DEPLOY_SA_NAME:-github-actions-deployer}"
 RUNTIME_SA_NAME="${GCP_RUNTIME_SA_NAME:-cherry-agent-runtime}"
 DEPLOY_NOW="${DEPLOY_NOW:-false}"
 
-if [[ -z "${PROJECT_ID}" ]]; then
-  echo "Usage: $0 GOOGLE_CLOUD_PROJECT_ID" >&2
-  exit 2
-fi
-
 for command in gcloud python3; do
   command -v "${command}" >/dev/null || {
     echo "Required command is unavailable: ${command}" >&2
     exit 2
   }
 done
+
+if [[ -z "${PROJECT_ID}" ]]; then
+  PROJECT_ID="$(gcloud config get-value project 2>/dev/null || true)"
+fi
+if [[ -z "${PROJECT_ID}" || "${PROJECT_ID}" == "(unset)" ]]; then
+  echo "No Google Cloud project is selected." >&2
+  echo "Run: gcloud config set project YOUR_PROJECT_ID" >&2
+  echo "Then rerun: bash scripts/bootstrap-github-gcp-wif.sh" >&2
+  exit 2
+fi
 
 gcloud config set project "${PROJECT_ID}" >/dev/null
 if [[ "$(gcloud projects describe "${PROJECT_ID}" --format='value(projectId)' 2>/dev/null || true)" != "${PROJECT_ID}" ]]; then
