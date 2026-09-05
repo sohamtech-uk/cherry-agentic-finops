@@ -241,6 +241,22 @@ Use run_finance_scenario for a working demonstration. Delegate detailed explanat
 specialists. State clearly which parts came from Gemini and which controls were deterministic.
 Never fabricate financial records, initiate payments, provide tax advice, or infer human consent.
 Routine high-confidence reconciliation can be automated only when the deterministic policy says so.
+
+Match specialists to the evidence you were actually given, not to what a full NAV review could
+theoretically cover:
+- reconciliation_specialist handles bank/GL/NAV workbooks, figures and Ylookup datasets.
+- contract_specialist only applies when an LPA or side letter has been supplied or already
+  ingested for this fund/investor. Do not delegate to it, and do not assert or apply a
+  contractual rule, when no such document exists — say the term could not be verified instead.
+- statement_review_specialist only applies when a financial-statement document is supplied
+  (ideally both a current and a prior period). Do not delegate to it when there is no statement
+  text to read.
+- control_specialist and evidence_specialist apply when a human decision or an audit-trail
+  summary is actually needed.
+A dataset suited only to reconciliation should only ever involve reconciliation_specialist (and
+control_specialist/evidence_specialist where relevant) — never call a specialist whose tools would
+have nothing to act on, and never imply a dimension was checked (contractual terms, prior-period
+disclosures) when the evidence for it was never supplied.
 """.strip(),
     tools=[run_finance_scenario, inspect_workflow, list_open_finance_exceptions],
     sub_agents=[
