@@ -87,7 +87,7 @@
     <div class="fm-head">
       <p class="fm-kicker">Cherry Fund Manager · NAV reconciliation</p>
       <h2 id="fm-title">Upload fund evidence.<br><em>Cherry works out what it is.</em></h2>
-      <p>Add any mix of NAV workbooks, investor GLs, capital-call notices, LPAs, side letters, bank statements or position/cash/trade files. The agent identifies each source, selects the required deterministic controls and investigates any resulting exceptions.</p>
+      <p>Add any mix of NAV workbooks, investor GLs, capital-call notices, LPAs, side letters, bank statements or position/cash/trade files. The Fund Manager agent identifies each source, selects the applicable controls, invokes deterministic financial tools and investigates any resulting exceptions.</p>
     </div>
 
     <div class="fm-card">
@@ -206,7 +206,7 @@
     <span>${esc(sourceCount)} file${sourceCount === 1 ? "" : "s"} · ${esc(unknownCount)} need${unknownCount === 1 ? "s" : ""} review</span>
   </div>
   <div class="fm-source-grid">${cards}</div>
-  <div class="fm-boundary">Classification only identifies what was uploaded — it does not decide which controls to run or review the figures inside. No control has run yet.</div>
+  <div class="fm-boundary">The Fund Manager agent classifies the uploaded evidence before selecting any control. Classification itself does not perform a financial check.</div>
 </div>`;
   }
 
@@ -252,8 +252,8 @@
       renderAnalysis();
       notify(
         body.status === "clean"
-          ? "Analysis complete — no issues found among the controls that ran."
-          : `Analysis complete — ${body.issues_found} issue${body.issues_found === 1 ? "" : "s"} found.`,
+          ? "Agentic analysis complete — no issues found among the controls that ran."
+          : `Agentic analysis complete — ${body.issues_found} issue${body.issues_found === 1 ? "" : "s"} found.`,
         body.status !== "clean"
       );
     } catch (error) {
@@ -266,7 +266,9 @@
   function severityPill(severity) {
     const label = severity.charAt(0).toUpperCase() + severity.slice(1);
     if (severity === "high") return `<span class="fm-pill error">${esc(label)}</span>`;
-    if (severity === "medium") return `<span class="fm-pill review">${esc(label)}</span>`;
+    if (severity === "medium" || severity === "warning") {
+      return `<span class="fm-pill review">${esc(label)}</span>`;
+    }
     return `<span class="fm-pill ok">${esc(label)}</span>`;
   }
 
@@ -274,6 +276,12 @@
     if (entry.status === "executed") return '<span class="fm-pill ok">Executed</span>';
     if (entry.status === "ready") return '<span class="fm-pill ok">Ready</span>';
     if (entry.status === "failed") return '<span class="fm-pill error">Failed</span>';
+    if (entry.status === "awaiting_evidence") {
+      return '<span class="fm-pill review">Awaiting evidence</span>';
+    }
+    if (entry.status === "adapter_pending") {
+      return '<span class="fm-pill review">Adapter pending</span>';
+    }
     if (entry.status === "needs_pairing") {
       return '<span class="fm-pill review">Needs pairing</span>';
     }
@@ -345,7 +353,7 @@
     <summary>Control plan (${(plan || []).length} recognised source${(plan || []).length === 1 ? "" : "s"})</summary>
     <div class="fm-plan-grid">${planRows}</div>
   </details>
-  <div class="fm-boundary">Deterministic tools produced every figure and comparison above; no LLM decided a pass/fail. Controls awaiting evidence or an adapter never ran — they are not silent passes.</div>
+  <div class="fm-boundary">Agentic control review: the Fund Manager agent selects the applicable controls from the uploaded evidence and investigates the results. Deterministic tools perform financial calculations and reconciliations. Controls awaiting evidence or an adapter never ran, and material actions remain subject to human review.</div>
 </div>`;
   }
 
