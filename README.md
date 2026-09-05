@@ -129,6 +129,34 @@ Parsed contract evidence is held in ephemeral memory for the hackathon deploymen
 
 ## FundOps Agent Studio microservice
 
+## Agentic Fund Manager control pipeline
+
+`POST /api/fund-manager/analyse` now runs one bounded, traceable pipeline over a mixed evidence
+batch:
+
+```text
+upload -> classify -> agent plans controls -> deterministic tools run
+       -> unified exception queue -> agent investigates -> human action recommended
+```
+
+The planning agent can select only tools in the checked-in control catalogue. It forms statement,
+position, trade and cash comparison pairs from explicit filename roles (`prior`/`current`,
+`internal`/`external`), or from exactly two compatible sources with reduced confidence. Ambiguous
+batches are returned as evidence-gap exceptions; the agent never guesses a comparison side.
+
+Each response includes:
+
+- a content-derived `case_id` and evidence-manifest hash;
+- the agent's control plan, rationale, confidence, source roles and missing evidence;
+- deterministic control runs and their exact tool names;
+- one severity/materiality-ranked exception queue, including data-quality failures;
+- an investigation for every exception with the selected tool path and recommended human action;
+- lineage from investigation to exception, control run, source ID and source SHA-256.
+
+`clean` is returned only when at least one applicable control executed, every planned control
+completed, and no exception was generated. Missing adapters or comparison evidence return
+`insufficient_evidence`/`partially_evaluated`, never a silent pass.
+
 Sunil's `fundops-agent-studio` backend is kept as a separate service instead of copying it into this
 repository. Configure:
 

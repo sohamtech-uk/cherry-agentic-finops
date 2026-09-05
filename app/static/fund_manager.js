@@ -1,11 +1,14 @@
 (() => {
   "use strict";
 
+  const REQUEST_COOLDOWN_MS = 5000;
+
   const state = {
     files: [],
     sources: null,
     analysis: null,
     busy: false,
+    lastRequestAt: new Map(),
   };
 
   const TYPE_LABELS = {
@@ -49,10 +52,6 @@
     if (typeof loading === "function") loading(visible);
   }
 
-  function demoToken() {
-    return q("#fm-demo-token")?.value.trim() || q("#upload-token")?.value.trim() || "";
-  }
-
   function injectStyles() {
     if (q('link[href="/static/fund_manager.css"]')) return;
     const link = document.createElement("link");
@@ -88,12 +87,10 @@
     <div class="fm-head">
       <p class="fm-kicker">Cherry Fund Manager · NAV reconciliation</p>
       <h2 id="fm-title">Upload fund evidence.<br><em>Cherry works out what it is.</em></h2>
-      <p>Add any mix of NAV workbooks, investor GLs, capital-call notices, LPAs, side letters, bank statements or position/cash/trade files. Cherry identifies each source before anything else happens — nothing here decides which controls to run yet.</p>
+      <p>Add any mix of NAV workbooks, investor GLs, capital-call notices, LPAs, side letters, bank statements or position/cash/trade files. The agent identifies each source, selects the required deterministic controls and investigates any resulting exceptions.</p>
     </div>
 
     <div class="fm-card">
-      <label class="fm-field fm-token-field"><span>Demo upload token <small>(protected deployment only)</small></span><input type="password" id="fm-demo-token" autocomplete="off" placeholder="Not stored in the browser"></label>
-
       <div class="fm-dropzone" id="fm-dropzone">
         <span>PDF · XLSX · CSV · JSON — drop files here or</span>
         <button type="button" class="fm-button secondary" id="fm-browse">Browse files</button>
@@ -104,7 +101,6 @@
       <div class="fm-file-list" id="fm-file-list" aria-live="polite"></div>
 
       <div class="fm-actions">
-        <button type="button" class="fm-button secondary" id="fm-classify" disabled>Identify sources</button>
         <button type="button" class="fm-button primary" id="fm-analyse" disabled>Analyse</button>
         <button type="button" class="fm-button ghost" id="fm-clear-files" hidden>Clear all</button>
         <span class="fm-file-count" id="fm-file-count"></span>
@@ -127,7 +123,6 @@
   function renderFileList() {
     const list = q("#fm-file-list");
     const clearButton = q("#fm-clear-files");
-    const classifyButton = q("#fm-classify");
     const analyseButton = q("#fm-analyse");
     const countLabel = q("#fm-file-count");
     if (!list) return;
@@ -135,7 +130,6 @@
     if (state.files.length === 0) {
       list.innerHTML = "";
       clearButton.hidden = true;
-      classifyButton.disabled = true;
       analyseButton.disabled = true;
       countLabel.textContent = "";
       return;
@@ -150,7 +144,6 @@
 </div>`)
       .join("");
     clearButton.hidden = false;
-    classifyButton.disabled = state.busy;
     analyseButton.disabled = state.busy;
     countLabel.textContent = `${state.files.length} file${state.files.length === 1 ? "" : "s"} selected`;
   }
@@ -224,11 +217,18 @@
   }
 
   async function postEvidence(path, form) {
-    const headers = {};
-    const token = demoToken();
-    if (token) headers["X-Cherry-Demo-Token"] = token;
+    const now = Date.now();
+    const lastRequestAt = state.lastRequestAt.get(path) || 0;
+    const remainingMs = REQUEST_COOLDOWN_MS - (now - lastRequestAt);
+    if (remainingMs > 0) {
+      const remainingSeconds = Math.ceil(remainingMs / 1000);
+      throw new Error(
+        `Please wait ${remainingSeconds} second${remainingSeconds === 1 ? "" : "s"} before retrying this action.`
+      );
+    }
+    state.lastRequestAt.set(path, now);
 
-    const response = await fetch(path, { method: "POST", body: form, headers });
+    const response = await fetch(path, { method: "POST", body: form });
     let body = {};
     try { body = await response.json(); } catch { body = {}; }
     if (!response.ok) {
@@ -238,21 +238,6 @@
       throw new Error(detail);
     }
     return body;
-  }
-
-  async function classifySources() {
-    if (state.files.length === 0 || state.busy) return;
-    busy(true);
-    try {
-      const body = await postEvidence("/api/fund-manager/classify", buildEvidenceForm());
-      state.sources = body;
-      renderInventory();
-      notify(`Identified ${body.source_count} source${body.source_count === 1 ? "" : "s"}.`);
-    } catch (error) {
-      notify(error.message || "Could not classify the uploaded files.", true);
-    } finally {
-      busy(false);
-    }
   }
 
   async function runAnalysis() {
@@ -392,19 +377,14 @@
       state.files = [];
       state.sources = null;
       state.analysis = null;
-      const tokenInput = q("#fm-demo-token");
-      if (tokenInput) tokenInput.value = "";
-      const fallbackTokenInput = q("#upload-token");
-      if (fallbackTokenInput) fallbackTokenInput.value = "";
       const fileInput = q("#fm-file-input");
       if (fileInput) fileInput.value = "";
       renderFileList();
       renderInventory();
       renderAnalysis();
-      notify("Selected files, analysis and upload token cleared.");
+      notify("Selected files and analysis cleared.");
     });
 
-    q("#fm-classify")?.addEventListener("click", classifySources);
     q("#fm-analyse")?.addEventListener("click", runAnalysis);
   }
 

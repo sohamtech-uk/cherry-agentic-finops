@@ -147,6 +147,7 @@ async def private_markets_health() -> dict[str, object]:
         "cherry_money_read_only_configured": cherry_money.configured,
         "accepted_commitment_format": "xlsx",
         "accepted_cash_format": "utf-8 csv",
+        "upload_token_configured": expected_token,
         "real_upload_protected": settings.environment == "production" or expected_token,
         "financial_boundary": "Decision support only; no payment initiation.",
     }

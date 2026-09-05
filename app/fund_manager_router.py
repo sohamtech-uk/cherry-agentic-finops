@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-import hmac
 import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
 
 from app.config import get_settings
-from app.fund_manager_classification import classify_sources
+from app.fund_manager_classification import classify_and_validate_sources
 from app.fund_manager_orchestrator import run_analysis
+from app.rate_limit import limiter
 
 settings = get_settings()
 router = APIRouter(prefix="/api/fund-manager", tags=["fund-manager"])
@@ -18,7 +18,8 @@ router = APIRouter(prefix="/api/fund-manager", tags=["fund-manager"])
 MAX_FILES = 25
 
 
-def _require_upload_access(token: str | None) -> None:
+def _require_upload_access() -> None:
+    """Require the deployment secret server-side without exposing it to the browser."""
     expected = os.getenv("CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN", "").strip()
     if settings.environment != "production" and not expected:
         return
@@ -28,8 +29,6 @@ def _require_upload_access(token: str | None) -> None:
             detail="Fund Manager uploads are disabled until CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN "
             "is configured.",
         )
-    if not token or not hmac.compare_digest(token, expected):
-        raise HTTPException(status_code=401, detail="Valid private-markets demo token required.")
 
 
 def _safe_file_name(value: str | None, fallback: str) -> str:
@@ -61,7 +60,7 @@ async def _read_upload_batch(files: list[UploadFile]) -> list[tuple[str, bytes, 
 async def fund_manager_health() -> dict[str, Any]:
     return {
         "status": "ok",
-        "stage": "classification",
+        "stage": "end_to_end_control_pipeline",
         "pipeline": [
             "multiple_files",
             "file_classification",
@@ -73,16 +72,23 @@ async def fund_manager_health() -> dict[str, Any]:
             "agentic_investigation",
             "fund_manager_dashboard",
         ],
-        "implemented_stages": ["multiple_files", "file_classification", "canonical_data_room"],
+        "implemented_stages": [
+            "multiple_files",
+            "file_classification",
+            "canonical_data_room",
+            "agent_determines_required_controls",
+            "deterministic_exception_engine",
+            "agentic_investigation",
+            "lineage",
+        ],
         "partially_implemented_stages": {
-            "agent_determines_required_controls": (
-                "POST /analyse builds a control plan for every recognised source, but only "
-                "financial_statement pairs are actually executable today; other types are "
-                "reported not_yet_available."
+            "position_cash_trade_nav_recon": (
+                "Statement, position, trade and cash pairs execute. NAV, capital-call, contract "
+                "and workbook adapters remain explicit needs_evidence plan entries."
             ),
-            "deterministic_exception_engine": (
-                "Issues are only produced for the one control that runs: period-over-period "
-                "financial statement comparison."
+            "human_decision": (
+                "The pipeline recommends a human action and exposes whether a decision is "
+                "required; durable decision recording remains a separate workflow capability."
             ),
         },
         "recognised_source_types": [
@@ -111,26 +117,29 @@ async def fund_manager_health() -> dict[str, Any]:
 
 
 @router.post("/classify")
+@limiter.limit("1 per 5 seconds")
 async def classify_fund_evidence(
+    request: Request,
+    response: Response,
     files: Annotated[list[UploadFile], File(description="One or more mixed evidence files")],
     fund_name: Annotated[str | None, Form(description="Optional fund/entity name")] = None,
     reporting_period: Annotated[str | None, Form(description="Optional reporting period")] = None,
     as_of_date: Annotated[str | None, Form(description="Optional as-of date, YYYY-MM-DD")] = None,
-    x_cherry_demo_token: Annotated[str | None, Header(alias="X-Cherry-Demo-Token")] = None,
 ) -> dict[str, Any]:
-    """Classify a batch of mixed evidence files into a canonical source inventory.
+    """Agent-facing classification tool for a mixed evidence batch.
 
-    This is the first stage of the Fund Manager pipeline only: identify what each file is
+    This endpoint is not called by the browser UI. It is the first agent stage only: identify
+    what each file is
     (NAV workbook, investor GL, capital-call notice, LPA, side letter, bank statement, financial
     statement, positions/trades/cash JSON or CSV, ...), never what to do with it. Nothing here
     runs a control or decides a control plan. An unrecognised file is returned as unknown with a
     warning rather than guessed at.
     """
 
-    _require_upload_access(x_cherry_demo_token)
+    _require_upload_access()
     items = await _read_upload_batch(files)
-    sources = classify_sources(items)
-    unknown_count = sum(1 for source in sources if source["status"] != "processed")
+    sources = classify_and_validate_sources(items)
+    rejected_count = sum(1 for source in sources if source["validation_status"] == "rejected")
 
     return {
         "fund_name": fund_name,
@@ -138,7 +147,9 @@ async def classify_fund_evidence(
         "as_of_date": as_of_date,
         "generated_at": datetime.now(UTC).isoformat(),
         "source_count": len(sources),
-        "unknown_count": unknown_count,
+        "unknown_count": rejected_count,
+        "accepted_count": len(sources) - rejected_count,
+        "rejected_count": rejected_count,
         "sources": sources,
         "control_boundary": (
             "This is a source inventory, not a review result. No control has run yet."
@@ -147,12 +158,14 @@ async def classify_fund_evidence(
 
 
 @router.post("/analyse")
+@limiter.limit("1 per 5 seconds")
 async def analyse_fund_evidence(
+    request: Request,
+    response: Response,
     files: Annotated[list[UploadFile], File(description="One or more mixed evidence files")],
     fund_name: Annotated[str | None, Form(description="Optional fund/entity name")] = None,
     reporting_period: Annotated[str | None, Form(description="Optional reporting period")] = None,
     as_of_date: Annotated[str | None, Form(description="Optional as-of date, YYYY-MM-DD")] = None,
-    x_cherry_demo_token: Annotated[str | None, Header(alias="X-Cherry-Demo-Token")] = None,
 ) -> dict[str, Any]:
     """Classify the uploaded evidence, decide which control each source needs (the "agent
     determines required controls" stage), and run whichever of those controls can execute
@@ -165,7 +178,7 @@ async def analyse_fund_evidence(
     plan rather than silently skipped or guessed at.
     """
 
-    _require_upload_access(x_cherry_demo_token)
+    _require_upload_access()
     items = await _read_upload_batch(files)
     result = run_analysis(items)
 
