@@ -6,21 +6,20 @@ import re
 from typing import Any
 
 from openpyxl import load_workbook
-from openpyxl.worksheet.worksheet import Worksheet
 
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _sheet_by_trimmed_name(workbook: Any, name: str) -> Worksheet | None:
+def _sheet_by_trimmed_name(workbook: Any, name: str) -> Any | None:
     for sheet_name in workbook.sheetnames:
         if sheet_name.strip() == name:
             return workbook[sheet_name]
     return None
 
 
-def _first_row(sheet: Worksheet) -> list[Any]:
+def _first_row(sheet: Any) -> list[Any]:
     try:
         return list(next(sheet.iter_rows(values_only=True)))
     except StopIteration:
@@ -58,11 +57,8 @@ def inspect_workbook(content: bytes, file_name: str) -> dict[str, Any]:
         stripped = {name.strip() for name in sheet_names}
         first_headers: list[str] = []
         if workbook.worksheets:
-            first_headers = [
-                _text(value)
-                for value in _first_row(workbook.worksheets[0])
-                if _text(value)
-            ]
+            first_row = _first_row(workbook.worksheets[0])
+            first_headers = [_text(value) for value in first_row if _text(value)]
 
         kind = "supporting_workbook"
         purpose = "Supporting Excel evidence"
@@ -119,9 +115,8 @@ def analyse_bank_statement_workbook(
         staging = _sheet_by_trimmed_name(workbook, "Staging Sheet")
         diu = _sheet_by_trimmed_name(workbook, "DIU")
         if staging is None or diu is None:
-            raise ValueError(
-                "Bank-statement workflow requires 'Staging Sheet' and 'DIU' sheets."
-            )
+            message = "Bank-statement workflow requires 'Staging Sheet' and 'DIU' sheets."
+            raise ValueError(message)
 
         headers = _first_row(staging)
         indexes = _header_index(headers)
@@ -288,6 +283,7 @@ def analyse_investor_gl_workbook(content: bytes, file_name: str) -> dict[str, An
             investors.add(_text(_cell(row, indexes, "Investor")))
             deals.add(_text(_cell(row, indexes, "Deal Name")))
 
+        transaction_currency_count = len({value for value in transaction_currencies if value})
         return {
             "workflow": "investor_gl_to_loader",
             "title": "Investor-level GL → loader",
@@ -297,9 +293,7 @@ def analyse_investor_gl_workbook(content: bytes, file_name: str) -> dict[str, An
             "column_count": len(headers),
             "legal_entity_count": len({value for value in legal_entities if value}),
             "fund_family_count": len({value for value in fund_families if value}),
-            "transaction_currency_count": len(
-                {value for value in transaction_currencies if value}
-            ),
+            "transaction_currency_count": transaction_currency_count,
             "gl_account_count": len({value for value in gl_accounts if value}),
             "transaction_type_count": len({value for value in transaction_types if value}),
             "investor_count": len({value for value in investors if value}),
