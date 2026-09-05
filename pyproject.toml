@@ -80,5 +80,5 @@ plugins = ["pydantic.mypy"]
 exclude = ["tests"]
 
 [[tool.mypy.overrides]]
-module = ["app.private_markets", "app.document_ai"]
+module = ["app.private_markets", "app.document_ai", "app.nav_summary_extraction"]
 disable_error_code = ["arg-type"]

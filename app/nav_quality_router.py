@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from app.config import get_settings
 from app.contract_nav import resolve_contract_rules_for_nav
+from app.document_ai import GeminiUnavailable
 from app.nav_exceptions import group_exceptions_by_root_cause
 from app.nav_health_check import build_daily_health_check
 from app.nav_quality import (
@@ -25,9 +26,11 @@ from app.nav_quality import (
     sha256_hex,
 )
 from app.nav_review_history import get_nav_review_history_store
+from app.nav_summary_extraction import NAVSummaryExtractor
 
 settings = get_settings()
 router = APIRouter(prefix="/api/nav-quality", tags=["nav-quality"])
+nav_summary_extractor = NAVSummaryExtractor(settings)
 
 
 def _require_real_data_access(token: str | None) -> None:
@@ -65,6 +68,11 @@ async def nav_quality_health() -> dict[str, Any]:
             "source_ledger": False,
             "side_letter_rules": False,
             "use_contract_documents": False,
+        },
+        "nav_summary_accepted_formats": {
+            "json": "pre-built administrator NAV summary",
+            "pdf": "raw NAV pack; Gemini extracts the summary before checks run",
+            "xlsx": "raw NAV workbook; Gemini extracts the summary before checks run",
         },
         "checks": [
             "balance_sheet_footing",
@@ -126,7 +134,12 @@ async def daily_fund_health_check() -> dict[str, Any]:
 async def review_nav_pack(
     nav_summary: Annotated[
         UploadFile,
-        File(description="Administrator's reported NAV summary (.json)"),
+        File(
+            description=(
+                "Administrator's reported NAV summary: a pre-built .json, or the NAV pack "
+                "itself (.pdf/.xlsx) for Gemini to extract the summary from"
+            )
+        ),
     ],
     source_ledger: Annotated[
         UploadFile | None,
@@ -154,7 +167,10 @@ async def review_nav_pack(
     """Run the deterministic NAV quality checks against an administrator's reported NAV summary.
 
     ``nav_summary`` is always required and is checked for internal footing on its own (the balance
-    sheet and NAV bridge must add up). ``source_ledger`` and ``side_letter_rules`` are optional
+    sheet and NAV bridge must add up). It may be a pre-built ``.json`` summary, or the NAV pack
+    itself (``.pdf``/``.xlsx``) — Gemini extracts the same summary fields from the pack first, then
+    every check below runs exactly as it would against a hand-built JSON summary; extraction never
+    decides whether the NAV is correct. ``source_ledger`` and ``side_letter_rules`` are optional
     independent evidence. ``use_contract_documents`` instead resolves side-letter terms from the
     source-backed contract repository. When supplied, those inputs add an independent balance-sheet,
     NAV and per-investor capital check. This never posts a correction; it only reports findings, a
@@ -179,8 +195,11 @@ async def review_nav_pack(
             status_code=413,
             detail=f"NAV summary exceeds the {settings.max_upload_mb} MB upload limit.",
         )
-    if not summary_name.lower().endswith(".json"):
-        raise HTTPException(status_code=415, detail="nav_summary must be a .json file.")
+    summary_is_pack = summary_name.lower().endswith((".pdf", ".xlsx"))
+    if not summary_is_pack and not summary_name.lower().endswith(".json"):
+        raise HTTPException(
+            status_code=415, detail="nav_summary must be a .json, .pdf or .xlsx file."
+        )
 
     ledger_name: str | None = None
     ledger_content: bytes | None = None
@@ -208,12 +227,27 @@ async def review_nav_pack(
         if not rules_name.lower().endswith(".json"):
             raise HTTPException(status_code=415, detail="side_letter_rules must be a .json file.")
 
-    try:
-        summary = parse_administrator_nav_summary(summary_content)
-    except (ValueError, ValidationError) as exc:
-        raise HTTPException(
-            status_code=422, detail=f"Invalid administrator NAV summary: {exc}"
-        ) from exc
+    if summary_is_pack:
+        mime_type = nav_summary.content_type or (
+            "application/pdf"
+            if summary_name.lower().endswith(".pdf")
+            else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        try:
+            summary = await nav_summary_extractor.extract(summary_content, mime_type, summary_name)
+        except GeminiUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except (ValueError, ValidationError) as exc:
+            raise HTTPException(
+                status_code=422, detail=f"Could not extract a NAV summary from the pack: {exc}"
+            ) from exc
+    else:
+        try:
+            summary = parse_administrator_nav_summary(summary_content)
+        except (ValueError, ValidationError) as exc:
+            raise HTTPException(
+                status_code=422, detail=f"Invalid administrator NAV summary: {exc}"
+            ) from exc
 
     ledger = None
     if ledger_content is not None:
@@ -292,6 +326,7 @@ async def review_nav_pack(
     return {
         "case_id": case_id,
         "legal_entity": summary.legal_entity,
+        "nav_summary_source": "extracted_from_pack" if summary_is_pack else "uploaded_json",
         "ledger_supplied": ledger is not None,
         "side_letter_rules_supplied": bool(rules),
         "iteration": {

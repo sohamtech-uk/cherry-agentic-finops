@@ -4,12 +4,14 @@ import io
 import json
 from datetime import date
 from decimal import Decimal
+from unittest.mock import AsyncMock, patch
 
 import openpyxl
 import pytest
 from fastapi.testclient import TestClient
 
 from app.api import app
+from app.document_ai import GeminiUnavailable
 from app.nav_exceptions import group_exceptions_by_root_cause
 from app.nav_quality import (
     AdministratorNAVSummary,
@@ -968,3 +970,59 @@ def test_daily_health_check_endpoint_classifies_ready_and_attention_needed_funds
     assert body["entries"][0]["critical_root_causes"] >= 1
     assert body["entries"][1]["legal_entity"] == "Fund Ready"
     assert body["entries"][1]["status"] == "ready"
+
+
+def test_review_endpoint_rejects_unsupported_nav_summary_extension() -> None:
+    response = client.post(
+        "/api/nav-quality/review",
+        files={"nav_summary": ("nav-summary.docx", b"binary", "application/octet-stream")},
+    )
+
+    assert response.status_code == 415
+
+
+def test_review_endpoint_extracts_nav_summary_from_a_pdf_pack() -> None:
+    clean_summary = AdministratorNAVSummary.model_validate(
+        {
+            "legal_entity": "Extracted Fund",
+            "period_end": "2026-06-30",
+            "total_assets": 5_000_000,
+            "total_liabilities": 150_000,
+            "reported_equity": 4_850_000,
+            "opening_nav": 4_700_000,
+            "contributions": 250_000,
+            "distributions": 100_000,
+            "income": 10_000,
+            "expenses": 10_000,
+            "closing_nav": 4_850_000,
+        }
+    )
+
+    with patch(
+        "app.nav_quality_router.nav_summary_extractor.extract",
+        new=AsyncMock(return_value=clean_summary),
+    ) as mock_extract:
+        response = client.post(
+            "/api/nav-quality/review",
+            files={"nav_summary": ("nav-pack.pdf", b"%PDF-1.4 fake", "application/pdf")},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["legal_entity"] == "Extracted Fund"
+    assert body["nav_summary_source"] == "extracted_from_pack"
+    assert body["review"]["action"] == "ready_to_submit"
+    mock_extract.assert_awaited_once()
+
+
+def test_review_endpoint_surfaces_gemini_unavailable_as_503() -> None:
+    with patch(
+        "app.nav_quality_router.nav_summary_extractor.extract",
+        new=AsyncMock(side_effect=GeminiUnavailable("Gemini is not configured.")),
+    ):
+        response = client.post(
+            "/api/nav-quality/review",
+            files={"nav_summary": ("nav-pack.pdf", b"%PDF-1.4 fake", "application/pdf")},
+        )
+
+    assert response.status_code == 503

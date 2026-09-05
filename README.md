@@ -255,10 +255,20 @@ Multipart inputs:
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `nav_summary` | yes | administrator's reported NAV summary `.json` (balance sheet, NAV bridge, investor capital) |
+| `nav_summary` | yes | administrator's reported NAV summary: a pre-built `.json`, or the NAV pack itself (`.pdf`/`.xlsx`) for Gemini to extract the summary from first |
 | `source_ledger` | no | investor-level GL export `.xlsx`, to independently recompute the balance sheet, NAV and investor capital |
 | `side_letter_rules` | no | structured side-letter terms `.json`; incomplete source locators route to review |
 | `use_contract_documents` | no | resolve investor terms from documents already ingested through `/api/contracts` |
+
+When `nav_summary` is a PDF or Excel NAV pack rather than a pre-built JSON summary,
+`app/nav_summary_extraction.py` uses Gemini (the same schema-validated extraction pattern as
+`app/document_ai.py`) to pull out the same summary fields first — legal entity, period end,
+balance sheet, NAV bridge, investor capital. Excel workbooks are rendered to plain text with
+openpyxl before being sent to Gemini rather than uploaded as a binary part, matching the
+deterministic-text-then-LLM boundary used elsewhere in this codebase (e.g. contract ingestion).
+Extraction only produces the same structured summary the checks below already validate; it never
+decides whether the NAV is correct. The response's `nav_summary_source` field says whether the
+summary came from `uploaded_json` or was `extracted_from_pack`.
 
 Every check is plain `Decimal` arithmetic, never an LLM: does the balance sheet foot to equity, does
 the NAV bridge (opening + contributions + investment movement + income − expenses − distributions)
@@ -391,6 +401,7 @@ app/private_markets_router.py                legacy/demo and Cherry Money routes
 app/private_markets_integration_router.py    PDF + Excel + JSON orchestration
 app/nav_quality.py                           NAV Quality Controller schemas, GL parser and checks
 app/nav_quality_router.py                    NAV Quality Controller endpoint
+app/nav_summary_extraction.py                Gemini extraction of a NAV summary from a raw PDF/XLSX pack
 app/nav_exceptions.py                        root-cause grouping of NAV review findings
 app/nav_review_history.py                    NAV review iteration/round tracking
 app/nav_health_check.py                      daily portfolio-level fund health check

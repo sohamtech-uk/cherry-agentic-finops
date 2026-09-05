@@ -385,7 +385,10 @@ def run_nav_quality_review(
 
     Args:
         nav_summary_path: Local path to the administrator's reported NAV summary (.json): legal
-            entity, period end, balance sheet, NAV bridge and investor capital lines.
+            entity, period end, balance sheet, NAV bridge and investor capital lines. A raw NAV
+            pack (.pdf/.xlsx) is not accepted here yet — that Gemini-extraction path currently
+            only exists on POST /api/nav-quality/review; a pre-built .json is required for this
+            tool for now.
         source_ledger_path: Optional local path to an investor-level GL export (.xlsx) to
             independently recompute the balance sheet, NAV and investor capital against.
         side_letter_rules_path: Optional local path to structured side-letter rules (.json), e.g.
