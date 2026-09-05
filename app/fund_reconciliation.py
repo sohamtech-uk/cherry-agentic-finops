@@ -10,9 +10,15 @@ figures used so a reviewer (or an agent explaining the result) never has to trus
 verdict.
 
 ``prioritise_exceptions`` is the one function here that is domain-agnostic: it accepts
-``ExceptionItem`` records from any of the other six checks (each result type has a
+``ExceptionItem`` records from any of the other eight checks (each result type has a
 ``to_exceptions()`` method) and ranks them by severity then materiality, the same ordering
 ``app.nav_exceptions.group_exceptions_by_root_cause`` uses for NAV-level findings.
+
+The last two checks (management fee validation, expense allocation validation) extend this family
+down a different axis from the first six: instead of comparing two records of the same shape
+(internal vs external), they compare an administrator-reported figure against a *rule* — the
+governing fee rate/basis or the fund manager's own expected allocation — so a break can be flagged
+even when there is nothing else to diff against.
 """
 
 from __future__ import annotations
@@ -69,7 +75,14 @@ class ExceptionItem(BaseModel):
     ``prioritise_exceptions`` can rank findings from different checks together."""
 
     category: Literal[
-        "position", "cash", "trade", "stale_price", "unsettled_trade", "exposure_breach"
+        "position",
+        "cash",
+        "trade",
+        "stale_price",
+        "unsettled_trade",
+        "exposure_breach",
+        "management_fee",
+        "expense_allocation",
     ]
     code: str
     key: str | None = None
@@ -792,6 +805,384 @@ def detect_exposure_breaches(
                     )
 
     return sorted(breaches, key=lambda breach: -breach.exposure_percent)
+
+
+# --- Management fee validation ------------------------------------------------------------------
+
+
+FeeBasis = Literal["committed_capital", "invested_capital", "called_capital", "net_asset_value"]
+
+
+class FeeRule(BaseModel):
+    investor: str
+    fee_rate: Decimal
+    fee_basis: FeeBasis
+    source: str | None = None
+
+    @field_validator("fee_rate", mode="before")
+    @classmethod
+    def _normalise_rate(cls, value: Any) -> Decimal:
+        return Decimal(str(value))
+
+
+class AdministratorFeeLine(BaseModel):
+    investor: str
+    fee_basis: FeeBasis
+    basis_amount: Decimal
+    reported_fee: Decimal
+
+    @field_validator("basis_amount", "reported_fee", mode="before")
+    @classmethod
+    def _normalise_money(cls, value: Any) -> Decimal:
+        return money(value)
+
+
+class FeeBreak(BaseModel):
+    investor: str
+    break_type: Literal["rule_unavailable", "basis_mismatch", "amount_mismatch"]
+    rule_fee_rate: Decimal | None = None
+    rule_fee_basis: FeeBasis | None = None
+    administrator_fee_basis: FeeBasis
+    basis_amount: Decimal
+    reported_fee: Decimal
+    expected_fee: Decimal | None = None
+    difference: Decimal | None = None
+    severity: FindingSeverity
+
+    def to_exception(self) -> ExceptionItem:
+        label = self.investor
+        if self.break_type == "rule_unavailable":
+            detail = (
+                f"No fee rule was supplied for {label}; the reported fee of {self.reported_fee} "
+                f"on a {self.administrator_fee_basis.replace('_', ' ')} basis could not be "
+                "independently checked."
+            )
+        elif self.break_type == "basis_mismatch":
+            rule_basis = (self.rule_fee_basis or "?").replace("_", " ")
+            admin_basis = self.administrator_fee_basis.replace("_", " ")
+            detail = (
+                f"The governing rule applies the fee to a {rule_basis} basis, but the "
+                f"administrator applied it to a {admin_basis} basis ({self.basis_amount})."
+            )
+        else:
+            detail = (
+                f"Expected fee of {self.expected_fee} ({self.rule_fee_rate} x {self.basis_amount}) "
+                f"does not match the administrator's reported fee of {self.reported_fee}."
+            )
+        return ExceptionItem(
+            category="management_fee",
+            code=f"management_fee.{self.break_type}",
+            key=self.investor,
+            title=f"{label}: management fee {self.break_type.replace('_', ' ')}",
+            detail=detail,
+            severity=self.severity,
+            impact_amount=abs(self.difference) if self.difference is not None else Decimal("0"),
+        )
+
+
+class FeeValidationResult(BaseModel):
+    breaks: list[FeeBreak] = Field(default_factory=list)
+    matched_count: int = 0
+
+    def to_exceptions(self) -> list[ExceptionItem]:
+        return [item.to_exception() for item in self.breaks]
+
+
+def parse_fee_rules(content: bytes) -> list[FeeRule]:
+    """Parse a flexible JSON fee-rule set (LPA defaults or side-letter overrides): a top-level
+    array, or an object with a ``fee_rules`` array."""
+
+    return [FeeRule.model_validate(row) for row in _load_json(content, "fee_rules")]
+
+
+def parse_administrator_fees(content: bytes) -> list[AdministratorFeeLine]:
+    """Parse a flexible JSON administrator fee-calculation export: a top-level array, or an
+    object with an ``administrator_fees`` array."""
+
+    return [
+        AdministratorFeeLine.model_validate(row)
+        for row in _load_json(content, "administrator_fees")
+    ]
+
+
+def validate_management_fees(
+    rules: list[FeeRule],
+    administrator_fees: list[AdministratorFeeLine],
+    *,
+    tolerance: Decimal = DEFAULT_MONEY_TOLERANCE,
+) -> FeeValidationResult:
+    """Compare each administrator-calculated management fee against the governing fee rule (LPA
+    default or side-letter override) for that investor, matched by investor name.
+
+    Two independent break types beyond a missing rule: the administrator may have applied the fee
+    to the wrong basis (e.g. committed capital instead of invested capital) even when the rate is
+    right — flagged regardless of the resulting amount, because the wrong basis is wrong even when
+    it happens not to move this period's number much — or the recomputed fee (basis_amount x rate)
+    may simply disagree with what the administrator reported.
+    """
+
+    rules_by_investor = {rule.investor.casefold(): rule for rule in rules}
+    breaks: list[FeeBreak] = []
+    matched = 0
+
+    for line in administrator_fees:
+        rule = rules_by_investor.get(line.investor.casefold())
+        if rule is None:
+            breaks.append(
+                FeeBreak(
+                    investor=line.investor,
+                    break_type="rule_unavailable",
+                    administrator_fee_basis=line.fee_basis,
+                    basis_amount=line.basis_amount,
+                    reported_fee=line.reported_fee,
+                    severity=FindingSeverity.WARNING,
+                )
+            )
+            continue
+
+        expected_fee = money(line.basis_amount * rule.fee_rate)
+        difference = money(line.reported_fee - expected_fee)
+        common = {
+            "investor": line.investor,
+            "rule_fee_rate": rule.fee_rate,
+            "rule_fee_basis": rule.fee_basis,
+            "administrator_fee_basis": line.fee_basis,
+            "basis_amount": line.basis_amount,
+            "reported_fee": line.reported_fee,
+            "expected_fee": expected_fee,
+            "difference": difference,
+        }
+        if line.fee_basis != rule.fee_basis:
+            breaks.append(
+                FeeBreak(**common, break_type="basis_mismatch", severity=FindingSeverity.HIGH)
+            )
+        elif abs(difference) > tolerance:
+            breaks.append(
+                FeeBreak(**common, break_type="amount_mismatch", severity=FindingSeverity.HIGH)
+            )
+        else:
+            matched += 1
+
+    return FeeValidationResult(breaks=breaks, matched_count=matched)
+
+
+# --- Expense allocation validation ---------------------------------------------------------------
+
+
+ExpenseCategory = Literal["fund", "management_company", "portfolio_company"]
+
+
+class ExpectedExpenseAllocation(BaseModel):
+    expense_id: str
+    description: str | None = None
+    amount: Decimal
+    expected_category: ExpenseCategory
+    portfolio_company: str | None = None
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _normalise_amount(cls, value: Any) -> Decimal:
+        return money(value)
+
+
+class AdministratorExpenseLine(BaseModel):
+    expense_id: str
+    description: str | None = None
+    amount: Decimal
+    allocated_category: ExpenseCategory
+    portfolio_company: str | None = None
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _normalise_amount(cls, value: Any) -> Decimal:
+        return money(value)
+
+
+class ExpenseBreak(BaseModel):
+    expense_id: str
+    description: str | None = None
+    break_type: Literal[
+        "missing_internal", "missing_external", "category_mismatch", "amount_mismatch"
+    ]
+    expected_category: str | None = None
+    allocated_category: str | None = None
+    expected_portfolio_company: str | None = None
+    allocated_portfolio_company: str | None = None
+    internal_amount: Decimal | None = None
+    external_amount: Decimal | None = None
+    difference: Decimal
+    severity: FindingSeverity
+
+    def to_exception(self) -> ExceptionItem:
+        label = self.description or self.expense_id
+        if self.break_type == "missing_internal":
+            detail = (
+                f"The administrator allocated an expense ({label}) that is not present in the "
+                "fund manager's expected allocation schedule."
+            )
+        elif self.break_type == "missing_external":
+            detail = (
+                f"The fund manager expected an allocation for {label} that the administrator's "
+                "package does not contain."
+            )
+        elif self.break_type == "category_mismatch":
+            expected = (self.expected_category or "?").replace("_", " ")
+            allocated = (self.allocated_category or "?").replace("_", " ")
+            detail = (
+                f"Expected this expense to sit with the {expected}, but the administrator "
+                f"allocated it to the {allocated}."
+            )
+        else:
+            detail = f"Internal amount {self.internal_amount} vs administrator amount {self.external_amount}."
+        return ExceptionItem(
+            category="expense_allocation",
+            code=f"expense_allocation.{self.break_type}",
+            key=self.expense_id,
+            title=f"{label}: {self.break_type.replace('_', ' ')}",
+            detail=detail,
+            severity=self.severity,
+            impact_amount=abs(self.difference),
+        )
+
+
+class ExpenseAllocationResult(BaseModel):
+    breaks: list[ExpenseBreak] = Field(default_factory=list)
+    matched_count: int = 0
+    internal_count: int = 0
+    external_count: int = 0
+
+    def to_exceptions(self) -> list[ExceptionItem]:
+        return [item.to_exception() for item in self.breaks]
+
+
+def parse_expected_expense_allocations(content: bytes) -> list[ExpectedExpenseAllocation]:
+    """Parse a flexible JSON expected-allocation schedule (the fund manager's own record of which
+    entity each expense belongs to): a top-level array, or an object with an
+    ``expected_allocations`` array."""
+
+    return [
+        ExpectedExpenseAllocation.model_validate(row)
+        for row in _load_json(content, "expected_allocations")
+    ]
+
+
+def parse_administrator_expenses(content: bytes) -> list[AdministratorExpenseLine]:
+    """Parse a flexible JSON administrator expense-allocation export: a top-level array, or an
+    object with an ``administrator_expenses`` array."""
+
+    return [
+        AdministratorExpenseLine.model_validate(row)
+        for row in _load_json(content, "administrator_expenses")
+    ]
+
+
+def reconcile_expense_allocations(
+    expected: list[ExpectedExpenseAllocation],
+    administrator: list[AdministratorExpenseLine],
+    *,
+    amount_tolerance: Decimal = DEFAULT_MONEY_TOLERANCE,
+) -> ExpenseAllocationResult:
+    """Compare the fund manager's expected expense allocation (which entity each expense belongs
+    to — the fund, the management company, or a named portfolio company) against how the
+    administrator actually allocated it, matched by expense_id.
+
+    This is the deterministic check for "which expenses belong to the management company, which
+    belong to the fund, which belong to portfolio companies" — a category mismatch is flagged as
+    HIGH regardless of amount, since a misallocated expense is a control break even when the
+    figure itself is immaterial; an amount-only difference on an otherwise correctly categorised
+    expense is a WARNING.
+    """
+
+    expected_by_id = {line.expense_id: line for line in expected}
+    administrator_by_id = {line.expense_id: line for line in administrator}
+    breaks: list[ExpenseBreak] = []
+    matched = 0
+
+    for expense_id in sorted(set(expected_by_id) | set(administrator_by_id)):
+        expected_line = expected_by_id.get(expense_id)
+        administrator_line = administrator_by_id.get(expense_id)
+        if expected_line is None:
+            breaks.append(
+                ExpenseBreak(
+                    expense_id=expense_id,
+                    description=administrator_line.description if administrator_line else None,
+                    break_type="missing_internal",
+                    allocated_category=(
+                        administrator_line.allocated_category if administrator_line else None
+                    ),
+                    allocated_portfolio_company=(
+                        administrator_line.portfolio_company if administrator_line else None
+                    ),
+                    external_amount=administrator_line.amount if administrator_line else None,
+                    difference=administrator_line.amount if administrator_line else Decimal("0"),
+                    severity=FindingSeverity.WARNING,
+                )
+            )
+            continue
+        if administrator_line is None:
+            breaks.append(
+                ExpenseBreak(
+                    expense_id=expense_id,
+                    description=expected_line.description,
+                    break_type="missing_external",
+                    expected_category=expected_line.expected_category,
+                    expected_portfolio_company=expected_line.portfolio_company,
+                    internal_amount=expected_line.amount,
+                    difference=expected_line.amount,
+                    severity=FindingSeverity.WARNING,
+                )
+            )
+            continue
+
+        description = expected_line.description or administrator_line.description
+        category_mismatch = (
+            expected_line.expected_category != administrator_line.allocated_category
+            or (
+                expected_line.expected_category == "portfolio_company"
+                and (expected_line.portfolio_company or "").casefold()
+                != (administrator_line.portfolio_company or "").casefold()
+            )
+        )
+        amount_difference = money(expected_line.amount - administrator_line.amount)
+        if category_mismatch:
+            breaks.append(
+                ExpenseBreak(
+                    expense_id=expense_id,
+                    description=description,
+                    break_type="category_mismatch",
+                    expected_category=expected_line.expected_category,
+                    allocated_category=administrator_line.allocated_category,
+                    expected_portfolio_company=expected_line.portfolio_company,
+                    allocated_portfolio_company=administrator_line.portfolio_company,
+                    internal_amount=expected_line.amount,
+                    external_amount=administrator_line.amount,
+                    difference=amount_difference,
+                    severity=FindingSeverity.HIGH,
+                )
+            )
+        elif abs(amount_difference) > amount_tolerance:
+            breaks.append(
+                ExpenseBreak(
+                    expense_id=expense_id,
+                    description=description,
+                    break_type="amount_mismatch",
+                    expected_category=expected_line.expected_category,
+                    allocated_category=administrator_line.allocated_category,
+                    internal_amount=expected_line.amount,
+                    external_amount=administrator_line.amount,
+                    difference=amount_difference,
+                    severity=FindingSeverity.WARNING,
+                )
+            )
+        else:
+            matched += 1
+
+    return ExpenseAllocationResult(
+        breaks=breaks,
+        matched_count=matched,
+        internal_count=len(expected),
+        external_count=len(administrator),
+    )
 
 
 # --- Prioritise exceptions ------------------------------------------------------------------------

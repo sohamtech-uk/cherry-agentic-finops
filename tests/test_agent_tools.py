@@ -23,6 +23,7 @@ from app.agent_tools import (
     query_database,
     read_document,
     reconcile_cash,
+    reconcile_expense_allocations,
     reconcile_investor_gl_workbook,
     reconcile_loader_sample_workbook,
     reconcile_positions,
@@ -30,6 +31,7 @@ from app.agent_tools import (
     run_daily_fund_health_check,
     run_finance_scenario,
     run_nav_quality_review,
+    validate_management_fees,
 )
 from app.nav_review_history import get_nav_review_history_store
 
@@ -448,6 +450,63 @@ def test_detect_stale_prices_tool_flags_a_high_severity_finding(tmp_path: Path) 
 
     assert result["findings"][0]["severity"] == "high"
     assert result["exceptions"][0]["category"] == "stale_price"
+
+
+def test_validate_management_fees_tool_flags_amount_mismatch(tmp_path: Path) -> None:
+    rules_path = _write_json(
+        tmp_path / "fee-rules.json",
+        [{"investor": "Investor A", "fee_rate": "0.0125", "fee_basis": "invested_capital"}],
+    )
+    fees_path = _write_json(
+        tmp_path / "administrator-fees.json",
+        [
+            {
+                "investor": "Investor A",
+                "fee_basis": "invested_capital",
+                "basis_amount": 1_000_000,
+                "reported_fee": 12_800,
+            }
+        ],
+    )
+
+    result = validate_management_fees(rules_path, fees_path)
+
+    assert result["breaks"][0]["break_type"] == "amount_mismatch"
+    assert result["exceptions"][0]["category"] == "management_fee"
+
+
+def test_validate_management_fees_tool_wraps_invalid_json(tmp_path: Path) -> None:
+    bad_path = tmp_path / "fee-rules.json"
+    bad_path.write_text("not json")
+    fees_path = _write_json(tmp_path / "administrator-fees.json", [])
+
+    with pytest.raises(ValueError, match="Invalid fee rules"):
+        validate_management_fees(str(bad_path), fees_path)
+
+
+def test_reconcile_expense_allocations_tool_flags_category_mismatch(tmp_path: Path) -> None:
+    expected_path = _write_json(
+        tmp_path / "expected-allocations.json",
+        [{"expense_id": "EXP1", "amount": 5_000, "expected_category": "management_company"}],
+    )
+    administrator_path = _write_json(
+        tmp_path / "administrator-expenses.json",
+        [{"expense_id": "EXP1", "amount": 5_000, "allocated_category": "fund"}],
+    )
+
+    result = reconcile_expense_allocations(expected_path, administrator_path)
+
+    assert result["breaks"][0]["break_type"] == "category_mismatch"
+    assert result["exceptions"][0]["category"] == "expense_allocation"
+
+
+def test_reconcile_expense_allocations_tool_wraps_invalid_json(tmp_path: Path) -> None:
+    bad_path = tmp_path / "expected-allocations.json"
+    bad_path.write_text("not json")
+    administrator_path = _write_json(tmp_path / "administrator-expenses.json", [])
+
+    with pytest.raises(ValueError, match="Invalid expected expense allocations"):
+        reconcile_expense_allocations(str(bad_path), administrator_path)
 
 
 def test_detect_unsettled_trades_tool_flags_an_overdue_trade(tmp_path: Path) -> None:

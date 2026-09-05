@@ -7,24 +7,34 @@ from decimal import Decimal
 import pytest
 
 from app.fund_reconciliation import (
+    AdministratorExpenseLine,
+    AdministratorFeeLine,
     CashBalance,
     ExceptionItem,
+    ExpectedExpenseAllocation,
     ExposureLimit,
+    FeeRule,
     Position,
     PriceRecord,
     Trade,
     detect_exposure_breaches,
     detect_stale_prices,
     detect_unsettled_trades,
+    parse_administrator_expenses,
+    parse_administrator_fees,
     parse_cash_balances,
+    parse_expected_expense_allocations,
     parse_exposure_limits,
+    parse_fee_rules,
     parse_positions,
     parse_prices,
     parse_trades,
     prioritise_exceptions,
     reconcile_cash,
+    reconcile_expense_allocations,
     reconcile_positions,
     reconcile_trades,
+    validate_management_fees,
 )
 
 # --- parsing --------------------------------------------------------------------------------
@@ -384,6 +394,295 @@ def test_detect_exposure_breaches_returns_nothing_when_within_limit() -> None:
     breaches = detect_exposure_breaches(positions, nav=Decimal("100"), limits=limits)
 
     assert breaches == []
+
+
+# --- validate_management_fees ------------------------------------------------------------------
+
+
+def test_parse_fee_rules_and_administrator_fees_round_trip() -> None:
+    rules = parse_fee_rules(
+        json.dumps(
+            {
+                "fee_rules": [
+                    {
+                        "investor": "Investor A",
+                        "fee_rate": "0.0125",
+                        "fee_basis": "invested_capital",
+                        "source": "Side Letter §4.2",
+                    }
+                ]
+            }
+        ).encode()
+    )
+    assert rules == [
+        FeeRule(
+            investor="Investor A",
+            fee_rate=Decimal("0.0125"),
+            fee_basis="invested_capital",
+            source="Side Letter §4.2",
+        )
+    ]
+
+    fees = parse_administrator_fees(
+        json.dumps(
+            [
+                {
+                    "investor": "Investor A",
+                    "fee_basis": "invested_capital",
+                    "basis_amount": 1_000_000,
+                    "reported_fee": 12_500,
+                }
+            ]
+        ).encode()
+    )
+    assert fees[0].reported_fee == Decimal("12500.00")
+
+
+def test_validate_management_fees_matches_correct_fee() -> None:
+    rules = [
+        FeeRule(investor="Investor A", fee_rate=Decimal("0.0125"), fee_basis="invested_capital")
+    ]
+    fees = [
+        AdministratorFeeLine(
+            investor="Investor A",
+            fee_basis="invested_capital",
+            basis_amount=1_000_000,
+            reported_fee=12_500,
+        )
+    ]
+
+    result = validate_management_fees(rules, fees)
+
+    assert result.breaks == []
+    assert result.matched_count == 1
+
+
+def test_validate_management_fees_flags_basis_mismatch_regardless_of_amount() -> None:
+    rules = [
+        FeeRule(investor="Investor A", fee_rate=Decimal("0.0125"), fee_basis="invested_capital")
+    ]
+    fees = [
+        AdministratorFeeLine(
+            investor="Investor A",
+            fee_basis="committed_capital",
+            basis_amount=1_000_000,
+            reported_fee=12_500,
+        )
+    ]
+
+    result = validate_management_fees(rules, fees)
+
+    assert len(result.breaks) == 1
+    assert result.breaks[0].break_type == "basis_mismatch"
+    assert result.breaks[0].severity == "high"
+
+
+def test_validate_management_fees_flags_amount_mismatch() -> None:
+    rules = [
+        FeeRule(investor="Investor A", fee_rate=Decimal("0.0125"), fee_basis="invested_capital")
+    ]
+    fees = [
+        AdministratorFeeLine(
+            investor="Investor A",
+            fee_basis="invested_capital",
+            basis_amount=1_000_000,
+            reported_fee=12_800,
+        )
+    ]
+
+    result = validate_management_fees(rules, fees)
+
+    assert len(result.breaks) == 1
+    assert result.breaks[0].break_type == "amount_mismatch"
+    assert result.breaks[0].difference == Decimal("300.00")
+
+
+def test_validate_management_fees_flags_rule_unavailable() -> None:
+    fees = [
+        AdministratorFeeLine(
+            investor="Investor B",
+            fee_basis="invested_capital",
+            basis_amount=500_000,
+            reported_fee=6_250,
+        )
+    ]
+
+    result = validate_management_fees([], fees)
+
+    assert len(result.breaks) == 1
+    assert result.breaks[0].break_type == "rule_unavailable"
+    assert result.breaks[0].severity == "warning"
+
+
+def test_validate_management_fees_to_exceptions_carries_impact_amount() -> None:
+    rules = [
+        FeeRule(investor="Investor A", fee_rate=Decimal("0.0125"), fee_basis="invested_capital")
+    ]
+    fees = [
+        AdministratorFeeLine(
+            investor="Investor A",
+            fee_basis="invested_capital",
+            basis_amount=1_000_000,
+            reported_fee=12_800,
+        )
+    ]
+
+    exceptions = validate_management_fees(rules, fees).to_exceptions()
+
+    assert exceptions[0].category == "management_fee"
+    assert exceptions[0].impact_amount == Decimal("300.00")
+
+
+# --- reconcile_expense_allocations -------------------------------------------------------------
+
+
+def test_parse_expected_and_administrator_expenses_round_trip() -> None:
+    expected = parse_expected_expense_allocations(
+        json.dumps(
+            {
+                "expected_allocations": [
+                    {
+                        "expense_id": "EXP1",
+                        "description": "Board meeting travel",
+                        "amount": 5_000,
+                        "expected_category": "management_company",
+                    }
+                ]
+            }
+        ).encode()
+    )
+    assert expected == [
+        ExpectedExpenseAllocation(
+            expense_id="EXP1",
+            description="Board meeting travel",
+            amount=Decimal("5000.00"),
+            expected_category="management_company",
+        )
+    ]
+
+    administrator = parse_administrator_expenses(
+        json.dumps(
+            [
+                {
+                    "expense_id": "EXP1",
+                    "amount": 5_000,
+                    "allocated_category": "management_company",
+                }
+            ]
+        ).encode()
+    )
+    assert administrator[0].allocated_category == "management_company"
+
+
+def test_reconcile_expense_allocations_matches_clean_allocation() -> None:
+    expected = [
+        ExpectedExpenseAllocation(
+            expense_id="EXP1", amount=5_000, expected_category="management_company"
+        )
+    ]
+    administrator = [
+        AdministratorExpenseLine(
+            expense_id="EXP1", amount=5_000, allocated_category="management_company"
+        )
+    ]
+
+    result = reconcile_expense_allocations(expected, administrator)
+
+    assert result.breaks == []
+    assert result.matched_count == 1
+
+
+def test_reconcile_expense_allocations_flags_missing_internal() -> None:
+    administrator = [
+        AdministratorExpenseLine(expense_id="EXP1", amount=5_000, allocated_category="fund")
+    ]
+
+    result = reconcile_expense_allocations([], administrator)
+
+    assert len(result.breaks) == 1
+    assert result.breaks[0].break_type == "missing_internal"
+
+
+def test_reconcile_expense_allocations_flags_missing_external() -> None:
+    expected = [
+        ExpectedExpenseAllocation(expense_id="EXP1", amount=5_000, expected_category="fund")
+    ]
+
+    result = reconcile_expense_allocations(expected, [])
+
+    assert len(result.breaks) == 1
+    assert result.breaks[0].break_type == "missing_external"
+
+
+def test_reconcile_expense_allocations_flags_category_mismatch() -> None:
+    expected = [
+        ExpectedExpenseAllocation(
+            expense_id="EXP1", amount=5_000, expected_category="management_company"
+        )
+    ]
+    administrator = [
+        AdministratorExpenseLine(expense_id="EXP1", amount=5_000, allocated_category="fund")
+    ]
+
+    result = reconcile_expense_allocations(expected, administrator)
+
+    assert len(result.breaks) == 1
+    assert result.breaks[0].break_type == "category_mismatch"
+    assert result.breaks[0].severity == "high"
+
+
+def test_reconcile_expense_allocations_flags_portfolio_company_mismatch() -> None:
+    expected = [
+        ExpectedExpenseAllocation(
+            expense_id="EXP1",
+            amount=5_000,
+            expected_category="portfolio_company",
+            portfolio_company="Acme Co",
+        )
+    ]
+    administrator = [
+        AdministratorExpenseLine(
+            expense_id="EXP1",
+            amount=5_000,
+            allocated_category="portfolio_company",
+            portfolio_company="Other Co",
+        )
+    ]
+
+    result = reconcile_expense_allocations(expected, administrator)
+
+    assert len(result.breaks) == 1
+    assert result.breaks[0].break_type == "category_mismatch"
+
+
+def test_reconcile_expense_allocations_flags_amount_mismatch_when_category_matches() -> None:
+    expected = [
+        ExpectedExpenseAllocation(expense_id="EXP1", amount=5_000, expected_category="fund")
+    ]
+    administrator = [
+        AdministratorExpenseLine(expense_id="EXP1", amount=5_200, allocated_category="fund")
+    ]
+
+    result = reconcile_expense_allocations(expected, administrator)
+
+    assert len(result.breaks) == 1
+    assert result.breaks[0].break_type == "amount_mismatch"
+    assert result.breaks[0].severity == "warning"
+    assert result.breaks[0].difference == Decimal("-200.00")
+
+
+def test_reconcile_expense_allocations_to_exceptions_carries_impact_amount() -> None:
+    expected = [
+        ExpectedExpenseAllocation(expense_id="EXP1", amount=5_000, expected_category="fund")
+    ]
+    administrator = [
+        AdministratorExpenseLine(expense_id="EXP1", amount=5_200, allocated_category="fund")
+    ]
+
+    exceptions = reconcile_expense_allocations(expected, administrator).to_exceptions()
+
+    assert exceptions[0].category == "expense_allocation"
+    assert exceptions[0].impact_amount == Decimal("200.00")
 
 
 # --- prioritise_exceptions --------------------------------------------------------------------

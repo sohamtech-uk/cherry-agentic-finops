@@ -12,8 +12,12 @@ from app.config import get_settings
 from app.container import get_engine
 from app.fund_reconciliation import (
     ExceptionItem,
+    parse_administrator_expenses,
+    parse_administrator_fees,
     parse_cash_balances,
+    parse_expected_expense_allocations,
     parse_exposure_limits,
+    parse_fee_rules,
     parse_positions,
     parse_prices,
     parse_trades,
@@ -34,10 +38,16 @@ from app.fund_reconciliation import (
     reconcile_cash as _reconcile_cash,
 )
 from app.fund_reconciliation import (
+    reconcile_expense_allocations as _reconcile_expense_allocations,
+)
+from app.fund_reconciliation import (
     reconcile_positions as _reconcile_positions,
 )
 from app.fund_reconciliation import (
     reconcile_trades as _reconcile_trades,
+)
+from app.fund_reconciliation import (
+    validate_management_fees as _validate_management_fees,
 )
 from app.models import ApprovalRequest, RejectionRequest
 from app.nav_exceptions import group_exceptions_by_root_cause
@@ -745,6 +755,78 @@ def detect_exposure_breaches(positions_path: str, nav: str, limits_path: str) ->
     return {
         "breaches": [breach.model_dump(mode="json") for breach in breaches],
         "exceptions": [breach.to_exception().model_dump(mode="json") for breach in breaches],
+    }
+
+
+def validate_management_fees(fee_rules_path: str, administrator_fees_path: str) -> dict[str, Any]:
+    """Compare each administrator-calculated management fee against the governing fee rule (LPA
+    default or side-letter override) for that investor, matched by investor name. Flags a fee
+    calculated on the wrong basis (e.g. committed capital instead of invested capital) even if the
+    amount looks close, a recomputed amount that disagrees with what the administrator reported,
+    and an administrator fee with no supplied rule to check it against. Report the breaks; do not
+    recompute a fee yourself.
+
+    Args:
+        fee_rules_path: Local path to the fee-rule export (.json): an array, or an object with a
+            fee_rules array, of {investor, fee_rate, fee_basis, source}. fee_basis is one of
+            committed_capital, invested_capital, called_capital, net_asset_value.
+        administrator_fees_path: Local path to the administrator's fee-calculation export (.json):
+            an array, or an object with an administrator_fees array, of {investor, fee_basis,
+            basis_amount, reported_fee}.
+    """
+
+    rules = _parse_input_file(
+        fee_rules_path, kind="Fee rules", extension=".json", parser=parse_fee_rules
+    )
+    administrator_fees = _parse_input_file(
+        administrator_fees_path,
+        kind="Administrator fees",
+        extension=".json",
+        parser=parse_administrator_fees,
+    )
+    result = _validate_management_fees(rules, administrator_fees)
+    return {
+        **result.model_dump(mode="json"),
+        "exceptions": [item.model_dump(mode="json") for item in result.to_exceptions()],
+    }
+
+
+def reconcile_expense_allocations(
+    expected_allocations_path: str, administrator_expenses_path: str
+) -> dict[str, Any]:
+    """Compare the fund manager's expected expense allocation (which entity each expense belongs
+    to — the fund, the management company, or a named portfolio company) against how the
+    administrator actually allocated it, matched by expense_id. A category mismatch is flagged
+    regardless of amount, since a misallocated expense is a control break even when the figure is
+    immaterial; an amount-only difference on an otherwise correctly categorised expense is a
+    separate, lower-severity break. Report the breaks; do not decide the correct allocation
+    yourself.
+
+    Args:
+        expected_allocations_path: Local path to the fund manager's expected-allocation schedule
+            (.json): an array, or an object with an expected_allocations array, of {expense_id,
+            description, amount, expected_category, portfolio_company}. expected_category is one
+            of fund, management_company, portfolio_company.
+        administrator_expenses_path: Local path to the administrator's expense-allocation export
+            in the same shape, with allocated_category in place of expected_category.
+    """
+
+    expected = _parse_input_file(
+        expected_allocations_path,
+        kind="Expected expense allocations",
+        extension=".json",
+        parser=parse_expected_expense_allocations,
+    )
+    administrator = _parse_input_file(
+        administrator_expenses_path,
+        kind="Administrator expenses",
+        extension=".json",
+        parser=parse_administrator_expenses,
+    )
+    result = _reconcile_expense_allocations(expected, administrator)
+    return {
+        **result.model_dump(mode="json"),
+        "exceptions": [item.model_dump(mode="json") for item in result.to_exceptions()],
     }
 
 
