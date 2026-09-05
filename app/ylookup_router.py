@@ -158,7 +158,9 @@ async def download_ylookup_report(
 
     _require_upload_access(x_cherry_demo_token)
     if result.get("workflow_type") != "ylookup_dataset_batch":
-        raise HTTPException(status_code=422, detail="A Ylookup dataset analysis result is required.")
+        raise HTTPException(
+            status_code=422, detail="A Ylookup dataset analysis result is required."
+        )
 
     if report_format == "xlsx":
         content = build_ylookup_excel_report(result)
