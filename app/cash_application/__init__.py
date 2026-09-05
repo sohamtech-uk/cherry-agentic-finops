@@ -1,6 +1,7 @@
 """Deterministic, evidence-grounded, simulated AR cash application."""
 
 from app.cash_application.controls import evaluate_cash_application
+from app.cash_application.evaluation import CashApplicationCaseInput, run_case
 from app.cash_application.ledger import LedgerInvariantError, SimulatedCashLedger
 from app.cash_application.models import (
     AllocationKind,
@@ -35,6 +36,7 @@ __all__ = [
     "ApplicationKind",
     "ApplicationStatus",
     "CashReceipt",
+    "CashApplicationCaseInput",
     "ControlDisposition",
     "EvidenceRef",
     "EvidenceSource",
@@ -57,4 +59,5 @@ __all__ = [
     "SimulatedCashLedger",
     "SimulatedPostingResult",
     "evaluate_cash_application",
+    "run_case",
 ]

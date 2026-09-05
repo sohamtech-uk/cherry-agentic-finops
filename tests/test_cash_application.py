@@ -8,6 +8,7 @@ from app.cash_application import (
     AllocationKind,
     ApplicationKind,
     ApplicationStatus,
+    CashApplicationCaseInput,
     CashReceipt,
     ControlDisposition,
     EvidenceRef,
@@ -25,6 +26,7 @@ from app.cash_application import (
     ShortPayPolicy,
     SimulatedCashLedger,
     evaluate_cash_application,
+    run_case,
 )
 
 DECISION_DATE = date(2026, 9, 5)
@@ -578,3 +580,68 @@ def test_simulated_ledger_rejects_any_production_posting_mode() -> None:
 
     assert ledger.invoice(open_item.invoice_id).open_balance == Decimal("1250.00")
     assert ledger.processed_receipt_identities == frozenset()
+
+
+def test_run_case_exposes_canonical_posted_outcome_for_eval_workstream() -> None:
+    cash = receipt("RCPT-EVAL", "1250.00")
+    open_item = invoice("INV-EVAL", "1250.00")
+
+    outcome = run_case(
+        CashApplicationCaseInput(
+            receipt=cash,
+            remittance=remittance(
+                cash.receipt_id,
+                line(open_item.invoice_id, "1250.00"),
+            ),
+            open_items=[open_item],
+        ),
+        trial_id="trial-ca-01-1",
+    )
+
+    assert outcome["schema_version"] == "cash_application_outcome.v1"
+    assert outcome["trial_id"] == "trial-ca-01-1"
+    assert outcome["receipt"]["settlement_status"] == "BOOKED"
+    assert outcome["receipt"]["allocation_status"] == "APPLIED"
+    assert outcome["receipt"]["residual"] == "0.00"
+    assert outcome["application"]["status"] == "POSTED_SIMULATED"
+    assert outcome["application"]["cash_allocated"] == "1250.00"
+    assert outcome["invoices"][0]["balance_after"] == "0.00"
+    assert outcome["exception"]["status"] is None
+    assert outcome["review"]["status"] is None
+    assert outcome["policy"]["references"] == []
+    assert outcome["audit"]["event_count"] == 2
+    assert outcome["audit"]["chain_valid"] is True
+    assert len(outcome["audit"]["events"][1]["event_hash"]) == 64
+
+
+def test_run_case_reports_held_projection_without_claiming_ledger_mutation() -> None:
+    cash = receipt("RCPT-EVAL-HELD", "9500.00")
+    open_item = invoice("INV-EVAL-HELD", "10000.00")
+
+    outcome = run_case(
+        CashApplicationCaseInput(
+            receipt=cash,
+            remittance=remittance(
+                cash.receipt_id,
+                line(
+                    open_item.invoice_id,
+                    "9500.00",
+                    kind=AllocationKind.SHORT_PAY,
+                    deduction="500.00",
+                    reason="DAMAGED_GOODS",
+                ),
+            ),
+            open_items=[open_item],
+            policies=[short_pay_policy()],
+        ),
+        trial_id="trial-ca-05-1",
+    )
+
+    assert outcome["receipt"]["allocation_status"] == "HELD"
+    assert outcome["application"]["status"] == "REVIEW_REQUIRED"
+    assert outcome["application"]["posted"] is False
+    assert outcome["invoices"][0]["balance_after"] == "10000.00"
+    assert outcome["invoices"][0]["projected_balance_after"] == "500.00"
+    assert outcome["exception"]["status"] == "WAITING_REVIEW"
+    assert outcome["review"]["status"] == "REQUESTED"
+    assert outcome["audit"]["event_count"] == 1
