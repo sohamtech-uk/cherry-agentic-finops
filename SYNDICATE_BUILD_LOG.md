@@ -27,7 +27,7 @@ AO is mandatory for Syndicate. Record every real AO session used during the buil
 
 | AO session | Purpose | Status | Result / commit |
 | --- | --- | --- | --- |
-| 1 | CFO workflow architecture and acceptance criteria | Planned | — |
+| 1 (`cherry-agentic-finops-2`) | CFO workflow architecture and acceptance criteria | Complete | Canonical AR cash-application contract in `docs/CASH_APPLICATION_WORKFLOW.md`: evidence/state/authority/tool boundaries, CA-01..CA-13 mapping and BUILD-NOW sequence |
 | 2 | Agent/tool design | Planned | — |
 | 3 | Deterministic finance controls | Planned | — |
 | 4 | Exception investigation | Planned | — |
