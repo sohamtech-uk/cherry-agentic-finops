@@ -42,7 +42,7 @@ cherry-agent = "app.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["app*", "agents*"]
+include = ["app*", "agents*", "evals*"]
 
 [tool.setuptools.package-data]
 app = ["static/*"]

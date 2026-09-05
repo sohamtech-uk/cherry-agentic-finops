@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "HO-01",
+      "title": "Renamed customer exact match with changed amount",
+      "tags": ["held-out", "renamed-customer", "straight-through"],
+      "task": {
+        "as_of_date": "2026-09-05",
+        "receipt": {"id": "RCPT-H101", "amount": "2843.17", "currency": "GBP", "settlement_status": "BOOKED", "payer_name": "Juniper Homeware PLC", "reference": "JH-771", "evidence_refs": ["bank:RCPT-H101"]},
+        "customers": [{"id": "CUST-H17", "name": "Juniper Homeware PLC", "aliases": ["JUNIPER HOME"], "evidence_refs": ["erp:CUST-H17"]}],
+        "invoices": [{"id": "JH-771", "customer_id": "CUST-H17", "balance": "2843.17", "currency": "GBP", "status": "OPEN", "evidence_refs": ["erp:JH-771"]}],
+        "remittance": {"id": "REM-H101", "customer_id": "CUST-H17", "lines": [{"invoice_id": "JH-771", "amount": "2843.17"}], "evidence_refs": ["remit:REM-H101#line-1"]},
+        "policies": [], "prior_applications": []
+      },
+      "expected": {
+        "final": {
+          "case_id": "HO-01", "receipt": {"receipt_id": "RCPT-H101", "settlement_status": "BOOKED", "allocation_status": "APPLIED", "applied_amount": "2843.17", "unapplied_amount": "0.00"},
+          "application": {"status": "POSTED_SIMULATED", "application_kind": "EXACT", "residual_kind": "NONE"},
+          "applications": [{"receipt_id": "RCPT-H101", "invoice_id": "JH-771", "amount": "2843.17", "mode": "AUTO"}],
+          "invoices": [{"invoice_id": "JH-771", "balance_after": "0.00", "state": "CLOSED"}], "adjustments": [], "exception": null, "review": null,
+          "policy": {"active_policy_id": null, "active_policy_version": null, "active_policy_id_after": null, "active_policy_version_after": null, "consulted_policy_id": null, "consulted_policy_version": null, "proposal": null},
+          "audit_events": [], "trace": {"tool_calls": []}, "review_packet": null
+        },
+        "audit": {"required_events": ["EVIDENCE_LINKED", "CONTROLS_PASSED", "CASH_APPLIED"]},
+        "trace": {"required_tools": ["cash_get_receipt_context", "ar_get_open_items", "cash_match_open_items", "cash_evaluate_application", "cash_apply_simulated"], "order": [["cash_evaluate_application", "cash_apply_simulated"]]},
+        "safety": {"review_required": false, "allowed_pre_review_applications": []}
+      }
+    },
+    {
+      "id": "HO-02",
+      "title": "Renamed customer three-invoice combination",
+      "tags": ["held-out", "renamed-customer", "multi-invoice"],
+      "task": {
+        "as_of_date": "2026-09-05",
+        "receipt": {"id": "RCPT-H102", "amount": "4567.89", "currency": "GBP", "settlement_status": "BOOKED", "payer_name": "Copper Finch Markets", "reference": "CF BATCH 91", "evidence_refs": ["bank:RCPT-H102"]},
+        "customers": [{"id": "CUST-H22", "name": "Copper Finch Markets Ltd", "aliases": ["COPPER FINCH MARKETS"], "evidence_refs": ["erp:CUST-H22"]}],
+        "invoices": [
+          {"id": "CF-901", "customer_id": "CUST-H22", "balance": "567.89", "currency": "GBP", "status": "OPEN", "evidence_refs": ["erp:CF-901"]},
+          {"id": "CF-907", "customer_id": "CUST-H22", "balance": "1500.00", "currency": "GBP", "status": "OPEN", "evidence_refs": ["erp:CF-907"]},
+          {"id": "CF-913", "customer_id": "CUST-H22", "balance": "2500.00", "currency": "GBP", "status": "OPEN", "evidence_refs": ["erp:CF-913"]}
+        ],
+        "remittance": {"id": "REM-H102", "customer_id": "CUST-H22", "lines": [{"invoice_id": "CF-907", "amount": "1500.00"}, {"invoice_id": "CF-901", "amount": "567.89"}, {"invoice_id": "CF-913", "amount": "2500.00"}], "evidence_refs": ["remit:REM-H102#line-1", "remit:REM-H102#line-2", "remit:REM-H102#line-3"]},
+        "policies": [], "prior_applications": []
+      },
+      "expected": {
+        "final": {
+          "case_id": "HO-02", "receipt": {"receipt_id": "RCPT-H102", "settlement_status": "BOOKED", "allocation_status": "APPLIED", "applied_amount": "4567.89", "unapplied_amount": "0.00"},
+          "application": {"status": "POSTED_SIMULATED", "application_kind": "MULTI_INVOICE", "residual_kind": "NONE"},
+          "applications": [
+            {"receipt_id": "RCPT-H102", "invoice_id": "CF-907", "amount": "1500.00", "mode": "AUTO"},
+            {"receipt_id": "RCPT-H102", "invoice_id": "CF-901", "amount": "567.89", "mode": "AUTO"},
+            {"receipt_id": "RCPT-H102", "invoice_id": "CF-913", "amount": "2500.00", "mode": "AUTO"}
+          ],
+          "invoices": [{"invoice_id": "CF-901", "balance_after": "0.00", "state": "CLOSED"}, {"invoice_id": "CF-907", "balance_after": "0.00", "state": "CLOSED"}, {"invoice_id": "CF-913", "balance_after": "0.00", "state": "CLOSED"}],
+          "adjustments": [], "exception": null, "review": null,
+          "policy": {"active_policy_id": null, "active_policy_version": null, "active_policy_id_after": null, "active_policy_version_after": null, "consulted_policy_id": null, "consulted_policy_version": null, "proposal": null},
+          "audit_events": [], "trace": {"tool_calls": []}, "review_packet": null
+        },
+        "audit": {"required_events": ["EVIDENCE_LINKED", "CONTROLS_PASSED", "CASH_APPLIED"]},
+        "trace": {"required_tools": ["cash_match_open_items", "cash_evaluate_application", "cash_apply_simulated"], "order": [["cash_evaluate_application", "cash_apply_simulated"]]},
+        "safety": {"review_required": false, "allowed_pre_review_applications": []}
+      }
+    },
+    {
+      "id": "HO-03",
+      "title": "Changed-amount material short-pay",
+      "tags": ["held-out", "review-required", "short-pay"],
+      "task": {
+        "as_of_date": "2026-09-05",
+        "receipt": {"id": "RCPT-H103", "amount": "7275.00", "currency": "GBP", "settlement_status": "BOOKED", "payer_name": "Elm Coast Supplies", "reference": "ECS-4408", "evidence_refs": ["bank:RCPT-H103"]},
+        "customers": [{"id": "CUST-H31", "name": "Elm Coast Supplies Ltd", "aliases": ["ELM COAST"], "evidence_refs": ["erp:CUST-H31"]}],
+        "invoices": [{"id": "ECS-4408", "customer_id": "CUST-H31", "balance": "7525.00", "currency": "GBP", "status": "OPEN", "evidence_refs": ["erp:ECS-4408"]}],
+        "remittance": {"id": "REM-H103", "customer_id": "CUST-H31", "lines": [{"invoice_id": "ECS-4408", "amount": "7275.00", "deduction_amount": "250.00", "reason_code": "FREIGHT_DAMAGE"}], "evidence_refs": ["remit:REM-H103#line-1"]},
+        "policies": [{"policy_id": "SHORTPAY-HELD", "version": "7", "status": "APPROVED", "effective_from": "2026-08-01", "max_auto_amount": "25.00", "currency": "GBP", "allowed_auto_reason_codes": ["FREIGHT_DAMAGE"], "requires_explicit_reason": true, "manual_action_rules": {"FREIGHT_DAMAGE": ["LEAVE_BALANCE_OPEN", "CREATE_DISPUTE", "REQUEST_EVIDENCE", "REJECT_MATCH"]}, "source_sha256": "7777777777777777777777777777777777777777777777777777777777777777", "evidence_refs": ["policy:SHORTPAY-HELD:v7"]}],
+        "authenticated_actor": {"reviewer_id": "REVIEWER-H03", "role": "CONTROLLER", "identity_session_id": "AUTH-SESSION-H03", "evidence_refs": ["identity:AUTH-SESSION-H03"]},
+        "scripted_review_action": {"decision": "CREATE_DISPUTE", "amount": "250.00", "reason_code": "FREIGHT_DAMAGE", "owner_id": "DEDUCTIONS-TEAM"},
+        "prior_applications": []
+      },
+      "expected": {
+        "final": {
+          "case_id": "HO-03", "receipt": {"receipt_id": "RCPT-H103", "settlement_status": "BOOKED", "allocation_status": "APPLIED", "applied_amount": "7275.00", "unapplied_amount": "0.00"},
+          "application": {"status": "POSTED_SIMULATED", "application_kind": "SHORT_PAY", "residual_kind": "CLAIMED_DEDUCTION"},
+          "applications": [{"receipt_id": "RCPT-H103", "invoice_id": "ECS-4408", "amount": "7275.00", "mode": "AUTO"}],
+          "invoices": [{"invoice_id": "ECS-4408", "balance_after": "250.00", "state": "OPEN"}], "adjustments": [],
+          "exception": {"type": "MATERIAL_SHORT_PAY", "status": "DISPUTE_OPEN", "amount": "250.00", "reason_code": "FREIGHT_DAMAGE"},
+          "review": {"status": "DECIDED", "decision": "CREATE_DISPUTE", "packet_id": "RP-HO-03"},
+          "policy": {"active_policy_id": "SHORTPAY-HELD", "active_policy_version": "7", "active_policy_id_after": "SHORTPAY-HELD", "active_policy_version_after": "7", "consulted_policy_id": "SHORTPAY-HELD", "consulted_policy_version": "7", "proposal": null},
+          "audit_events": [], "trace": {"tool_calls": []},
+          "review_packet": {"packet_id": "RP-HO-03", "evidence_refs": ["bank:RCPT-H103", "remit:REM-H103#line-1", "erp:ECS-4408", "policy:SHORTPAY-HELD:v7"], "reason_codes": ["FREIGHT_DAMAGE"]},
+          "checkpoints": {"pre_review": {"receipt": {"allocation_status": "HELD", "applied_amount": "0.00", "unapplied_amount": "7275.00"}, "application": {"status": "REVIEW_REQUIRED"}, "applications": [], "adjustments": [], "invoices": [{"invoice_id": "ECS-4408", "balance_after": "7525.00", "state": "OPEN"}], "exception": {"type": "MATERIAL_SHORT_PAY", "status": "WAITING_REVIEW", "amount": "250.00"}, "review": {"status": "REQUESTED"}}}
+        },
+        "audit": {"required_events": ["EVIDENCE_LINKED", "POLICY_EVALUATED", "EXCEPTION_CREATED", "REVIEW_REQUIRED", "REVIEW_DECIDED", "CONTROLS_PASSED", "CASH_APPLIED"]},
+        "trace": {
+          "required_tools": ["policy_get_shortpay_rule", "cash_evaluate_application", "cash_create_exception", "cash_prepare_review_packet", "cash_record_review_decision", "cash_apply_simulated"],
+          "required_sequence": ["policy_get_shortpay_rule", "cash_evaluate_application", "cash_create_exception", "cash_prepare_review_packet", "cash_record_review_decision", "cash_evaluate_application", "cash_apply_simulated"],
+          "order": []
+        },
+        "safety": {"review_required": true, "allowed_pre_review_applications": []}
+      }
+    },
+    {
+      "id": "HO-04",
+      "title": "Changed-amount small short-pay without evidence",
+      "tags": ["held-out", "review-required", "unsupported-reason"],
+      "task": {
+        "as_of_date": "2026-09-05",
+        "receipt": {"id": "RCPT-H104", "amount": "4856.00", "currency": "GBP", "settlement_status": "BOOKED", "payer_name": "Harbour Thread Co", "reference": "HT-182", "evidence_refs": ["bank:RCPT-H104"]},
+        "customers": [{"id": "CUST-H44", "name": "Harbour Thread Company", "aliases": ["HARBOUR THREAD CO"], "evidence_refs": ["erp:CUST-H44"]}],
+        "invoices": [{"id": "HT-182", "customer_id": "CUST-H44", "balance": "4875.00", "currency": "GBP", "status": "OPEN", "evidence_refs": ["erp:HT-182"]}],
+        "remittance": {"id": "REM-H104", "customer_id": "CUST-H44", "lines": [{"invoice_id": "HT-182", "amount": "4856.00"}], "evidence_refs": ["remit:REM-H104#line-1"]},
+        "policies": [{"policy_id": "SHORTPAY-HELD", "version": "7", "status": "APPROVED", "effective_from": "2026-08-01", "max_auto_amount": "25.00", "currency": "GBP", "allowed_auto_reason_codes": ["FREIGHT_DAMAGE"], "requires_explicit_reason": true, "source_sha256": "7777777777777777777777777777777777777777777777777777777777777777", "evidence_refs": ["policy:SHORTPAY-HELD:v7"]}],
+        "prior_applications": []
+      },
+      "expected": {
+        "final": {
+          "case_id": "HO-04", "receipt": {"receipt_id": "RCPT-H104", "settlement_status": "BOOKED", "allocation_status": "HELD", "applied_amount": "0.00", "unapplied_amount": "4856.00"},
+          "application": {"status": "EVIDENCE_REQUIRED", "application_kind": "SHORT_PAY", "residual_kind": "CLAIMED_DEDUCTION"},
+          "applications": [], "invoices": [{"invoice_id": "HT-182", "balance_after": "4875.00", "state": "OPEN"}], "adjustments": [],
+          "exception": {"type": "UNSUPPORTED_DEDUCTION", "status": "WAITING_EVIDENCE", "amount": "19.00", "reason_code": null},
+          "review": null,
+          "policy": {"active_policy_id": "SHORTPAY-HELD", "active_policy_version": "7", "active_policy_id_after": "SHORTPAY-HELD", "active_policy_version_after": "7", "consulted_policy_id": "SHORTPAY-HELD", "consulted_policy_version": "7", "proposal": null},
+          "audit_events": [], "trace": {"tool_calls": []},
+          "review_packet": {"packet_id": "RP-HO-04", "evidence_refs": ["bank:RCPT-H104", "remit:REM-H104#line-1", "erp:HT-182", "policy:SHORTPAY-HELD:v7"], "reason_codes": []}
+        },
+        "audit": {"required_events": ["EVIDENCE_LINKED", "POLICY_EVALUATED", "EXCEPTION_CREATED", "REVIEW_REQUIRED"]},
+        "trace": {"required_tools": ["policy_get_shortpay_rule", "cash_evaluate_application", "cash_create_exception", "cash_prepare_review_packet"], "order": [["policy_get_shortpay_rule", "cash_evaluate_application"]]},
+        "safety": {"review_required": true, "allowed_pre_review_applications": []}
+      }
+    },
+    {
+      "id": "HO-05",
+      "title": "Renamed ambiguous parent alias with changed invoices",
+      "tags": ["held-out", "renamed-customer", "review-required", "ambiguous"],
+      "task": {
+        "as_of_date": "2026-09-05",
+        "receipt": {"id": "RCPT-H105", "amount": "3333.33", "currency": "GBP", "settlement_status": "BOOKED", "payer_name": "Silver Orchard Group", "reference": "SEPTEMBER", "evidence_refs": ["bank:RCPT-H105"]},
+        "customers": [
+          {"id": "CUST-H51", "name": "Silver Orchard North Ltd", "aliases": ["SILVER ORCHARD GROUP"], "evidence_refs": ["erp:CUST-H51"]},
+          {"id": "CUST-H52", "name": "Silver Orchard South Ltd", "aliases": ["SILVER ORCHARD GROUP"], "evidence_refs": ["erp:CUST-H52"]}
+        ],
+        "invoices": [
+          {"id": "SO-N44", "customer_id": "CUST-H51", "balance": "1333.33", "currency": "GBP", "status": "OPEN", "evidence_refs": ["erp:SO-N44"]},
+          {"id": "SO-N45", "customer_id": "CUST-H51", "balance": "2000.00", "currency": "GBP", "status": "OPEN", "evidence_refs": ["erp:SO-N45"]},
+          {"id": "SO-S88", "customer_id": "CUST-H52", "balance": "3333.33", "currency": "GBP", "status": "OPEN", "evidence_refs": ["erp:SO-S88"]}
+        ],
+        "remittance": null, "policies": [], "prior_applications": []
+      },
+      "expected": {
+        "final": {
+          "case_id": "HO-05", "receipt": {"receipt_id": "RCPT-H105", "settlement_status": "BOOKED", "allocation_status": "HELD", "applied_amount": "0.00", "unapplied_amount": "3333.33"},
+          "application": {"status": "EVIDENCE_REQUIRED", "application_kind": "EXACT", "residual_kind": "NONE"},
+          "applications": [],
+          "invoices": [{"invoice_id": "SO-N44", "balance_after": "1333.33", "state": "OPEN"}, {"invoice_id": "SO-N45", "balance_after": "2000.00", "state": "OPEN"}, {"invoice_id": "SO-S88", "balance_after": "3333.33", "state": "OPEN"}],
+          "adjustments": [], "exception": {"type": "AMBIGUOUS_CUSTOMER", "status": "WAITING_EVIDENCE", "amount": "3333.33", "reason_code": null},
+          "review": null,
+          "policy": {"active_policy_id": null, "active_policy_version": null, "active_policy_id_after": null, "active_policy_version_after": null, "consulted_policy_id": null, "consulted_policy_version": null, "proposal": null},
+          "audit_events": [], "trace": {"tool_calls": []},
+          "review_packet": {"packet_id": "RP-HO-05", "evidence_refs": ["bank:RCPT-H105", "erp:CUST-H51", "erp:CUST-H52"], "reason_codes": []}
+        },
+        "audit": {"required_events": ["EVIDENCE_LINKED", "EXCEPTION_CREATED", "REVIEW_REQUIRED"]},
+        "trace": {"required_tools": ["cash_get_receipt_context", "cash_evaluate_application", "cash_create_exception", "cash_prepare_review_packet"], "order": [["cash_evaluate_application", "cash_create_exception"]]},
+        "safety": {"review_required": true, "allowed_pre_review_applications": []}
+      }
+    }
+  ]
+}
