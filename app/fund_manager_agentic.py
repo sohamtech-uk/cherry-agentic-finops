@@ -220,6 +220,24 @@ def _materialise_files(
     return manifest
 
 
+def _shape_response_metadata(
+    result: dict[str, Any], files: list[tuple[str, bytes, str | None]]
+) -> None:
+    sources = classify_and_validate_sources(files)
+    result["sources"] = sources
+    filename_by_source = {source["id"]: source["filename"] for source in sources}
+    for entry in result.get("control_plan", []):
+        if not isinstance(entry, dict):
+            continue
+        source_ids = entry.get("source_ids") or []
+        if "filename" not in entry:
+            entry["filename"] = ", ".join(
+                filename_by_source[source_id]
+                for source_id in source_ids
+                if source_id in filename_by_source
+            )
+
+
 async def run_agentic_analysis(
     files: list[tuple[str, bytes, str | None]],
     *,
@@ -281,6 +299,7 @@ async def run_agentic_analysis(
             raise RuntimeError("Fund Manager agent completed without a final response.")
 
         result = _extract_json(final_text)
+        _shape_response_metadata(result, files)
         result["orchestration_mode"] = "agentic"
         result["agent_name"] = fund_manager_agent.name
         result["agent_tool_trace"] = tool_trace
