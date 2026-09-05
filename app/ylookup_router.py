@@ -5,10 +5,12 @@ import hmac
 import os
 from typing import Annotated, Any
 
-from fastapi import APIRouter, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Header, HTTPException, UploadFile
+from fastapi.responses import Response
 
 from app.config import get_settings
 from app.ylookup_datasets import analyse_ylookup_dataset_batch
+from app.ylookup_reports import build_ylookup_excel_report, build_ylookup_pdf_report
 
 settings = get_settings()
 router = APIRouter(prefix="/api/ylookup", tags=["ylookup"])
@@ -51,6 +53,7 @@ async def ylookup_health() -> dict[str, Any]:
             "excel": "one_or_many",
             "json": "not_required",
         },
+        "report_formats": ["pdf", "xlsx"],
     }
 
 
@@ -133,3 +136,46 @@ async def analyse_ylookup_dataset(
         "excel_sha256": _hash_items(workbook_items),
     }
     return result
+
+
+@router.post("/report/{report_format}")
+async def download_ylookup_report(
+    report_format: str,
+    result: Annotated[
+        dict[str, Any],
+        Body(description="Previously returned /api/ylookup/analyse result"),
+    ],
+    x_cherry_demo_token: Annotated[
+        str | None,
+        Header(alias="X-Cherry-Demo-Token"),
+    ] = None,
+) -> Response:
+    """Create a point-in-time report from the current structured review result.
+
+    The report request is stateless: the browser sends the current structured analysis back to this
+    endpoint, which renders a file and does not retain the report payload after the request.
+    """
+
+    _require_upload_access(x_cherry_demo_token)
+    if result.get("workflow_type") != "ylookup_dataset_batch":
+        raise HTTPException(status_code=422, detail="A Ylookup dataset analysis result is required.")
+
+    if report_format == "xlsx":
+        content = build_ylookup_excel_report(result)
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        filename = "cherry-fundops-ylookup-review.xlsx"
+    elif report_format == "pdf":
+        try:
+            content = build_ylookup_pdf_report(result)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        media_type = "application/pdf"
+        filename = "cherry-fundops-ylookup-review.pdf"
+    else:
+        raise HTTPException(status_code=404, detail="Report format must be pdf or xlsx.")
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
