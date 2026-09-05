@@ -10,6 +10,7 @@ from app.private_markets import FundCashTransaction
 
 
 def _rows(payload: Any) -> list[dict[str, Any]]:
+    rows: Any
     if isinstance(payload, list):
         rows = payload
     elif isinstance(payload, dict):
