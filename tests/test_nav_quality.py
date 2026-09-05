@@ -170,9 +170,14 @@ def test_parse_investor_level_gl_workbook_skips_rows_missing_date_or_amount() ->
 def test_parse_investor_level_gl_workbook_respects_as_of_date_cutoff() -> None:
     ledger = parse_investor_level_gl_workbook(_build_gl_workbook(FUND_X_ROWS))
 
-    # 2026-01-01 is before the March postings, so nothing should be included yet.
+    # Before any posting date (earliest is the 2026-01-01 capital contributions), nothing counts.
+    assert ledger.balance("Fund X", "Assets", as_of=date(2025, 12, 31)) == 0
+    assert ledger.capital_balance("Fund X", as_of=date(2025, 12, 31)) == 0
+
+    # Between the capital contributions (2026-01-01) and the asset/liability postings
+    # (2026-03-01): capital is already booked, assets are not yet.
     assert ledger.balance("Fund X", "Assets", as_of=date(2026, 1, 15)) == 0
-    assert ledger.capital_balance("Fund X", as_of=date(2026, 1, 15)) == 0
+    assert ledger.capital_balance("Fund X", as_of=date(2026, 1, 15)) == 4_850_000
 
 
 # --- Administrator NAV summary / side-letter rule parsing ----------------------------------------
