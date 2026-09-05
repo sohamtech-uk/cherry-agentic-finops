@@ -16,11 +16,11 @@ router = APIRouter(prefix="/api/session", tags=["session"])
 async def clear_memory() -> dict[str, Any]:
     """Clear only ephemeral server state; never require the upload token for a reset.
 
-    Private-markets and Ylookup upload endpoints process uploaded bytes request-by-request and do not
-    retain the raw PDF/XLSX/JSON payloads. The browser clears selected files and rendered results
-    locally. On memory-backed deployments this endpoint also clears ephemeral workflow and parsed
-    contract state. Persistent backends such as Firestore are deliberately left untouched so the
-    reset action can never become an unauthenticated database-delete operation.
+    Private-markets and Ylookup upload endpoints process uploaded bytes request-by-request and do
+    not retain the raw PDF/XLSX/JSON payloads. The browser clears selected files and rendered
+    results locally. On memory-backed deployments this endpoint also clears ephemeral workflow and
+    parsed contract state. Persistent backends such as Firestore are deliberately left untouched so
+    the reset action can never become an unauthenticated database-delete operation.
     """
 
     if settings.persistence_backend != "memory":
