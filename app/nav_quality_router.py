@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from app.config import get_settings
 from app.contract_nav import resolve_contract_rules_for_nav
 from app.nav_exceptions import group_exceptions_by_root_cause
+from app.nav_health_check import build_daily_health_check
 from app.nav_quality import (
     SideLetterRule,
     build_case_id,
@@ -76,7 +77,7 @@ async def nav_quality_health() -> dict[str, Any]:
         "exception_grouping": "root_causes ranked by impact_amount (materiality), highest first",
         "iteration_tracking": (
             "Each /review submission is recorded as one round for its (legal_entity, period_end) "
-            "case; see /cases/{legal_entity}/{period_end} and /metrics."
+            "case; see /cases/{legal_entity}/{period_end}, /metrics and /daily-health-check."
         ),
         "financial_boundary": (
             "Decision support only; this service never posts a journal entry or amends the "
@@ -108,6 +109,17 @@ async def nav_iteration_metrics() -> dict[str, Any]:
     real usage instead of asserted in a pitch."""
 
     return get_nav_review_history_store().metrics().model_dump(mode="json")
+
+
+@router.get("/daily-health-check")
+async def daily_fund_health_check() -> dict[str, Any]:
+    """Return a portfolio-level view across every fund/period reviewed through this service:
+    which are ready_to_submit, which need attention, and — for those — the root causes still
+    open as of their latest round. Built entirely from recorded review rounds; running this
+    daily (e.g. from a scheduler hitting this endpoint) is the deployment's choice, not this
+    service's."""
+
+    return build_daily_health_check(get_nav_review_history_store()).model_dump(mode="json")
 
 
 @router.post("/review")
@@ -274,6 +286,7 @@ async def review_nav_pack(
         controls_passed=report.controls_passed,
         exceptions_open=report.exceptions_open,
         case_id=case_id,
+        root_causes=root_causes,
     )
 
     return {

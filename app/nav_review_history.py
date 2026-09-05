@@ -20,6 +20,7 @@ from threading import RLock
 
 from pydantic import BaseModel, Field
 
+from app.nav_exceptions import RootCauseGroup
 from app.nav_quality import NAVAction
 
 
@@ -35,6 +36,7 @@ class NAVReviewRound(BaseModel):
     controls_passed: int
     exceptions_open: int
     case_id: str
+    root_causes: list[RootCauseGroup] = Field(default_factory=list)
     submitted_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -118,6 +120,7 @@ class NAVReviewHistoryStore:
         controls_passed: int,
         exceptions_open: int,
         case_id: str,
+        root_causes: list[RootCauseGroup] | None = None,
     ) -> NAVReviewRound:
         key = _case_key(legal_entity, period_end)
         with self._lock:
@@ -130,6 +133,7 @@ class NAVReviewHistoryStore:
                 controls_passed=controls_passed,
                 exceptions_open=exceptions_open,
                 case_id=case_id,
+                root_causes=root_causes or [],
             )
             history.append(round_)
             return round_

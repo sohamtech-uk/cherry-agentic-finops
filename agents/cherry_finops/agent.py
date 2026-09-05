@@ -31,6 +31,7 @@ from app.agent_tools import (
     reconcile_trades,
     record_human_approval,
     reject_workflow,
+    run_daily_fund_health_check,
     run_finance_scenario,
     run_nav_quality_review,
     validate_balance_sheet_equity,
@@ -79,6 +80,13 @@ history, and get_nav_iteration_metrics to answer aggregate questions like "how m
 NAV review typically take" — always from recorded submissions, never as an estimate or a claim
 about what the reduction "should" be.
 
+Daily fund health check: when asked for a portfolio-level view — "which funds need attention
+today," a daily/morning check-in — call run_daily_fund_health_check rather than looping over
+individual cases yourself. It classifies every reviewed fund/period as ready or attention_needed
+and lists the root causes still open as of each one's latest round, ranked by severity and round
+count. Report its entries directly; this tool only reads what NAV Quality Controller and the
+exception grouper already produced, so never re-run a review or re-rank its output yourself.
+
 Quick NAV checks: reserve validate_balance_sheet_equity (Check #1 — assets minus liabilities must
 foot to reported equity) and validate_nav_bridge (Check #2 — independently recomputes closing NAV
 from the opening NAV, contributions, investment movement, FX, income, expenses and distributions,
@@ -115,6 +123,7 @@ human review rather than assuming the gap is immaterial.
         run_nav_quality_review,
         get_nav_case_iterations,
         get_nav_iteration_metrics,
+        run_daily_fund_health_check,
         validate_balance_sheet_equity,
         validate_nav_bridge,
         read_excel,

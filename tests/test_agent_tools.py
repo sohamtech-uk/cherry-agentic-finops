@@ -27,6 +27,7 @@ from app.agent_tools import (
     reconcile_loader_sample_workbook,
     reconcile_positions,
     reconcile_trades,
+    run_daily_fund_health_check,
     run_finance_scenario,
     run_nav_quality_review,
 )
@@ -172,6 +173,30 @@ def test_get_nav_iteration_metrics_reflects_recorded_reviews(tmp_path: Path) -> 
 
     assert metrics["tracked_cases"] >= 1
     assert metrics["closed_cases"] >= 1
+
+
+def test_run_daily_fund_health_check_classifies_ready_and_attention_needed(
+    tmp_path: Path,
+) -> None:
+    clean_path = _write_nav_summary(
+        tmp_path / "clean.json", legal_entity="Fund Ready", period_end="2026-06-30"
+    )
+    broken_path = _write_nav_summary(
+        tmp_path / "broken.json",
+        legal_entity="Fund Broken",
+        period_end="2026-06-30",
+        reported_equity=4_000_000,
+    )
+    run_nav_quality_review(clean_path)
+    run_nav_quality_review(broken_path)
+
+    report = run_daily_fund_health_check()
+
+    assert report["tracked_funds"] == 2
+    assert report["ready"] == 1
+    assert report["attention_needed"] == 1
+    assert report["entries"][0]["legal_entity"] == "Fund Broken"
+    assert report["entries"][0]["status"] == "attention_needed"
 
 
 def test_run_nav_quality_review_flags_balance_sheet_mismatch(tmp_path: Path) -> None:
