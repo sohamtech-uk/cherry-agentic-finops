@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
@@ -7,6 +10,35 @@ from pydantic import ValidationError
 
 from app.config import get_settings
 from app.container import get_engine
+from app.fund_reconciliation import (
+    ExceptionItem,
+    parse_cash_balances,
+    parse_exposure_limits,
+    parse_positions,
+    parse_prices,
+    parse_trades,
+)
+from app.fund_reconciliation import (
+    detect_exposure_breaches as _detect_exposure_breaches,
+)
+from app.fund_reconciliation import (
+    detect_stale_prices as _detect_stale_prices,
+)
+from app.fund_reconciliation import (
+    detect_unsettled_trades as _detect_unsettled_trades,
+)
+from app.fund_reconciliation import (
+    prioritise_exceptions as _prioritise_exceptions,
+)
+from app.fund_reconciliation import (
+    reconcile_cash as _reconcile_cash,
+)
+from app.fund_reconciliation import (
+    reconcile_positions as _reconcile_positions,
+)
+from app.fund_reconciliation import (
+    reconcile_trades as _reconcile_trades,
+)
 from app.models import ApprovalRequest, RejectionRequest
 from app.nav_exceptions import group_exceptions_by_root_cause
 from app.nav_quality import (
@@ -115,9 +147,9 @@ def _read_file_bytes(file_path: str) -> bytes:
 
 
 def _read_input_file(file_path: str, *, kind: str, extension: str) -> bytes:
-    """Read a required or optional NAV-review input, applying the same size and extension checks
-    as the POST /api/nav-quality/review endpoint, so a bad path fails with a clear ValueError
-    instead of an unbounded read or a raw parser exception."""
+    """Read a JSON reconciliation input, applying the same size and extension checks as the
+    POST /api/nav-quality/review endpoint, so a bad path fails with a clear ValueError instead of
+    an unbounded read or a raw parser exception."""
 
     content = _read_file_bytes(file_path)
     max_bytes = get_settings().max_upload_mb * 1024 * 1024
@@ -128,6 +160,19 @@ def _read_input_file(file_path: str, *, kind: str, extension: str) -> bytes:
     if not file_path.lower().endswith(extension):
         raise ValueError(f"{kind} {file_path!r} must be a {extension} file.")
     return content
+
+
+def _parse_input_file(
+    file_path: str, *, kind: str, extension: str, parser: Callable[[bytes], Any]
+) -> Any:
+    """Read and parse a reconciliation input, wrapping any parse failure with the file path and
+    kind so the caller knows which of several inputs was invalid."""
+
+    content = _read_input_file(file_path, kind=kind, extension=extension)
+    try:
+        return parser(content)
+    except (ValueError, ValidationError) as exc:
+        raise ValueError(f"Invalid {kind.lower()} {file_path!r}: {exc}") from exc
 
 
 def identify_ylookup_workbook(workbook_path: str) -> dict[str, Any]:
@@ -526,3 +571,185 @@ def get_nav_iteration_metrics() -> dict[str, Any]:
     """
 
     return get_nav_review_history_store().metrics().model_dump(mode="json")
+
+
+def reconcile_positions(
+    internal_positions_path: str, external_positions_path: str
+) -> dict[str, Any]:
+    """Compare an internal fund position record against an external one (administrator or
+    custodian), matched by security_id. Flags missing positions on either side, quantity breaks
+    and market value breaks. Report the returned breaks and counts; the exceptions list is the
+    same breaks in the common shape prioritise_exceptions expects.
+
+    Args:
+        internal_positions_path: Local path to the internal position export (.json): an array,
+            or an object with a positions array, of {fund, security_id, quantity, price, ...}.
+        external_positions_path: Local path to the external (administrator/custodian) position
+            export in the same shape.
+    """
+
+    internal = _parse_input_file(
+        internal_positions_path,
+        kind="Internal positions",
+        extension=".json",
+        parser=parse_positions,
+    )
+    external = _parse_input_file(
+        external_positions_path,
+        kind="External positions",
+        extension=".json",
+        parser=parse_positions,
+    )
+    result = _reconcile_positions(internal, external)
+    return {
+        **result.model_dump(mode="json"),
+        "exceptions": [item.model_dump(mode="json") for item in result.to_exceptions()],
+    }
+
+
+def reconcile_cash(internal_cash_path: str, external_cash_path: str) -> dict[str, Any]:
+    """Compare internal fund cash balances against an external source (bank/custodian statement),
+    matched by (account, currency). Flags missing balances on either side and balance mismatches.
+
+    Args:
+        internal_cash_path: Local path to the internal cash-balance export (.json): an array, or
+            an object with a cash_balances array, of {fund, account, currency, balance, ...}.
+        external_cash_path: Local path to the external cash-balance export in the same shape.
+    """
+
+    internal = _parse_input_file(
+        internal_cash_path,
+        kind="Internal cash balances",
+        extension=".json",
+        parser=parse_cash_balances,
+    )
+    external = _parse_input_file(
+        external_cash_path,
+        kind="External cash balances",
+        extension=".json",
+        parser=parse_cash_balances,
+    )
+    result = _reconcile_cash(internal, external)
+    return {
+        **result.model_dump(mode="json"),
+        "exceptions": [item.model_dump(mode="json") for item in result.to_exceptions()],
+    }
+
+
+def reconcile_trades(internal_trades_path: str, external_trades_path: str) -> dict[str, Any]:
+    """Compare an internal trade blotter against an external one (broker/custodian
+    confirmations), matched by trade_id. Flags missing trades on either side, and side, quantity
+    or price mismatches on trades present in both.
+
+    Args:
+        internal_trades_path: Local path to the internal trade export (.json): an array, or an
+            object with a trades array, of {trade_id, fund, security_id, side, quantity, price,
+            trade_date, settlement_date, status}.
+        external_trades_path: Local path to the external trade export in the same shape.
+    """
+
+    internal = _parse_input_file(
+        internal_trades_path, kind="Internal trades", extension=".json", parser=parse_trades
+    )
+    external = _parse_input_file(
+        external_trades_path, kind="External trades", extension=".json", parser=parse_trades
+    )
+    result = _reconcile_trades(internal, external)
+    return {
+        **result.model_dump(mode="json"),
+        "exceptions": [item.model_dump(mode="json") for item in result.to_exceptions()],
+    }
+
+
+def detect_stale_prices(prices_path: str, as_of: str, max_age_days: int = 3) -> dict[str, Any]:
+    """Flag any security price older than max_age_days as of the given date. Severity escalates
+    to HIGH beyond twice the threshold. Report the findings; do not judge staleness yourself.
+
+    Args:
+        prices_path: Local path to the price export (.json): an array, or an object with a
+            prices array, of {security_id, price, price_date, ...}.
+        as_of: Control date to measure staleness against, as YYYY-MM-DD.
+        max_age_days: Maximum age in days still treated as fresh.
+    """
+
+    prices = _parse_input_file(prices_path, kind="Prices", extension=".json", parser=parse_prices)
+    findings = _detect_stale_prices(
+        prices, as_of=date.fromisoformat(as_of), max_age_days=max_age_days
+    )
+    return {
+        "findings": [finding.model_dump(mode="json") for finding in findings],
+        "exceptions": [finding.to_exception().model_dump(mode="json") for finding in findings],
+    }
+
+
+def detect_unsettled_trades(trades_path: str, as_of: str, grace_days: int = 3) -> dict[str, Any]:
+    """Flag trades still marked unsettled whose settlement_date has passed as_of. Severity
+    escalates to HIGH once more than grace_days overdue. Report the findings; do not judge
+    settlement risk yourself.
+
+    Args:
+        trades_path: Local path to a trade blotter (.json), same shape as reconcile_trades'
+            inputs — only status and settlement_date are required for this check.
+        as_of: Control date to measure overdue settlement against, as YYYY-MM-DD.
+        grace_days: Days past settlement_date still treated as a WARNING rather than HIGH.
+    """
+
+    trades = _parse_input_file(trades_path, kind="Trades", extension=".json", parser=parse_trades)
+    findings = _detect_unsettled_trades(
+        trades, as_of=date.fromisoformat(as_of), grace_days=grace_days
+    )
+    return {
+        "findings": [finding.model_dump(mode="json") for finding in findings],
+        "exceptions": [finding.to_exception().model_dump(mode="json") for finding in findings],
+    }
+
+
+def detect_exposure_breaches(positions_path: str, nav: str, limits_path: str) -> dict[str, Any]:
+    """Compute each position's, issuer's, sector's and the fund's total exposure as a percentage
+    of NAV and flag any that breaches the matching limit. Report the breaches; do not compute
+    exposure percentages yourself.
+
+    Args:
+        positions_path: Local path to the position export (.json), same shape as
+            reconcile_positions' inputs — issuer and sector are used for those limit scopes.
+        nav: The fund's net asset value as a decimal string, e.g. "92500000.00".
+        limits_path: Local path to the exposure-limit export (.json): an array, or an object with
+            a limits array, of {label, scope, key, max_percent_of_nav}. scope is one of
+            single_position, issuer, sector or gross_exposure; key names the specific
+            issuer/sector for a targeted limit, or is omitted for a "no single X" rule.
+    """
+
+    positions = _parse_input_file(
+        positions_path, kind="Positions", extension=".json", parser=parse_positions
+    )
+    limits = _parse_input_file(
+        limits_path, kind="Exposure limits", extension=".json", parser=parse_exposure_limits
+    )
+    try:
+        breaches = _detect_exposure_breaches(positions, nav=Decimal(nav), limits=limits)
+    except ValueError as exc:
+        raise ValueError(f"Could not compute exposure breaches: {exc}") from exc
+    return {
+        "breaches": [breach.model_dump(mode="json") for breach in breaches],
+        "exceptions": [breach.to_exception().model_dump(mode="json") for breach in breaches],
+    }
+
+
+def prioritise_exceptions(
+    exceptions: list[dict[str, Any]], top_n: int | None = None
+) -> dict[str, Any]:
+    """Rank exceptions from any of the reconciliation/detection tools above by severity (HIGH
+    first, then WARNING) and, within a severity, by impact_amount (materiality) descending. Pass
+    it the combined exceptions arrays already returned by those tools; do not re-rank, filter or
+    recompute impact_amount yourself.
+
+    Args:
+        exceptions: Exception records to rank, each in the common shape every check above returns
+            in its own "exceptions" list (category, code, key, title, detail, severity,
+            impact_amount).
+        top_n: Optional cap on how many ranked exceptions to return.
+    """
+
+    items = [ExceptionItem.model_validate(item) for item in exceptions]
+    ranked = _prioritise_exceptions(items, top_n=top_n)
+    return {"exceptions": [item.model_dump(mode="json") for item in ranked]}
