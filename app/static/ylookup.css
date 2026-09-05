@@ -1,6 +1,8 @@
 .dataset-results {
-  max-width: 1360px;
-  margin: 34px auto 0;
+  grid-column: 1 / -1;
+  width: 100%;
+  max-width: none;
+  margin: 34px 0 0;
   display: grid;
   gap: 18px;
 }
