@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Cherry CFO controller review for decision-ready cash application exceptions.">
   <title>Cherry CFO — Controller review</title>
-  <link rel="stylesheet" href="/static/controller_review.css">
+  <link rel="stylesheet" href="/static/controller_review.css?v=agent-3">
 </head>
 <body>
   <header class="topbar">
@@ -109,13 +109,39 @@
       <div class="control-list" id="control-list"></div>
     </section>
 
+    <section class="panel agent-panel">
+      <div class="agent-heading">
+        <div class="panel-title"><span>07</span><div><small>READ-ONLY AGENT INVESTIGATION</small><h2>Grounded advice, visible trajectory</h2></div></div>
+        <button class="primary" id="run-agent" type="button">Run investigation agent</button>
+      </div>
+      <p class="agent-boundary">The model can inspect one authoritative packet and recommend <b>CREATE_DISPUTE</b> or <b>LEAVE_BALANCE_OPEN</b>. It cannot calculate balances, approve, post, or introduce facts. Every displayed claim must resolve to packet evidence.</p>
+      <div class="agent-placeholder" id="agent-placeholder">Ready · model access is isolated from the decision endpoint.</div>
+      <div class="agent-result hidden" id="agent-result" aria-live="polite">
+        <div class="agent-recommendation">
+          <small>ADVISORY · HUMAN DECISION REQUIRED</small>
+          <h3 id="agent-action">—</h3>
+          <p id="agent-summary">—</p>
+          <code id="agent-model">—</code>
+        </div>
+        <div>
+          <h3>Grounded claims</h3>
+          <div class="claim-list" id="agent-claims"></div>
+        </div>
+        <div>
+          <h3>Actual model / tool trajectory</h3>
+          <div class="trajectory-list" id="agent-trajectory"></div>
+        </div>
+        <small class="boundary">Advice only · deterministic controls remain authoritative · SIMULATED state · no production write.</small>
+      </div>
+    </section>
+
     <section class="panel evidence-panel">
-      <div class="panel-title"><span>07</span><div><small>SOURCE LINEAGE</small><h2>Evidence locators &amp; hashes</h2></div></div>
+      <div class="panel-title"><span>08</span><div><small>SOURCE LINEAGE</small><h2>Evidence locators &amp; hashes</h2></div></div>
       <div class="evidence-list" id="evidence-list"></div>
     </section>
 
     <section class="panel audit-panel">
-      <div class="panel-title"><span>08</span><div><small>TAMPER-EVIDENT RECORD</small><h2>Audit timeline</h2></div></div>
+      <div class="panel-title"><span>09</span><div><small>TAMPER-EVIDENT RECORD</small><h2>Audit timeline</h2></div></div>
       <div class="audit-list" id="audit-list"></div>
     </section>
 
@@ -144,6 +170,6 @@
     </section>
   </main>
 
-  <script src="/static/controller_review.js" defer></script>
+  <script src="/static/controller_review.js?v=agent-3" defer></script>
 </body>
 </html>

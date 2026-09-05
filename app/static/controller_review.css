@@ -76,13 +76,37 @@ dd { overflow-wrap: anywhere; margin: 3px 0 0; font-weight: 700; }
 .stop-reason p, .policy-clause p { margin: 0; color: #45544c; }
 .policy-panel > p { margin: -12px 0 18px; color: var(--muted); }
 .policy-clause b { display: block; margin-bottom: 5px; color: var(--green); }
-.controls-panel, .evidence-panel, .audit-panel, .decision-panel { margin-top: 22px; }
+.controls-panel, .agent-panel, .evidence-panel, .audit-panel, .decision-panel { margin-top: 22px; }
 .control-list { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
 .control { padding: 14px; border: 1px solid var(--line); border-radius: 11px; background: #f8faf7; }
 .control b { display: block; color: var(--green); font-size: 11px; }
 .control small { display: block; margin-top: 7px; color: var(--muted); }
 .control.failed { border-color: #e8aba4; background: #fff4f2; }
 .control.failed b { color: var(--red); }
+.agent-panel { border-color: #b5ccb9; background: linear-gradient(140deg, #fff 55%, #f1f8ed); }
+.agent-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.agent-heading .panel-title { margin-bottom: 0; }
+.agent-boundary { max-width: 900px; margin: 8px 0 20px 46px; color: var(--muted); }
+.agent-placeholder { padding: 16px; border: 1px dashed #aebbb1; border-radius: 11px; color: var(--muted); background: rgba(255, 255, 255, .7); }
+.agent-placeholder.agent-error { border-color: #e7ac8b; background: var(--amber-bg); color: #743716; }
+.agent-result { display: grid; gap: 22px; }
+.agent-result > div { min-width: 0; }
+.agent-result h3 { margin: 0 0 10px; }
+.agent-recommendation { padding: 18px; border-radius: 13px; background: var(--green); color: white; }
+.agent-recommendation small { color: var(--lime); font-weight: 800; letter-spacing: .08em; }
+.agent-recommendation h3 { margin: 5px 0; font: 700 27px/1.1 Georgia, serif; }
+.agent-recommendation p { margin: 0 0 8px; }
+.agent-recommendation code { display: block; overflow-wrap: anywhere; color: #dcece1; font-size: 11px; }
+.claim-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.grounded-claim { padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: white; }
+.grounded-claim b { color: var(--green); font-size: 11px; }
+.grounded-claim p { margin: 5px 0; color: #45544c; }
+.grounded-claim small { color: var(--muted); }
+.trajectory-list { display: grid; gap: 8px; }
+.trajectory-step { display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: start; }
+.trajectory-step > span { display: grid; height: 26px; place-items: center; border-radius: 50%; background: #edf4ed; color: var(--green); font-size: 10px; font-weight: 800; }
+.trajectory-step b { display: block; font-size: 12px; }
+.trajectory-step code { display: block; max-width: 100%; max-height: 72px; overflow: auto; overflow-wrap: anywhere; margin-top: 3px; color: var(--muted); font-size: 10px; white-space: normal; }
 .evidence-list { display: grid; gap: 10px; }
 .evidence-item { display: grid; grid-template-columns: 170px 1fr; gap: 18px; padding: 15px 0; border-top: 1px solid var(--line); }
 .evidence-item:first-child { border-top: 0; padding-top: 0; }
@@ -129,6 +153,8 @@ fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
   .bridge-values { grid-template-columns: 1fr 20px 1fr; }
   .bridge-values > b:nth-of-type(2), .bridge-values .residual { margin-top: 8px; }
   .page-heading { align-items: stretch; flex-direction: column; }
+  .agent-heading { align-items: stretch; flex-direction: column; }
+  .agent-boundary { margin-left: 0; }
   .risk-card { width: 100%; }
 }
 
@@ -137,7 +163,7 @@ fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
   .topbar { align-items: flex-start; }
   .top-actions { align-items: flex-end; flex-direction: column; }
   .simulation-badge { text-align: center; }
-  .facts, .action-grid, .conditional-fields, .control-list { grid-template-columns: 1fr; }
+  .facts, .action-grid, .conditional-fields, .control-list, .claim-list { grid-template-columns: 1fr; }
   .facts .wide { grid-column: auto; }
   .bridge-values { display: flex; align-items: stretch; flex-direction: column; }
   .bridge-values > b { transform: rotate(90deg); align-self: flex-start; }

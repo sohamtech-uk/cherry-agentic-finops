@@ -98,6 +98,49 @@ function renderPacket(packet) {
   }
 }
 
+function renderAgentInvestigation(result) {
+  state.action = result.recommended_action;
+  renderActions(state.packet.allowed_actions);
+  updateConditionalFields();
+  $("#agent-action").textContent = label(result.recommended_action);
+  $("#agent-summary").textContent = result.recommendation_label;
+  $("#agent-model").textContent = `${result.provider} · ${result.model} · ${result.model_response_ids.join(" / ")}`;
+  $("#agent-claims").innerHTML = result.grounded_claims.map((claim) => `
+    <div class="grounded-claim">
+      <b>${escapeHtml(claim.claim_id)}</b>
+      <p>${escapeHtml(claim.statement)}</p>
+      <small>Evidence · ${claim.evidence_ids.map(escapeHtml).join(" · ")}</small>
+    </div>`).join("");
+  $("#agent-trajectory").innerHTML = result.trajectory.map((step) => `
+    <div class="trajectory-step">
+      <span>${step.sequence}</span>
+      <div><b>${escapeHtml(step.kind)} · ${escapeHtml(step.name)}</b><code>${escapeHtml(JSON.stringify(step.detail))}</code></div>
+    </div>`).join("");
+  $("#agent-placeholder").classList.add("hidden");
+  $("#agent-result").classList.remove("hidden");
+}
+
+async function runAgentInvestigation() {
+  const button = $("#run-agent");
+  button.disabled = true;
+  button.textContent = "Investigating packet…";
+  $("#agent-placeholder").classList.remove("agent-error");
+  $("#agent-placeholder").textContent = "Calling the model with one read-only investigation tool…";
+  try {
+    const result = await api(`/api/controller-review/cases/${CASE_ID}/agent-investigation`, { method: "POST" });
+    renderAgentInvestigation(result);
+    showMessage("Grounded agent advice is ready. No decision was recorded and no ledger state changed.", true);
+  } catch (error) {
+    $("#agent-result").classList.add("hidden");
+    $("#agent-placeholder").classList.remove("hidden");
+    $("#agent-placeholder").classList.add("agent-error");
+    $("#agent-placeholder").textContent = `${error.message} Deterministic review remains available; no accounting state changed.`;
+  } finally {
+    button.disabled = false;
+    button.textContent = "Run investigation agent";
+  }
+}
+
 async function runCleanScenario() {
   const button = $("#run-clean");
   button.disabled = true;
@@ -131,6 +174,9 @@ async function resetDemo() {
   try {
     renderPacket(await api("/api/controller-review/demo/short-pay-500/reset", { method: "POST" }));
     $("#rationale").value = "";
+    $("#agent-result").classList.add("hidden");
+    $("#agent-placeholder").classList.remove("hidden", "agent-error");
+    $("#agent-placeholder").textContent = "Ready · model access is isolated from the decision endpoint.";
     showMessage("The £500 short-pay case was reset to awaiting controller review.", true);
   } catch (error) { showMessage(error.message); }
 }
@@ -161,10 +207,15 @@ async function submitDecision(event) {
 async function initialise() {
   $("#reset-demo").addEventListener("click", resetDemo);
   $("#run-clean").addEventListener("click", runCleanScenario);
+  $("#run-agent").addEventListener("click", runAgentInvestigation);
   $("#decision-form").addEventListener("submit", submitDecision);
   try {
     await Promise.all([loadReviewers(), loadPacket()]);
   } catch (error) { showMessage(error.message); }
 }
 
-document.addEventListener("DOMContentLoaded", initialise);
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initialise, { once: true });
+} else {
+  initialise();
+}

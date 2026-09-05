@@ -5,6 +5,10 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.cash_application.agent import (
+    AgentInvestigationError,
+    CashApplicationAgent,
+)
 from app.cash_application.demo import clean_multi_invoice_demo
 from app.cash_application.eval_adapter import to_trial_outcome
 from app.cash_application.review import (
@@ -19,6 +23,11 @@ router = APIRouter(prefix="/api/controller-review", tags=["controller-review"])
 @lru_cache(maxsize=1)
 def get_controller_review_service() -> ControllerReviewService:
     return ControllerReviewService()
+
+
+@lru_cache(maxsize=1)
+def get_cash_application_agent() -> CashApplicationAgent:
+    return CashApplicationAgent()
 
 
 def _raise_http_error(exc: ControllerReviewError) -> None:
@@ -101,6 +110,26 @@ async def get_review_trial_outcome(
     except ControllerReviewError as exc:
         _raise_http_error(exc)
     return to_trial_outcome(packet, trial_id=trial_id).model_dump(mode="json")
+
+
+@router.post("/cases/{case_id}/agent-investigation")
+async def investigate_review_case(case_id: str) -> dict[str, Any]:
+    """Run a read-only model/tool investigation; never record or apply a decision."""
+
+    try:
+        packet = get_controller_review_service().get_packet(case_id)
+        result = await get_cash_application_agent().investigate(packet)
+    except ControllerReviewError as exc:
+        _raise_http_error(exc)
+    except AgentInvestigationError as exc:
+        status_code = (
+            409 if exc.code in {"CASE_ALREADY_DECIDED", "FUNDAMENTAL_CONTROL_BLOCK"} else 503
+        )
+        raise HTTPException(
+            status_code=status_code,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+    return result.model_dump(mode="json")
 
 
 @router.post("/cases/{case_id}/decisions")

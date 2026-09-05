@@ -42,6 +42,25 @@ class Settings(BaseSettings):
     )
     max_upload_mb: int = Field(default=12, ge=1, le=50, validation_alias="CHERRY_MAX_UPLOAD_MB")
 
+    cash_agent_model: str = Field(
+        default="google/gemini-2.5-flash-lite",
+        validation_alias="CHERRY_CASH_AGENT_MODEL",
+    )
+    cash_agent_timeout_seconds: float = Field(
+        default=20.0,
+        ge=2,
+        le=60,
+        validation_alias="CHERRY_CASH_AGENT_TIMEOUT_SECONDS",
+    )
+    ai_gateway_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias="AI_GATEWAY_API_KEY",
+    )
+    vercel_oidc_token: SecretStr | None = Field(
+        default=None,
+        validation_alias="VERCEL_OIDC_TOKEN",
+    )
+
     google_cloud_project: str | None = Field(default=None, validation_alias="GOOGLE_CLOUD_PROJECT")
     google_cloud_location: str = Field(default="global", validation_alias="GOOGLE_CLOUD_LOCATION")
     google_api_key: SecretStr | None = Field(default=None, validation_alias="GOOGLE_API_KEY")
@@ -78,6 +97,15 @@ class Settings(BaseSettings):
         if self.google_api_key and self.google_api_key.get_secret_value().strip():
             return True
         return bool(self.use_vertex_ai and self.google_cloud_project)
+
+    @property
+    def cash_agent_token(self) -> str | None:
+        """Return Gateway auth without exposing it in application responses or logs."""
+
+        for candidate in (self.ai_gateway_api_key, self.vercel_oidc_token):
+            if candidate and candidate.get_secret_value().strip():
+                return candidate.get_secret_value().strip()
+        return None
 
     @property
     def cloud_mode(self) -> bool:

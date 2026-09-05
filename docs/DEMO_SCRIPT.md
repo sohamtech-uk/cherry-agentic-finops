@@ -1,54 +1,68 @@
-# Four-minute judge demo
+# Three-minute judge demo — Cherry CFO cash application
 
-## 0:00–0:25 — Problem
+Primary artifact: `/controller-review`
 
-“Small organisations still spend evenings opening bills, copying VAT, hunting for bank movements,
-requesting approvals and rebuilding the evidence at month-end. Most accounting AI gives another
-suggestion. Cherry Agent finishes the workflow when it is safe to do so.”
+## 0:00–0:25 — The CFO problem
 
-## 0:25–1:25 — Autonomous scenario
+“Cash application is easy until a receipt covers several invoices or a customer takes a deduction.
+AR teams then reconstruct bank evidence, remittance, invoice state and policy before deciding what
+can post. Cherry CFO clears the routine case and turns the material exception into a
+decision-ready controller packet.”
 
-1. Click **Run autonomous demo**.
-2. Show Gemini-structured invoice fields and the visible `Synthetic demo` label.
-3. Show the top bank candidate and factor scores: amount, date, reference, supplier and currency.
-4. Point to the risk policy: below threshold, no mismatch, high evidence score.
-5. Show `Auto-reconciled` and download the evidence pack.
+Point to the header: **SIMULATED AR · NO PRODUCTION WRITES**.
 
-Key line: “Gemini understood the document; deterministic code granted the action.”
+## 0:25–0:55 — RCPT-1041: routine cash applies itself
 
-## 1:25–2:25 — Human approval scenario
+1. Click **Run deterministic application**.
+2. Show `POSTED_SIMULATED / MULTI_INVOICE`.
+3. Read the bridge: GBP 10,000 to `INV-2208` + GBP 2,400 to `INV-2214`; GBP 0 residual.
+4. Point out the hash-linked audit event count and SIMULATED label.
 
-1. Click **Approval**.
-2. Show that the match remains strong.
-3. Show the £12,500 value control and `Paused safely` status.
-4. Enter the named approver, explain the evidence, then click **Approve & reconcile**.
-5. Show the two new audit events: human approval and resumed reconciliation.
+Key line: “The agent does not do the arithmetic. Fixed-point controls prove the receipt and every
+invoice allocation before simulated posting.”
 
-Key line: “The agent can pause for hours or days and resume without losing state.”
+## 0:55–1:40 — RCPT-1042: the system stops for judgement
 
-## 2:25–3:10 — Exception scenario
+1. Show GBP 9,500 booked against GBP 10,000 open on `INV-2208`.
+2. Show the explicit GBP 500 residual: cash remains HELD and GBP 0 is applied before review.
+3. Show the located `DAMAGED_GOODS` remittance claim—customer evidence, not independently proven
+   fact.
+4. Show `SHORTPAY-01 v3`: GBP 50 automatic limit and the two stop reasons.
+5. Scan the non-overridable PASS controls and evidence locators/hashes.
 
-1. Click **Exception**.
-2. Show that supplier and reference match but the amount differs materially.
-3. Point out that the agent does not average, guess or force a match.
-4. Show `Automation stopped` and the evidence request.
+Key line: “This is a real accounting stop: the value exceeds policy and the reason needs human
+judgement. A confidence score cannot override settlement, duplicate, currency, version or footing
+controls.”
 
-Key line: “Useful autonomy includes knowing when not to act.”
+## 1:40–2:15 — Read-only agent investigation
 
-## 3:10–3:45 — Agent and Google Cloud
+1. Click **Run investigation agent**.
+2. Show the recommended `CREATE_DISPUTE` or `LEAVE_BALANCE_OPEN` action.
+3. Show that every displayed sentence carries known evidence IDs.
+4. Show the actual two-step model/tool trajectory:
+   `investigate_cash_application` → `submit_controller_advice`.
+5. Point to **ADVISORY · HUMAN DECISION REQUIRED** and `production_write_performed=false`.
 
-Show the architecture section or repository:
+Key line: “The model chooses which supported facts matter; the server refuses invented claim IDs.
+It has read-only workflow tools and no posting, payment or policy tool.”
 
-- Google ADK orchestrator and specialists
-- Gemini 3.7 Flash
-- Cloud Run
-- Firestore state
-- Pub/Sub events
-- Cloud Storage evidence
+If Vercel AI Gateway is not enabled, show the fail-closed provider message and say: “Model access
+is unavailable, so the deterministic controller workflow remains usable and nothing changes.”
 
-Open `/health` and the Cloud Run service page so the Google Cloud backend is visible.
+## 2:15–2:48 — Controller owns the accounting outcome
 
-## 3:45–4:00 — Close
+1. Select **Create dispute**; keep reason `DAMAGED_GOODS` and owner `Deductions team`.
+2. Enter: “Customer deduction is evidenced; preserve the residual for deductions follow-up.”
+3. Click **Record simulated decision**.
+4. Show GBP 9,500 applied, GBP 500 still open, invoice `DISPUTED`, and the new hash-linked audit
+   events.
+5. If time permits, reset and show **Leave balance open** as the collections alternative.
 
-“Cherry Agent changes month-end from a long to-do list into an exception queue. People retain
-control of financial judgment; the agent completes the repetitive work and proves what happened.”
+Key line: “The controller chooses the treatment, but approval still re-runs every fundamental
+control. Human judgement cannot bypass the ledger invariants.”
+
+## 2:48–3:00 — Close
+
+“Cherry CFO gives the Office of the CFO the right split: deterministic accounting controls,
+agentic exception investigation, explicit human judgement and audit-ready evidence. It never
+initiates a payment and this demo never writes to production.”
