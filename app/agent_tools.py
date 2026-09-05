@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from app.config import get_settings
 from app.container import get_engine
+from app.exception_investigation import investigate_exception as _investigate_exception
 from app.fund_reconciliation import (
     ExceptionItem,
     parse_administrator_expenses,
@@ -848,3 +849,29 @@ def prioritise_exceptions(
     items = [ExceptionItem.model_validate(item) for item in exceptions]
     ranked = _prioritise_exceptions(items, top_n=top_n)
     return {"exceptions": [item.model_dump(mode="json") for item in ranked]}
+
+
+def investigate_exception(
+    exceptions: list[dict[str, Any]], code: str | None = None, key: str | None = None
+) -> dict[str, Any]:
+    """Investigate one exception from a combined exception queue — the highest-priority one by
+    default (by severity, then impact_amount), or a specific one selected by its code or key.
+    Finds every other exception in the queue sharing the target's key (a strong signal they are
+    one underlying incident rather than several independent ones) and returns a recommended
+    owner, action and escalation step (next_step). Report this directly; never correlate
+    exceptions, invent a root cause, or pick a different owner/action/escalation yourself.
+
+    Args:
+        exceptions: Exception records to investigate, each in the common shape every
+            reconciliation/detection/validation tool above returns in its own "exceptions" list
+            (category, code, key, title, detail, severity, impact_amount). Pass the combined list
+            across every check you have run, not just one tool's output, so a related exception in
+            a different category can be found.
+        code: Optional exact code of the exception to investigate. Defaults to the
+            highest-priority one when both code and key are omitted.
+        key: Optional exact key of the exception to investigate, used instead of code.
+    """
+
+    items = [ExceptionItem.model_validate(item) for item in exceptions]
+    result = _investigate_exception(items, code=code, key=key)
+    return result.model_dump(mode="json")
