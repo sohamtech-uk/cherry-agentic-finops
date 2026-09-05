@@ -8,8 +8,74 @@ into one governed private-markets case:
 **extract → cross-check → reconcile → surface exceptions → route the next action**
 
 The judge-facing experience is prepared for **Rebuild Private Markets: Ylookup × Encode AI
-Hackathon**. Gemini interprets documents; deterministic controls decide whether evidence is strong
-enough to close, needs more evidence or requires independent human verification.
+Hackathon**. Gemini interprets the PDF; deterministic Cherry controls decide whether evidence is
+strong enough to close, needs more evidence or requires independent human verification.
+
+## Judge-facing input contract
+
+The integrated workflow accepts the three requested source types:
+
+```text
+PDF capital-call notice
++ Excel commitment/control workbook
++ JSON fund cash/bank export
+                  ↓
+POST /api/private-markets/analyse-integrated
+```
+
+The response contains:
+
+- Gemini schema-validated extraction;
+- strict Cherry commitment/bank/cash controls;
+- owned exception work items;
+- SHA-256 hashes for all three inputs and the analysis;
+- optional FundOps Agent Studio enrichment.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  P[Capital-call PDF] --> G[Gemini extraction]
+  X[LP commitment/control Excel] --> C[Cherry strict controls]
+  J[Fund cash JSON] --> C
+  G --> C
+  C -->|structured case + evidence hashes| S[FundOps Agent Studio microservice]
+  S --> SR[Capital-call review]
+  S --> RR[Fund reconciliation]
+  S --> ER[Exception investigation]
+  C -->|all controls pass| R[Ready to reconcile]
+  C -->|changed bank instructions| H[Independent human verification]
+  C -->|missing/weak/mismatched evidence| E[Evidence required]
+  H --> W[Owned work queue]
+  E --> W
+```
+
+**Control boundary:** Agent Studio enriches the case but does not grant financial authority. Cherry's
+deterministic controls remain authoritative, and neither service initiates a payment.
+
+## FundOps Agent Studio microservice
+
+Sunil's `fundops-agent-studio` backend is kept as a separate service instead of copying it into this
+repository. Configure:
+
+```env
+FUNDOPS_STUDIO_API_URL=https://<fundops-agent-studio-service>
+FUNDOPS_STUDIO_AUDIENCE=https://<fundops-agent-studio-service>
+FUNDOPS_STUDIO_TIMEOUT_SECONDS=25
+```
+
+For private Google Cloud Run, `FUNDOPS_STUDIO_AUDIENCE` enables server-to-server IAM ID-token
+authentication. A static `FUNDOPS_STUDIO_API_TOKEN` can be used for local/non-GCP environments.
+
+Cherry calls:
+
+```text
+GET  /integration/cherry/health
+POST /integration/cherry/capital-call
+```
+
+on Agent Studio. If the microservice is unavailable, Cherry still completes its strict local control
+analysis and marks Agent Studio enrichment as unavailable rather than failing the financial review.
 
 ## Demo scenarios
 
@@ -19,7 +85,7 @@ enough to close, needs more evidence or requires independent human verification.
 | Awaiting cash | Notice and approved bank record agree but no strongly referenced receipt exists | Case remains open for investor operations |
 | Clean close | Notice, commitment arithmetic, approved bank record and strongly referenced cash agree | Ready to reconcile |
 
-Public synthetic demos are available at:
+Public synthetic demos:
 
 ```text
 POST /api/private-markets/demo/exception
@@ -27,23 +93,7 @@ POST /api/private-markets/demo/awaiting-cash
 POST /api/private-markets/demo/clean
 ```
 
-## Architecture
-
-```mermaid
-flowchart LR
-  P[Capital-call PDF/image] --> G[Gemini structured extraction]
-  X[LP commitment/control XLSX] --> C[Strict deterministic controls]
-  B[Fund cash CSV or read-only Cherry Money snapshot] --> C
-  G --> C
-  C -->|all controls pass| R[Ready to reconcile]
-  C -->|changed bank instructions| H[Independent human verification]
-  C -->|missing/weak/mismatched evidence| E[Evidence required]
-  H --> W[Owned work queue]
-  E --> W
-  C --> A[SHA-256 evidence metadata]
-```
-
-### Control principles
+## Control principles
 
 - blank or unapproved banking metadata never counts as approval;
 - a capital call cannot exceed the LP commitment remaining before the call;
@@ -55,51 +105,71 @@ flowchart LR
 
 ## Cherry Money relationship
 
-Cherry Money is a separate, pre-existing accounting/open-banking product. If the organisers permit
+Cherry Money is a separate, pre-existing accounting/open-banking product. If organiser rules permit
 pre-existing infrastructure, FundOps can use Cherry Money as a **read-only financial system of
 record** through its authenticated WebMCP bridge.
-
-Configure:
 
 ```env
 CHERRY_MONEY_API_URL=https://cherrymoney.co.uk
 CHERRY_MONEY_API_TOKEN=...
 ```
 
-Then the protected endpoint:
+Protected endpoint:
 
 ```text
 GET /api/private-markets/cherry-money/snapshot
 ```
 
-reads the bounded company-scoped `/api/webmcp/bootstrap` projection. The private-markets route does
-not write to Cherry Money. See `PREEXISTING_CODE.md` for the exact reuse/baseline disclosure.
+The private-markets workflow never writes to Cherry Money.
 
-## Real three-file analysis
+## Real PDF + Excel + JSON analysis
 
 ```text
-POST /api/private-markets/analyse
+POST /api/private-markets/analyse-integrated
 ```
 
 Multipart inputs:
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `capital_call` | one of | Capital-call/distribution PDF or image |
-| `capital_call_json` | one of | Structured fallback when Gemini is unavailable |
+| `capital_call` | yes | capital-call PDF |
 | `commitments` | yes | LP commitment/control `.xlsx` |
-| `cash` | yes | UTF-8 fund cash `.csv` |
+| `fund_json` | yes | UTF-8 cash/bank `.json` |
 | `as_of_date` | no | `YYYY-MM-DD` control date |
 
 In production, real uploads fail closed until `CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN` is configured.
-Clients send the same value as `X-Cherry-Demo-Token`. Synthetic demo endpoints remain public.
+Clients send it as `X-Cherry-Demo-Token`. The token is not persisted by the browser UI.
 
-The response includes SHA-256 hashes of each input plus the deterministic analysis so the review
-brief can be tied back to the evidence used for the decision.
+The previous CSV/structured fallback endpoint remains available at
+`POST /api/private-markets/analyse` for backwards compatibility.
+
+## JSON cash shapes
+
+The integrated JSON parser accepts either a top-level transaction array or:
+
+```json
+{
+  "transactions": [
+    {
+      "transaction_id": "TXN-1",
+      "booking_date": "2026-09-05",
+      "direction": "credit",
+      "amount": 1249500,
+      "currency": "GBP",
+      "counterparty": "Oakfield Pension Trust",
+      "reference": "NCGFIII-CALL-2026-03 / LP-001",
+      "status": "BOOKED"
+    }
+  ]
+}
+```
+
+Common aliases such as `id`, `date`, `value_date`, `amount_gbp`, `payment_reference` and `narrative`
+are normalised before strict validation.
 
 ## Run locally
 
-Python 3.11+ is required.
+Python 3.11+:
 
 ```bash
 git clone git@github.com:sohamtech-uk/cherry-agentic-finops.git
@@ -111,19 +181,22 @@ cp .env.example .env
 uvicorn app.api:app --reload --port 8080
 ```
 
-Open:
+Useful URLs:
 
 ```text
 http://localhost:8080
 http://localhost:8080/api/docs
 http://localhost:8080/api/private-markets/health
+http://localhost:8080/api/private-markets/integration/health
 ```
 
-Generate the synthetic backup fixtures:
+Generate backup fixtures:
 
 ```bash
 make ylookup-fixtures
 ```
+
+This creates both CSV and JSON cash fixtures; the integrated workflow uses the JSON version.
 
 ## Quality gates
 
@@ -137,32 +210,36 @@ node --check app/static/app.js
 docker build --tag cherry-agent:test .
 ```
 
-CI runs the same lint/type/test/compile/browser/container checks on pull requests.
-
 ## Deployment
 
-The existing deployment target is `https://finops.cherrymoney.co.uk` on Google Cloud Run. See
-`docs/DEPLOY_GCP.md` for deployment details.
+Cherry's target is `https://finops.cherrymoney.co.uk` on Google Cloud Run. The deployment workflow
+accepts the Agent Studio URL/audience as GitHub environment variables and uses the existing Cherry
+runtime service account for server-to-server invocation.
+
+Agent Studio should be deployed separately as a **private Cloud Run service** backed by the existing
+PostgreSQL/Cloud SQL instance (preferably a dedicated `fundops` database on that instance).
 
 ## Repository map
 
 ```text
-app/private_markets.py          Private-markets schemas, parsers and legacy analysis
-app/private_markets_strict.py   Fail-closed deterministic control policy
-app/private_markets_router.py   Demo, protected real analysis and read-only Cherry Money endpoint
-app/static/                     Judge-facing control-room UI
-fixtures/private_markets/       Synthetic backup data
-scripts/                        Fixture/deployment helpers
-tests/                          Controls, API and workflow tests
-docs/                           Readiness/deployment documentation
+app/private_markets.py                       private-markets schemas and Excel/CSV parsing
+app/private_markets_strict.py                fail-closed deterministic controls
+app/private_markets_io.py                    JSON cash parser
+app/private_markets_router.py                legacy/demo and Cherry Money routes
+app/private_markets_integration_router.py    PDF + Excel + JSON orchestration
+app/fundops_studio.py                        Agent Studio microservice client
+app/static/                                  judge-facing control-room UI
+fixtures/private_markets/                    synthetic backup data
+scripts/                                     fixture/deployment helpers
+tests/                                       controls, API and integration tests
 ```
 
 ## Reuse disclosure
 
-The repository contains pre-existing Cherry Agent work and pre-event Ylookup preparation. The frozen
-pre-hardening state is preserved at `baseline/pre-hardening-2026-09-05` on commit
-`22f4461ee793eb9d9ab83828f9992a76c0be3ef6`. Do not represent that pre-existing work as code built
-after hackathon kickoff. See `PREEXISTING_CODE.md` for details.
+This repository contains pre-existing Cherry Agent work and pre-event Ylookup preparation. The frozen
+pre-hardening state remains at `baseline/pre-hardening-2026-09-05` on commit
+`22f4461ee793eb9d9ab83828f9992a76c0be3ef6`. Do not represent pre-existing work as code built after
+hackathon kickoff. See `PREEXISTING_CODE.md` for details.
 
 ## Licence
 

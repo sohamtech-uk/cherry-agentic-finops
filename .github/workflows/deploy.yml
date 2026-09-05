@@ -1,6 +1,8 @@
 name: Deploy to Cloud Run
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -55,6 +57,10 @@ jobs:
             CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN=${{ secrets.CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN }}
             CHERRY_MONEY_API_URL=https://cherrymoney.co.uk
             CHERRY_MONEY_API_TOKEN=${{ secrets.CHERRY_MONEY_API_TOKEN }}
+            FUNDOPS_STUDIO_API_URL=${{ vars.FUNDOPS_STUDIO_API_URL }}
+            FUNDOPS_STUDIO_AUDIENCE=${{ vars.FUNDOPS_STUDIO_AUDIENCE }}
+            FUNDOPS_STUDIO_API_TOKEN=${{ secrets.FUNDOPS_STUDIO_API_TOKEN }}
+            FUNDOPS_STUDIO_TIMEOUT_SECONDS=25
             GOOGLE_GENAI_USE_VERTEXAI=true
             GOOGLE_CLOUD_PROJECT=${{ vars.GCP_PROJECT_ID }}
             GOOGLE_CLOUD_LOCATION=global
@@ -75,5 +81,6 @@ jobs:
           curl --fail --retry 8 --retry-delay 5 "${{ steps.deploy.outputs.url }}/"
           curl --fail --retry 8 --retry-delay 5 "${{ steps.deploy.outputs.url }}/api/config"
           curl --fail --retry 8 --retry-delay 5 "${{ steps.deploy.outputs.url }}/api/private-markets/health"
+          curl --fail --retry 8 --retry-delay 5 "${{ steps.deploy.outputs.url }}/api/private-markets/integration/health"
           curl --fail --retry 8 --retry-delay 5 \
             -X POST "${{ steps.deploy.outputs.url }}/api/private-markets/demo/clean"

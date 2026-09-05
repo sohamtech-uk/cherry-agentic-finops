@@ -15,6 +15,7 @@ from app.config import get_settings
 from app.container import get_engine
 from app.document_ai import GeminiDocumentExtractor, GeminiUnavailable
 from app.models import ApprovalRequest, BankTransaction, RejectionRequest
+from app.private_markets_integration_router import router as private_markets_integration_router
 from app.private_markets_router import router as private_markets_router
 from app.workflow import InvalidWorkflowAction, WorkflowNotFound
 
@@ -49,6 +50,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(private_markets_router)
+app.include_router(private_markets_integration_router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -102,6 +104,7 @@ async def public_config() -> dict[str, object]:
         "auto_reconcile_score": settings.auto_reconcile_score,
         "approval_amount_gbp": settings.approval_amount_gbp,
         "amount_tolerance_percent": settings.amount_tolerance_percent,
+        "fundops_studio_configured": bool(settings.fundops_studio_api_url),
         "financial_boundary": "Accounting reconciliation only; no payment initiation.",
     }
 

@@ -10,6 +10,42 @@ from openpyxl import Workbook
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "fixtures" / "private_markets"
 
+CASH_ROWS = [
+    {
+        "transaction_id": "TXN-2026-0904-001",
+        "booking_date": "2026-09-04",
+        "direction": "CREDIT",
+        "amount_gbp": "875000.00",
+        "currency": "GBP",
+        "counterparty": "Northbridge Family Office",
+        "reference": "NCGFIII-CALL-2026-03 / LP-002",
+        "description": "Capital contribution - Northbridge",
+        "status": "BOOKED",
+    },
+    {
+        "transaction_id": "TXN-2026-0904-002",
+        "booking_date": "2026-09-04",
+        "direction": "CREDIT",
+        "amount_gbp": "1000000.00",
+        "currency": "GBP",
+        "counterparty": "Horizon Community Foundation",
+        "reference": "NCGFIII-CALL-2026-03 / LP-004",
+        "description": "Capital contribution - Horizon",
+        "status": "BOOKED",
+    },
+    {
+        "transaction_id": "TXN-2026-0905-003",
+        "booking_date": "2026-09-05",
+        "direction": "CREDIT",
+        "amount_gbp": "1249500.00",
+        "currency": "GBP",
+        "counterparty": "Oakfield Pension Trust",
+        "reference": "NCGFIII-CALL-2026-03 / LP-001",
+        "description": "Capital contribution - Oakfield",
+        "status": "BOOKED",
+    },
+]
+
 
 def build_workbook(path: Path) -> None:
     workbook = Workbook()
@@ -175,57 +211,17 @@ def build_workbook(path: Path) -> None:
 
 
 def build_cash_csv(path: Path) -> None:
-    rows = [
-        [
-            "TXN-2026-0904-001",
-            "2026-09-04",
-            "CREDIT",
-            "875000.00",
-            "GBP",
-            "Northbridge Family Office",
-            "NCGFIII-CALL-2026-03 / LP-002",
-            "Capital contribution - Northbridge",
-            "BOOKED",
-        ],
-        [
-            "TXN-2026-0904-002",
-            "2026-09-04",
-            "CREDIT",
-            "1000000.00",
-            "GBP",
-            "Horizon Community Foundation",
-            "NCGFIII-CALL-2026-03 / LP-004",
-            "Capital contribution - Horizon",
-            "BOOKED",
-        ],
-        [
-            "TXN-2026-0905-003",
-            "2026-09-05",
-            "CREDIT",
-            "1249500.00",
-            "GBP",
-            "Oakfield Pension Trust",
-            "NCGFIII-CALL-2026-03 / LP-001",
-            "Capital contribution - Oakfield",
-            "BOOKED",
-        ],
-    ]
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(
-            [
-                "transaction_id",
-                "booking_date",
-                "direction",
-                "amount_gbp",
-                "currency",
-                "counterparty",
-                "reference",
-                "description",
-                "status",
-            ]
-        )
-        writer.writerows(rows)
+        writer = csv.DictWriter(handle, fieldnames=list(CASH_ROWS[0]))
+        writer.writeheader()
+        writer.writerows(CASH_ROWS)
+
+
+def build_cash_json(path: Path) -> None:
+    path.write_text(
+        json.dumps({"transactions": CASH_ROWS}, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def build_capital_call_json(path: Path) -> None:
@@ -259,6 +255,7 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     build_workbook(OUT / "02_LP_Commitments_and_Controls.xlsx")
     build_cash_csv(OUT / "03_Fund_Bank_Cash_Transactions.csv")
+    build_cash_json(OUT / "03_Fund_Bank_Cash_Transactions.json")
     build_capital_call_json(OUT / "capital_call_fixture.json")
     print(f"Synthetic private-markets fixtures written to {OUT}")
 
