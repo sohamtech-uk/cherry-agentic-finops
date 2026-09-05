@@ -181,6 +181,21 @@
         line-height: 1.45;
       }
 
+      .navm-capability-button,
+      .navm-capability-button:disabled {
+        padding: 7px 10px !important;
+        color: #264d40 !important;
+        border: 1px solid #c9d7d0 !important;
+        border-radius: 8px !important;
+        background: #f1f7f2 !important;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+        font-size: 9px !important;
+        font-weight: 750 !important;
+        line-height: 1.2 !important;
+        opacity: 1 !important;
+        cursor: default !important;
+      }
+
       @media (max-width: 520px) {
         .clear-dialog-actions {
           flex-direction: column-reverse;
@@ -246,6 +261,98 @@
         window.setTimeout(() => { input.value = todayIso(); }, 0);
       });
     }
+  }
+
+  function humaniseAgentCapabilities() {
+    const sections = [
+      {
+        selector: "#reconciliation-manager",
+        heading: "Available actions",
+        badge: "Governed actions",
+        actions: [
+          "Read workbook",
+          "Read cell",
+          "Calculate totals",
+          "Compare values",
+          "Build reconciliation bridge",
+          "Query records",
+        ],
+      },
+      {
+        selector: "#contract-manager",
+        heading: "Available actions",
+        badge: "Governed actions",
+        actions: [
+          "Search fund agreement",
+          "Search side letter",
+          "Extract clause",
+          "Check effective date",
+          "Get investor rule",
+        ],
+      },
+      {
+        selector: "#statement-agent",
+        heading: "Available actions",
+        badge: "Governed actions",
+        actions: [
+          "Read document",
+          "Compare periods",
+          "Find section",
+          "Find entity",
+          "Compare dates",
+        ],
+      },
+      {
+        selector: "#exception-agent",
+        heading: "Planned exception actions",
+        badge: "Planned actions · next build",
+        actions: [
+          "View exceptions",
+          "Group related issues",
+          "Check materiality",
+          "Trace dependencies",
+        ],
+      },
+    ];
+
+    let found = false;
+    sections.forEach((section) => {
+      const root = q(section.selector);
+      if (!root) return;
+      found = true;
+
+      const heading = root.querySelector(".navm-tool-label");
+      if (heading) heading.textContent = section.heading;
+
+      const badge = root.querySelector(".navm-agent-badge");
+      if (badge) badge.textContent = section.badge;
+
+      const tools = root.querySelector(".navm-tools");
+      if (!tools || tools.dataset.humanised === "true") return;
+      tools.dataset.humanised = "true";
+      tools.innerHTML = "";
+      section.actions.forEach((action) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.disabled = true;
+        button.className = "navm-tool navm-capability-button";
+        button.textContent = action;
+        button.setAttribute("aria-label", action);
+        tools.appendChild(button);
+      });
+    });
+    return found;
+  }
+
+  function scheduleCapabilityLabels() {
+    injectStyles();
+    if (humaniseAgentCapabilities()) return;
+
+    const observer = new MutationObserver(() => {
+      if (humaniseAgentCapabilities()) observer.disconnect();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    window.setTimeout(() => observer.disconnect(), 5000);
   }
 
   function ensureDialog() {
@@ -337,5 +444,6 @@
   document.addEventListener("DOMContentLoaded", () => {
     enhanceControlDate();
     bindCustomClearDialog();
+    scheduleCapabilityLabels();
   });
 })();
