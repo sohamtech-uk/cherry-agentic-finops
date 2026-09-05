@@ -194,11 +194,15 @@ async def cherry_money_snapshot(
 ) -> dict[str, Any]:
     _require_real_data_access(x_cherry_demo_token)
     if not cherry_money.configured:
-        raise HTTPException(status_code=503, detail="Cherry Money read-only bridge is not configured.")
+        raise HTTPException(
+            status_code=503, detail="Cherry Money read-only bridge is not configured."
+        )
     try:
         snapshot = await cherry_money.finance_snapshot(limit=limit)
     except Exception as exc:  # pragma: no cover - depends on external service
-        raise HTTPException(status_code=502, detail="Cherry Money read-only bridge unavailable.") from exc
+        raise HTTPException(
+            status_code=502, detail="Cherry Money read-only bridge unavailable."
+        ) from exc
     return {
         "read_only": True,
         "source": "Cherry Money /api/webmcp/bootstrap",

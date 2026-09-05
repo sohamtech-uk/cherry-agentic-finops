@@ -105,9 +105,7 @@ def test_capital_call_cannot_exceed_remaining_commitment() -> None:
     )
 
     assert analysis.action == PrivateMarketsAction.REQUEST_EVIDENCE
-    assert "commitment.call_exceeds_remaining" in {
-        finding.code for finding in analysis.findings
-    }
+    assert "commitment.call_exceeds_remaining" in {finding.code for finding in analysis.findings}
     assert any(item.code == "review_commitment_ledger" for item in analysis.work_items)
 
 

@@ -21,7 +21,9 @@ from app.private_markets import (
 _SETTLED_STATUSES = {"BOOKED", "CLEARED", "RECONCILED", "SETTLED"}
 
 
-def _find_commitment(call: CapitalCallExtraction, commitments: list[LPCommitment]) -> LPCommitment | None:
+def _find_commitment(
+    call: CapitalCallExtraction, commitments: list[LPCommitment]
+) -> LPCommitment | None:
     candidates = list(commitments)
     if call.lp_reference:
         candidates = [
@@ -31,16 +33,13 @@ def _find_commitment(call: CapitalCallExtraction, commitments: list[LPCommitment
         notice_matches = [
             item
             for item in candidates
-            if item.call_notice_id
-            and item.call_notice_id.casefold() == call.notice_id.casefold()
+            if item.call_notice_id and item.call_notice_id.casefold() == call.notice_id.casefold()
         ]
         if notice_matches:
             candidates = notice_matches
     if call.investor_name and candidates:
         name_matches = [
-            item
-            for item in candidates
-            if item.lp_name.casefold() == call.investor_name.casefold()
+            item for item in candidates if item.lp_name.casefold() == call.investor_name.casefold()
         ]
         if name_matches:
             candidates = name_matches
@@ -122,9 +121,7 @@ def _approved_bank_record(
         item for item in records if item.fund_name.casefold() == call.fund_name.casefold()
     ]
     approved = [
-        item
-        for item in fund_records
-        if (item.approval_status or "").strip().upper() == "APPROVED"
+        item for item in fund_records if (item.approval_status or "").strip().upper() == "APPROVED"
     ]
     return (approved[0] if len(approved) == 1 else None), fund_records
 
@@ -274,12 +271,9 @@ def analyse_private_markets_case_strict(
                 )
             )
 
-    approved_bank, fund_bank_records = _approved_bank_record(
-        call, dataset.approved_bank_details
-    )
+    approved_bank, fund_bank_records = _approved_bank_record(call, dataset.approved_bank_details)
     approved_count = sum(
-        (item.approval_status or "").strip().upper() == "APPROVED"
-        for item in fund_bank_records
+        (item.approval_status or "").strip().upper() == "APPROVED" for item in fund_bank_records
     )
     if approved_count > 1:
         findings.append(
@@ -294,7 +288,9 @@ def analyse_private_markets_case_strict(
     elif approved_bank is None:
         code = "bank.approved_record_missing"
         title = "No approved banking record available"
-        detail = "Do not release funds until a current explicitly approved banking record is attached."
+        detail = (
+            "Do not release funds until a current explicitly approved banking record is attached."
+        )
         if fund_bank_records:
             code = "bank.record_not_approved"
             title = "Banking record is not explicitly approved"
@@ -324,13 +320,11 @@ def analyse_private_markets_case_strict(
         )
     else:
         changed_account = bool(
-            approved_bank.account_last4
-            and approved_bank.account_last4 != call.account_last4
+            approved_bank.account_last4 and approved_bank.account_last4 != call.account_last4
         )
         changed_sort = bool(
             approved_bank.sort_code
-            and approved_bank.sort_code.replace("-", "")
-            != call.sort_code.replace("-", "")
+            and approved_bank.sort_code.replace("-", "") != call.sort_code.replace("-", "")
         )
         changed_beneficiary = bool(
             approved_bank.beneficiary
