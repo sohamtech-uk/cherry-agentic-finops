@@ -61,7 +61,7 @@ async def _read_upload_batch(files: list[UploadFile]) -> list[tuple[str, bytes, 
 async def fund_manager_health() -> dict[str, Any]:
     return {
         "status": "ok",
-        "stage": "classification",
+        "stage": "end_to_end_control_pipeline",
         "pipeline": [
             "multiple_files",
             "file_classification",
@@ -73,16 +73,23 @@ async def fund_manager_health() -> dict[str, Any]:
             "agentic_investigation",
             "fund_manager_dashboard",
         ],
-        "implemented_stages": ["multiple_files", "file_classification", "canonical_data_room"],
+        "implemented_stages": [
+            "multiple_files",
+            "file_classification",
+            "canonical_data_room",
+            "agent_determines_required_controls",
+            "deterministic_exception_engine",
+            "agentic_investigation",
+            "lineage",
+        ],
         "partially_implemented_stages": {
-            "agent_determines_required_controls": (
-                "POST /analyse builds a control plan for every recognised source, but only "
-                "financial_statement pairs are actually executable today; other types are "
-                "reported not_yet_available."
+            "position_cash_trade_nav_recon": (
+                "Statement, position, trade and cash pairs execute. NAV, capital-call, contract "
+                "and workbook adapters remain explicit needs_evidence plan entries."
             ),
-            "deterministic_exception_engine": (
-                "Issues are only produced for the one control that runs: period-over-period "
-                "financial statement comparison."
+            "human_decision": (
+                "The pipeline recommends a human action and exposes whether a decision is "
+                "required; durable decision recording remains a separate workflow capability."
             ),
         },
         "recognised_source_types": [
