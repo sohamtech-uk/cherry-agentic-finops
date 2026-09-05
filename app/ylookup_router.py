@@ -54,9 +54,9 @@ async def analyse_ylookup_dataset(
         File(description="Optional Ylookup PDF documents, including bank statements"),
     ] = None,
     workbooks: Annotated[
-        list[UploadFile],
+        list[UploadFile] | None,
         File(description="One or more Ylookup XLSX workbooks"),
-    ] = [],
+    ] = None,
     x_cherry_demo_token: Annotated[
         str | None,
         Header(alias="X-Cherry-Demo-Token"),
@@ -65,11 +65,12 @@ async def analyse_ylookup_dataset(
     _require_upload_access(x_cherry_demo_token)
 
     pdf_uploads = documents or []
-    if not workbooks:
+    workbook_uploads = workbooks or []
+    if not workbook_uploads:
         raise HTTPException(status_code=422, detail="At least one Excel workbook is required.")
     if len(pdf_uploads) > MAX_PDF_FILES:
         raise HTTPException(status_code=413, detail=f"Maximum {MAX_PDF_FILES} PDFs per batch.")
-    if len(workbooks) > MAX_EXCEL_FILES:
+    if len(workbook_uploads) > MAX_EXCEL_FILES:
         raise HTTPException(status_code=413, detail=f"Maximum {MAX_EXCEL_FILES} Excel files per batch.")
 
     max_bytes = settings.max_upload_mb * 1024 * 1024
@@ -88,7 +89,7 @@ async def analyse_ylookup_dataset(
             raise HTTPException(status_code=415, detail=f"{file_name!r} must be a PDF.")
         pdf_items.append((file_name, content))
 
-    for upload in workbooks:
+    for upload in workbook_uploads:
         file_name = upload.filename or "workbook.xlsx"
         content = await upload.read()
         if len(content) > max_bytes:
