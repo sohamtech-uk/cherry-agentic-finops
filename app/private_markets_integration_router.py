@@ -286,11 +286,11 @@ async def analyse_integrated_private_markets_case(
     dataset = _merge_datasets(datasets)
     excel_bundle_hash = _bundle_hash(workbook_items)
     json_hash = _sha256(json_content) if json_content is not None else NO_JSON_HASH
-    sources_excel = [
+    sources_excel: list[dict[str, str | None]] = [
         {"kind": "excel", "file_name": file_name, "sha256": _sha256(content)}
         for file_name, content in workbook_items
     ]
-    json_source = (
+    json_source: dict[str, str | None] | None = (
         {"kind": "json", "file_name": json_file_name, "sha256": json_hash}
         if json_file_name is not None
         else None
