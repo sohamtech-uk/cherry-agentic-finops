@@ -10,7 +10,6 @@ from pypdf import PdfReader
 
 from app.ylookup_datasets import analyse_ylookup_dataset_batch
 
-
 _PRIMARY_ACCOUNT_RE = re.compile(
     r"Account\s+number\s*[:\r\n ]+([0-9]{3}[- ]?[0-9]{6}[- ]?[0-9]{3})",
     re.IGNORECASE,
