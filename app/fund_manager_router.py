@@ -8,8 +8,8 @@ from typing import Annotated, Any
 from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
 
 from app.config import get_settings
+from app.fund_manager_agentic import run_agentic_analysis
 from app.fund_manager_classification import classify_and_validate_sources
-from app.fund_manager_orchestrator import run_analysis
 from app.rate_limit import limiter
 
 settings = get_settings()
@@ -60,35 +60,36 @@ async def _read_upload_batch(files: list[UploadFile]) -> list[tuple[str, bytes, 
 async def fund_manager_health() -> dict[str, Any]:
     return {
         "status": "ok",
-        "stage": "end_to_end_control_pipeline",
+        "stage": "end_to_end_agentic_control_pipeline",
+        "orchestration_mode": "agentic",
         "pipeline": [
             "multiple_files",
-            "file_classification",
-            "canonical_data_room",
-            "data_quality",
+            "agent_calls_file_classification",
+            "agent_reads_control_catalogue",
             "agent_determines_required_controls",
-            "position_cash_trade_nav_recon",
-            "deterministic_exception_engine",
+            "agent_invokes_deterministic_tools",
             "agentic_investigation",
+            "human_decision",
             "fund_manager_dashboard",
         ],
         "implemented_stages": [
             "multiple_files",
-            "file_classification",
-            "canonical_data_room",
+            "agent_calls_file_classification",
+            "agent_reads_control_catalogue",
             "agent_determines_required_controls",
-            "deterministic_exception_engine",
+            "agent_invokes_deterministic_tools",
             "agentic_investigation",
             "lineage",
         ],
         "partially_implemented_stages": {
-            "position_cash_trade_nav_recon": (
-                "Statement, position, trade and cash pairs execute. NAV, capital-call, contract "
-                "and workbook adapters remain explicit needs_evidence plan entries."
+            "control_adapters": (
+                "The agent can select every recognised control. Existing deterministic adapters "
+                "execute when available; unsupported controls remain adapter_pending rather than "
+                "being treated as passed."
             ),
             "human_decision": (
-                "The pipeline recommends a human action and exposes whether a decision is "
-                "required; durable decision recording remains a separate workflow capability."
+                "The agent recommends a human action and exposes whether a decision is required; "
+                "durable decision recording remains a separate workflow capability."
             ),
         },
         "recognised_source_types": [
@@ -109,9 +110,9 @@ async def fund_manager_health() -> dict[str, Any]:
             "cash_transactions",
         ],
         "control_boundary": (
-            "Classification only identifies what was uploaded; it never decides which controls "
-            "should run or what a control result means. An unrecognised file is marked unknown "
-            "and flagged for review, never guessed at."
+            "The ADK Fund Manager agent classifies evidence and chooses which registered controls "
+            "to invoke. Deterministic tools remain authoritative for financial calculations and "
+            "reconciliations; material decisions remain human-governed."
         ),
     }
 
@@ -128,12 +129,9 @@ async def classify_fund_evidence(
 ) -> dict[str, Any]:
     """Agent-facing classification tool for a mixed evidence batch.
 
-    This endpoint is not called by the browser UI. It is the first agent stage only: identify
-    what each file is
-    (NAV workbook, investor GL, capital-call notice, LPA, side letter, bank statement, financial
-    statement, positions/trades/cash JSON or CSV, ...), never what to do with it. Nothing here
-    runs a control or decides a control plan. An unrecognised file is returned as unknown with a
-    warning rather than guessed at.
+    The browser UI does not call this endpoint. The Fund Manager ADK flow performs classification
+    internally as its first tool call before it selects any control. This endpoint remains useful
+    for agent/tool integration and diagnostics.
     """
 
     _require_upload_access()
@@ -167,20 +165,28 @@ async def analyse_fund_evidence(
     reporting_period: Annotated[str | None, Form(description="Optional reporting period")] = None,
     as_of_date: Annotated[str | None, Form(description="Optional as-of date, YYYY-MM-DD")] = None,
 ) -> dict[str, Any]:
-    """Classify the uploaded evidence, decide which control each source needs (the "agent
-    determines required controls" stage), and run whichever of those controls can execute
-    end-to-end from this upload alone. Returns a QC-report-shaped result: overall status, issue
-    counts, the control plan (including controls that were recognised but did not run, and why)
-    and any issues actually found, each with evidence and a recommended action.
+    """Run the uploaded batch through the ADK Fund Manager control-orchestration agent.
 
-    This never fabricates a result: a control that needs evidence this endpoint doesn't yet
-    extract (e.g. a NAV workbook, an investor GL) is reported as not_yet_available in the control
-    plan rather than silently skipped or guessed at.
+    The agent must classify the evidence first, read the closed control catalogue, choose the
+    applicable controls, and invoke deterministic tools for calculations/reconciliations. The agent
+    may investigate and explain tool outputs but cannot override deterministic financial results or
+    silently pass a control that lacks evidence or an implementation.
     """
 
     _require_upload_access()
     items = await _read_upload_batch(files)
-    result = run_analysis(items)
+    try:
+        result = await run_agentic_analysis(
+            items,
+            fund_name=fund_name,
+            reporting_period=reporting_period,
+            as_of_date=as_of_date,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Fund Manager agent could not complete the control review: {exc}",
+        ) from exc
 
     return {
         "fund_name": fund_name,
