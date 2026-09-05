@@ -41,9 +41,7 @@ _STATEMENT_DATE_FORMAT = "%d %b %Y"
 
 _HEADER_PATTERNS: dict[str, re.Pattern[str]] = {
     "account_name": re.compile(r"Account name (.+?) Closing ledger balance brought forward"),
-    "opening_balance": re.compile(
-        r"Closing ledger balance brought forward ([\d,]+\.\d{2}|\d+)"
-    ),
+    "opening_balance": re.compile(r"Closing ledger balance brought forward ([\d,]+\.\d{2}|\d+)"),
     "account_number": re.compile(r"Account number (\S+) From"),
     "bank_name": re.compile(r"Bank name (.+?) Closing available balance brought forward"),
     "currency": re.compile(r"Currency (\S+) From"),

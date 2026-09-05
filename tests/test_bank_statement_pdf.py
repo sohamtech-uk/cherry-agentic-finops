@@ -65,8 +65,28 @@ def test_parse_header_reports_missing_fields_without_raising() -> None:
 def test_rows_to_transactions_pairs_data_and_narrative_rows() -> None:
     rows = [
         TABLE_HEADER_ROW,
-        ["NONREF", "NONREF", "TFR-", "31 Mar 2026", "", "-0.44", "13,217,773.59", "17:46", "31 Mar 2026"],
-        ["Narrative", "CHARGES FOR 2, OUTWARD SEPA PAYMENT", None, None, None, None, None, None, None],
+        [
+            "NONREF",
+            "NONREF",
+            "TFR-",
+            "31 Mar 2026",
+            "",
+            "-0.44",
+            "13,217,773.59",
+            "17:46",
+            "31 Mar 2026",
+        ],
+        [
+            "Narrative",
+            "CHARGES FOR 2, OUTWARD SEPA PAYMENT",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
         [
             "10716RS62GWQ",
             "CEPHALUS TRF",
@@ -97,7 +117,17 @@ def test_rows_to_transactions_pairs_data_and_narrative_rows() -> None:
 def test_rows_to_transactions_skips_balance_checkpoint_rows_without_narrative() -> None:
     rows = [
         TABLE_HEADER_ROW,
-        ["Balance as at close 31 Mar 2026 103,014.97", None, None, None, None, None, None, None, None],
+        [
+            "Balance as at close 31 Mar 2026 103,014.97",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
         [
             "TT ABC414K0BGIBU",
             "WILLOWBANK TRF",
@@ -109,8 +139,28 @@ def test_rows_to_transactions_skips_balance_checkpoint_rows_without_narrative() 
             "10:45",
             "31 Mar 2026",
         ],
-        ["Narrative", "COMMISSION GBP 5,21, 21398DX37I23", None, None, None, None, None, None, None],
-        ["Balance brought forward 30 Mar 2026 46,667.40", None, None, None, None, None, None, None, None],
+        [
+            "Narrative",
+            "COMMISSION GBP 5,21, 21398DX37I23",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
+        [
+            "Balance brought forward 30 Mar 2026 46,667.40",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
     ]
 
     transactions, warnings = _rows_to_transactions(rows)
@@ -150,7 +200,17 @@ def test_to_fund_cash_transactions_maps_credit_and_debit_correctly() -> None:
     rows = [
         TABLE_HEADER_ROW,
         ["REF1", "CP", "TFR+", "31 Mar 2026", "100.00", "", "100.00", "09:00", "31 Mar 2026"],
-        ["Narrative", "CAPITAL CALL NCGFIII-CALL-2026-03", None, None, None, None, None, None, None],
+        [
+            "Narrative",
+            "CAPITAL CALL NCGFIII-CALL-2026-03",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
         ["REF2", "CP", "TFR-", "01 Apr 2026", "", "-40.00", "60.00", "09:05", "01 Apr 2026"],
         ["Narrative", "FEE PAYMENT", None, None, None, None, None, None, None],
     ]
