@@ -18,7 +18,7 @@ def _workflow_exceptions(result: dict[str, Any]) -> list[dict[str, Any]]:
     for workflow in result.get("workflows", []):
         if not isinstance(workflow, dict):
             continue
-        exceptions = workflow.get("exceptions", workflow.get("sample_exceptions", []))
+        exceptions = workflow.get("exceptions") or workflow.get("sample_exceptions") or []
         for item in exceptions:
             if not isinstance(item, dict):
                 continue
@@ -62,6 +62,8 @@ def _autosize(workbook: Workbook) -> None:
 def build_ylookup_excel_report(result: dict[str, Any]) -> bytes:
     workbook = Workbook()
     summary = workbook.active
+    if summary is None:
+        raise RuntimeError("Could not initialise the report workbook.")
     summary.title = "Summary"
     summary.append(["Cherry FundOps — Ylookup Review Report"])
     summary["A1"].font = Font(bold=True, size=16)
@@ -253,7 +255,7 @@ def build_ylookup_pdf_report(result: dict[str, Any]) -> bytes:
             story.append(Table(metrics, colWidths=[60 * mm, 30 * mm]))
             story.append(Spacer(1, 8))
 
-        exceptions = workflow.get("exceptions", workflow.get("sample_exceptions", []))
+        exceptions = workflow.get("exceptions") or workflow.get("sample_exceptions") or []
         if exceptions:
             story.append(Paragraph("Exception review queue", styles["Heading3"]))
         for item in exceptions:
