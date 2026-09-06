@@ -1,3 +1,4 @@
+# ruff: noqa: E402, I001
 from __future__ import annotations
 
 import json
@@ -7,6 +8,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 from uuid import uuid4
+
+import neatlogs
+
+from app.observability import initialize_neatlogs
+
+initialize_neatlogs()
 
 from google.adk.agents import Agent
 from google.adk.runners import Runner
@@ -277,35 +284,38 @@ async def run_agentic_analysis(
             user_id=USER_ID,
             session_id=session_id,
         )
-        runner = Runner(
-            agent=fund_manager_agent,
-            app_name=APP_NAME,
-            session_service=session_service,
+        runner = neatlogs.wrap(
+            Runner(
+                agent=fund_manager_agent,
+                app_name=APP_NAME,
+                session_service=session_service,
+            )
         )
         message = types.Content(role="user", parts=[types.Part(text=prompt)])
         final_text = ""
         tool_trace: list[str] = []
 
         try:
-            async for event in runner.run_async(
-                user_id=USER_ID,
-                session_id=session_id,
-                new_message=message,
-            ):
-                content = getattr(event, "content", None)
-                for part in getattr(content, "parts", []) or []:
-                    function_call = getattr(part, "function_call", None)
-                    if function_call and getattr(function_call, "name", None):
-                        tool_trace.append(str(function_call.name))
-                is_final = getattr(event, "is_final_response", None)
-                if callable(is_final) and is_final() and content:
-                    texts = [
-                        str(part.text)
-                        for part in getattr(content, "parts", []) or []
-                        if getattr(part, "text", None)
-                    ]
-                    if texts:
-                        final_text = "\n".join(texts)
+            with neatlogs.identify(session_id=session_id):
+                async for event in runner.run_async(
+                    user_id=USER_ID,
+                    session_id=session_id,
+                    new_message=message,
+                ):
+                    content = getattr(event, "content", None)
+                    for part in getattr(content, "parts", []) or []:
+                        function_call = getattr(part, "function_call", None)
+                        if function_call and getattr(function_call, "name", None):
+                            tool_trace.append(str(function_call.name))
+                    is_final = getattr(event, "is_final_response", None)
+                    if callable(is_final) and is_final() and content:
+                        texts = [
+                            str(part.text)
+                            for part in getattr(content, "parts", []) or []
+                            if getattr(part, "text", None)
+                        ]
+                        if texts:
+                            final_text = "\n".join(texts)
         except RuntimeError:
             raise
         except Exception as exc:

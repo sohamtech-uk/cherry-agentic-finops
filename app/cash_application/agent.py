@@ -5,6 +5,8 @@ from contextlib import suppress
 from typing import Any, Literal, Protocol, cast
 
 import httpx
+import neatlogs
+from opentelemetry.trace import Status, StatusCode
 from pydantic import BaseModel, Field
 
 from app.cash_application.review import ControllerReviewPacket, ReviewAction
@@ -92,42 +94,102 @@ class VercelGatewayClient:
             "temperature": 0,
             "max_tokens": 700,
         }
-        try:
-            async with httpx.AsyncClient(
-                timeout=self.settings.cash_agent_timeout_seconds
-            ) as client:
-                response = await client.post(
-                    "https://ai-gateway.vercel.sh/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {token}"},
-                    json=payload,
+        with neatlogs.trace(
+            "vercel_ai_gateway.chat.completions",
+            kind="LLM",
+            **{"neatlogs.internal": False},
+        ) as span:
+            span.set_attribute("neatlogs.llm.provider", "vercel_ai_gateway")
+            span.set_attribute("neatlogs.llm.model_name", self.model)
+            span.set_attribute("input.value", json.dumps(payload, sort_keys=True))
+            for index, message in enumerate(messages):
+                span.set_attribute(
+                    f"neatlogs.llm.input_messages.{index}.role",
+                    str(message.get("role", "")),
                 )
-        except httpx.HTTPError as exc:
-            raise AgentInvestigationError(
-                "AGENT_PROVIDER_UNAVAILABLE",
-                "The investigation provider could not be reached; no accounting state changed.",
-            ) from exc
-        if response.status_code >= 400:
-            provider_code = f"HTTP_{response.status_code}"
-            with suppress(ValueError):
-                provider_code = response.json().get("error", {}).get("code") or provider_code
-            raise AgentInvestigationError(
-                "AGENT_PROVIDER_UNAVAILABLE",
-                f"The investigation provider rejected the request ({provider_code}); "
-                "no accounting state changed.",
-            )
-        try:
-            decoded: Any = response.json()
-        except (TypeError, ValueError) as exc:
-            raise AgentInvestigationError(
-                "AGENT_INVALID_RESPONSE",
-                "The investigation provider returned invalid JSON; no accounting state changed.",
-            ) from exc
-        if not isinstance(decoded, dict):
-            raise AgentInvestigationError(
-                "AGENT_INVALID_RESPONSE",
-                "The investigation provider returned a non-object response.",
-            )
-        return cast(dict[str, Any], decoded)
+                span.set_attribute(
+                    f"neatlogs.llm.input_messages.{index}.content",
+                    json.dumps(message.get("content", ""), sort_keys=True),
+                )
+            try:
+                async with httpx.AsyncClient(
+                    timeout=self.settings.cash_agent_timeout_seconds
+                ) as client:
+                    response = await client.post(
+                        "https://ai-gateway.vercel.sh/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {token}"},
+                        json=payload,
+                    )
+            except httpx.HTTPError as exc:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, str(exc)))
+                raise AgentInvestigationError(
+                    "AGENT_PROVIDER_UNAVAILABLE",
+                    "The investigation provider could not be reached; no accounting state changed.",
+                ) from exc
+            if response.status_code >= 400:
+                provider_code = f"HTTP_{response.status_code}"
+                with suppress(ValueError):
+                    provider_code = response.json().get("error", {}).get("code") or provider_code
+                error = AgentInvestigationError(
+                    "AGENT_PROVIDER_UNAVAILABLE",
+                    f"The investigation provider rejected the request ({provider_code}); "
+                    "no accounting state changed.",
+                )
+                span.record_exception(error)
+                span.set_status(Status(StatusCode.ERROR, error.message))
+                raise error
+            try:
+                decoded: Any = response.json()
+            except (TypeError, ValueError) as exc:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, str(exc)))
+                raise AgentInvestigationError(
+                    "AGENT_INVALID_RESPONSE",
+                    "The investigation provider returned invalid JSON; "
+                    "no accounting state changed.",
+                ) from exc
+            if not isinstance(decoded, dict):
+                error = AgentInvestigationError(
+                    "AGENT_INVALID_RESPONSE",
+                    "The investigation provider returned a non-object response.",
+                )
+                span.record_exception(error)
+                span.set_status(Status(StatusCode.ERROR, error.message))
+                raise error
+            decoded_dict = cast(dict[str, Any], decoded)
+            span.set_attribute("output.value", json.dumps(decoded_dict, sort_keys=True))
+            choices = decoded_dict.get("choices") or []
+            if choices and isinstance(choices[0], dict):
+                output_message = choices[0].get("message")
+                span.set_attribute(
+                    "neatlogs.llm.output_messages.0.role",
+                    (
+                        str(output_message.get("role", "assistant"))
+                        if isinstance(output_message, dict)
+                        else "assistant"
+                    ),
+                )
+                span.set_attribute(
+                    "neatlogs.llm.output_messages.0.content",
+                    json.dumps(output_message, sort_keys=True),
+                )
+                if choices[0].get("finish_reason") is not None:
+                    span.set_attribute(
+                        "neatlogs.llm.finish_reason", str(choices[0]["finish_reason"])
+                    )
+            usage = decoded_dict.get("usage")
+            if isinstance(usage, dict):
+                for source, target in (
+                    ("prompt_tokens", "prompt"),
+                    ("completion_tokens", "completion"),
+                    ("total_tokens", "total"),
+                ):
+                    if isinstance(usage.get(source), int):
+                        span.set_attribute(
+                            f"neatlogs.llm.token_count.{target}", usage[source]
+                        )
+        return decoded_dict
 
 
 def _tool(name: str, description: str, parameters: dict[str, Any]) -> dict[str, Any]:
@@ -320,6 +382,7 @@ class CashApplicationAgent:
     def __init__(self, client: ChatCompletionClient | None = None) -> None:
         self.client = client or VercelGatewayClient()
 
+    @neatlogs.span(kind="WORKFLOW", name="cash-application-investigation")
     async def investigate(self, packet: ControllerReviewPacket) -> AgentInvestigationResult:
         if packet.recorded_decision is not None:
             raise AgentInvestigationError(

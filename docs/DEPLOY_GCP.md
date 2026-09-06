@@ -72,11 +72,13 @@ After the first deployment, configure GitHub repository environment variables:
 The workflow `.github/workflows/deploy.yml` uses short-lived Workload Identity Federation tokens.
 It intentionally avoids long-lived service-account JSON keys.
 
-The production environment must also contain the `GOOGLE_API_KEY` secret. The workflow deploys
+The production environment must also contain the `GOOGLE_API_KEY` and `NEATLOGS_API_KEY` secrets.
+The workflow deploys
 the same restricted-IAM runtime configuration as `scripts/deploy-gcplab.sh`:
 
 - `GOOGLE_GENAI_USE_VERTEXAI=false`;
 - `GOOGLE_API_KEY` is passed to Cloud Run without being printed;
+- `NEATLOGS_API_KEY` enables judge-visible agent traces in the Neatlogs workspace;
 - `CHERRY_PERSISTENCE_BACKEND=firestore`;
 - Fund Manager case state is stored in `fund_manager_cases`, with uploaded evidence split into
   integrity-checked Firestore chunks so the workflow survives Cloud Run instance changes;

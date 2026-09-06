@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
+import neatlogs
 from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel
 
@@ -368,12 +369,13 @@ async def plan_fund_manager_case(
     case = _case_or_404(case_id)
     _require_stage(case, {"classified"})
     try:
-        case.plan = await plan_case_controls(
-            case.classification,
-            fund_name=case.fund_name,
-            reporting_period=case.reporting_period,
-            as_of_date=case.as_of_date,
-        )
+        with neatlogs.identify(session_id=case_id):
+            case.plan = await plan_case_controls(
+                case.classification,
+                fund_name=case.fund_name,
+                reporting_period=case.reporting_period,
+                as_of_date=case.as_of_date,
+            )
     except RuntimeError as exc:
         raise HTTPException(
             status_code=502,
@@ -400,11 +402,12 @@ async def execute_fund_manager_case(
     if case.plan is None:
         raise HTTPException(status_code=409, detail="The case does not contain a control plan.")
     try:
-        case.execution = await execute_case_controls(
-            case.files,
-            case.classification,
-            case.plan,
-        )
+        with neatlogs.identify(session_id=case_id):
+            case.execution = await execute_case_controls(
+                case.files,
+                case.classification,
+                case.plan,
+            )
     except RuntimeError as exc:
         raise HTTPException(
             status_code=502,
@@ -431,7 +434,8 @@ async def investigate_fund_manager_case(
     if case.execution is None:
         raise HTTPException(status_code=409, detail="The case does not contain execution results.")
     try:
-        case.investigation = await investigate_case_execution(case.execution)
+        with neatlogs.identify(session_id=case_id):
+            case.investigation = await investigate_case_execution(case.execution)
     except RuntimeError as exc:
         raise HTTPException(
             status_code=502,

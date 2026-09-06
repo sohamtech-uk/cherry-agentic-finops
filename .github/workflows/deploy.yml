@@ -30,6 +30,7 @@ jobs:
       - name: Validate deployment configuration
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          NEATLOGS_API_KEY: ${{ secrets.NEATLOGS_API_KEY }}
           CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN: ${{ secrets.CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN }}
           WIF_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
@@ -39,6 +40,7 @@ jobs:
           test -n "${WIF_PROVIDER}" || { echo "Missing production variable GCP_WORKLOAD_IDENTITY_PROVIDER." >&2; exit 1; }
           test -n "${DEPLOY_SERVICE_ACCOUNT}" || { echo "Missing production variable GCP_DEPLOY_SERVICE_ACCOUNT." >&2; exit 1; }
           test -n "${GOOGLE_API_KEY}" || { echo "Missing production secret GOOGLE_API_KEY." >&2; exit 1; }
+          test -n "${NEATLOGS_API_KEY}" || { echo "Missing production secret NEATLOGS_API_KEY." >&2; exit 1; }
           test -n "${CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN}" || { echo "Missing production secret CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN." >&2; exit 1; }
           echo "Target project: ${PROJECT_ID}"
           echo "Target service: ${SERVICE} (${REGION})"
@@ -62,13 +64,7 @@ jobs:
           test -n "${ACTIVE_ACCOUNT}" || { echo "Google Cloud authentication produced no active account." >&2; exit 1; }
           echo "Authenticated deployment identity: ${ACTIVE_ACCOUNT}"
           echo "Verified target project access: ${PROJECT_ID}"
-          gcloud firestore databases describe \
-            --database='(default)' \
-            --project="${PROJECT_ID}" \
-            --format='value(name)' >/dev/null || {
-              echo "The default Firestore database is missing or inaccessible in ${PROJECT_ID}." >&2
-              exit 1
-            }
+          echo "Firestore availability will be verified by the deployed service health check."
 
       - name: Configure Artifact Registry authentication
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
@@ -97,6 +93,8 @@ jobs:
             CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN=${{ secrets.CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN }}
             GOOGLE_GENAI_USE_VERTEXAI=false
             GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
+            NEATLOGS_API_KEY=${{ secrets.NEATLOGS_API_KEY }}
+            NEATLOGS_WORKFLOW_NAME=fund-manager-control-review
             GOOGLE_CLOUD_PROJECT=${{ env.PROJECT_ID }}
             GOOGLE_CLOUD_LOCATION=global
           flags: >-

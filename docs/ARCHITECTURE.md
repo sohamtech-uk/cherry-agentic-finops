@@ -1,91 +1,218 @@
-# Cherry Agent architecture
+# Cherry CFO — Syndicate architecture
 
 ## Design principle
 
-**Use AI for understanding and planning; use deterministic software for financial authority.**
+**Use AI for understanding, planning and investigation; use deterministic software for financial authority; keep final judgement human.**
 
-A model can extract an invoice, explain a likely match and coordinate tools. It cannot waive a
-currency mismatch, reuse a reconciled transaction, override a material amount variance or invent a
-human approval.
+For the Syndicate Track 2 submission, the judge-facing workflow is the **NAV Quality Controller**. The system is designed to help a fund controller turn a fragmented close pack into an evidence-led review without allowing a model to invent authoritative NAV figures or silently change accounting state.
+
+## End-to-end flow
+
+```text
+mixed NAV evidence
+      ↓
+classify + validate
+      ↓
+evidence inventory + lineage
+      ↓
+readiness: which controls are supported?
+      ↓
+deterministic NAV / GL controls
+      ↓
+structured findings + exceptions
+      ↓
+agentic investigation / remediation summary
+      ↓
+human NAV decision
+      ↓
+audit-ready case + document view
+```
 
 ## Components
 
-### 1. Document Agent
+### 1. Dynamic NAV workbench
 
-Gemini 3.7 Flash receives PDF/image bytes and returns a schema-constrained `DocumentExtraction`.
-Pydantic validates required fields, money values, currency and confidence. The prompt explicitly
-forbids invented financial data.
+The browser UI is served from `app/static/` and presents two views of the same case:
 
-### 2. Categorisation Agent
+- **Canvas** — uploaded evidence and generated finance objects appear as connected, draggable cards.
+- **Document** — the case becomes a controller-style review with evidence, controls, findings and decision.
 
-The extraction includes a conservative category and VAT-treatment suggestion. These are visibly
-labelled suggestions rather than tax advice. A future Cherry Money integration can map them to each
-organisation's chart of accounts.
+The browser never decides financial truth. It sends evidence and actions to the API and renders returned state.
 
-### 3. Reconciliation Agent
+### 2. Evidence intake and classification
 
-Candidate scoring is deterministic and explainable:
+`app/fund_manager_classification.py` classifies mixed evidence using structure where possible instead of trusting filenames alone.
 
-| Evidence | Maximum score |
-|---|---:|
-| Amount | 45 |
-| Date proximity | 20 |
-| Invoice/payment reference | 20 |
-| Supplier/merchant similarity | 10 |
-| Currency | 5 |
+The inventory preserves source metadata such as:
 
-Each candidate exposes its score, amount variance and factor-level explanation.
+- source ID;
+- filename;
+- detected evidence type;
+- validation state;
+- warnings / validation errors; and
+- SHA-256 identity.
 
-### 4. Risk & Approval Agent
+Unrecognised or invalid evidence remains visible for review instead of being guessed into a supported type.
 
-The policy chooses exactly one bounded action:
+### 3. NAV readiness
 
-- `auto_reconcile`
-- `require_approval`
+`app/fund_manager_nav_controller.py` asks a deliberately narrow question before reconciliation:
+
+> **What can be checked from the evidence actually present?**
+
+Readiness identifies supported inputs such as an administrator NAV summary, investor-level GL and structured side-letter rules, then enables only the controls that can be grounded in those inputs.
+
+Missing optional evidence skips dependent checks or becomes an explicit gap. It is never fabricated.
+
+### 4. Deterministic NAV controls
+
+`app/nav_quality.py` and related control modules own authoritative arithmetic and reconciliation logic.
+
+Examples include:
+
+- balance-sheet footing;
+- NAV bridge footing;
+- independent NAV recalculation where supported;
+- investor-level GL source validation;
+- balance-sheet / source-ledger comparisons;
+- investor-capital reconciliation; and
+- cited side-letter rule checks where supported.
+
+Money calculations use deterministic code. The model cannot turn a failed control into a pass.
+
+### 5. Agentic exception review
+
+After deterministic controls run, the bounded agent layer can:
+
+- explain findings;
+- group related exceptions;
+- identify evidence gaps;
+- summarise root causes;
+- prepare a remediation package; and
+- recommend a supported next action.
+
+The agent operates on server-provided facts. It does not own the NAV calculation or final financial decision.
+
+### 6. Human decision gate
+
+A person records the final case decision. Current NAV routes include:
+
+- `approve_nav`
+- `approve_with_exception`
 - `request_evidence`
+- `return_to_administrator`
+- `escalate`
 
-The policy blocks automation for duplicate use, currency mismatch, material amount variance, weak
-evidence, low extraction confidence or high transaction value. Human approval records both the
-identity and note before the state machine resumes.
+This is a workflow state, not an error fallback.
 
-### 5. Evidence Agent
+### 7. Evidence lineage and auditability
 
-Each material transition contains the previous event hash. The current event hash is computed from a
-canonical JSON representation, producing a tamper-evident SHA-256 chain. The evidence ZIP contains a
-manifest with individual file digests.
+The workbench surfaces source IDs and SHA-256 evidence identity so a reviewer can trace a finding back to the source evidence used by the control.
 
-## Runtime flow
+Specialist workflows elsewhere in the repository also maintain hash-linked audit state. The Syndicate product principle is the same: **a result should be inspectable, attributable and reproducible.**
+
+### 8. Agent orchestration and observability
+
+- **AO (Agent Orchestrator)** was used to coordinate focused engineering sessions during the hackathon. Session evidence is recorded in `SYNDICATE_BUILD_LOG.md`.
+- **Codex** was used as an engineering/orchestration agent during implementation.
+- **Google ADK / Gemini** provides bounded model-backed planning or investigation where configured.
+- **Neatlogs** instrumentation is available for tracing agent workflows when `NEATLOGS_API_KEY` is configured.
+
+The deterministic NAV workflow remains the financial authority even when model access or observability is unavailable.
+
+## System diagram
 
 ```mermaid
-sequenceDiagram
-  participant Event as Invoice / bank event
-  participant Gemini as Document Agent (Gemini)
-  participant Match as Reconciliation controls
-  participant Risk as Risk policy
-  participant Human as Human approver
-  participant Audit as Evidence Agent
+flowchart TB
+    subgraph Browser[Browser]
+        U[Multi-source upload]
+        C[Dynamic Canvas]
+        D[Document View]
+        I[Evidence Inspector]
+    end
 
-  Event->>Gemini: PDF/image
-  Gemini-->>Match: Structured extraction
-  Event->>Match: Candidate bank transactions
-  Match-->>Risk: Ranked evidence and variance
-  alt bounded high-confidence operation
-    Risk->>Audit: Auto-reconcile
-  else high value or uncertainty
-    Risk->>Human: Pause and present evidence
-    Human->>Audit: Approve or reject explicitly
-  else material inconsistency
-    Risk->>Audit: Request missing/corrected evidence
-  end
-  Audit-->>Event: Hash-chained evidence pack
+    subgraph CaseAPI[Fund Manager NAV Case API]
+        CASE[Case service]
+        READY[Readiness endpoint]
+        RECON[Reconcile endpoint]
+        REVIEW[Review endpoint]
+        DECIDE[Decision endpoint]
+    end
+
+    subgraph Evidence[Evidence Layer]
+        CLASS[Classification + validation]
+        HASH[Source ID + SHA-256 lineage]
+    end
+
+    subgraph Finance[Deterministic Finance Controls]
+        NAV[NAV arithmetic]
+        GL[Investor GL controls]
+        CONTRACT[Contract / side-letter rules]
+        EX[Structured findings]
+    end
+
+    subgraph Agent[Bounded Agent Layer]
+        ADK[Google ADK / Gemini]
+        INVEST[Exception investigation]
+        TRACE[Neatlogs tracing]
+    end
+
+    U --> CASE
+    CASE --> CLASS
+    CLASS --> HASH
+    CLASS --> READY
+    READY --> NAV
+    READY --> GL
+    CONTRACT --> NAV
+    NAV --> EX
+    GL --> EX
+    EX --> RECON
+    RECON --> INVEST
+    ADK --> INVEST
+    INVEST --> REVIEW
+    TRACE -. observes .-> INVEST
+    REVIEW --> DECIDE
+    CASE --> C
+    HASH --> I
+    RECON --> C
+    REVIEW --> C
+    DECIDE --> C
+    CASE --> D
 ```
 
-## Google Cloud
+## API contract
 
-- Cloud Run executes a stateless container.
-- Firestore holds durable workflows and audit events.
-- Pub/Sub publishes workflow-state events for future asynchronous workers.
-- Cloud Storage stores versioned evidence ZIPs.
-- Cloud Run's service account receives only Vertex AI user, Datastore user, object admin on evidence
-  storage, Pub/Sub publisher and logging permissions.
-- No JSON service-account key is required; Cloud Run uses Application Default Credentials.
+```text
+POST /api/fund-manager/cases
+POST /api/fund-manager/cases/{case_id}/evidence
+GET  /api/fund-manager/cases/{case_id}
+POST /api/fund-manager/cases/{case_id}/nav/readiness
+POST /api/fund-manager/cases/{case_id}/nav/reconcile
+POST /api/fund-manager/cases/{case_id}/nav/review
+POST /api/fund-manager/cases/{case_id}/nav/decision
+```
+
+## Public deployment
+
+The Syndicate workbench is deployed at:
+
+```text
+https://cherry-cfo-canvas.vercel.app
+```
+
+The hosted demo includes browser-side transport optimisation for large Excel evidence so the UI can work within serverless request-size limits. That optimisation is a transport concern, not a financial control: the NAV controller still validates the structured workbook presented to the backend.
+
+## Financial boundary
+
+The submission deliberately does **not** expose unrestricted financial autonomy.
+
+- No model-generated number becomes an authoritative NAV merely because the model is confident.
+- Missing evidence cannot be silently substituted.
+- The agent cannot override deterministic control state.
+- The workbench does not initiate payments.
+- The workbench does not silently amend an official NAV or production ledger.
+- Human reviewers retain the final sign-off decision.
+
+This is the architecture behind the Syndicate message:
+
+> **Cherry CFO does the repetitive finance work required to reach a decision; humans remain responsible for the decisions that matter.**

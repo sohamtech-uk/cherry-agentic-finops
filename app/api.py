@@ -1,10 +1,15 @@
+# ruff: noqa: E402, I001
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, cast
 
+import neatlogs
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -13,12 +18,17 @@ from pydantic import TypeAdapter, ValidationError
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+from app.observability import initialize_neatlogs
+
+initialize_neatlogs()
+
 from app.cash_application.router import router as controller_review_router
 from app.config import get_settings
 from app.container import get_engine
 from app.contract_router import router as contract_router
 from app.document_ai import GeminiDocumentExtractor, GeminiUnavailable
 from app.fund_manager_nav_router import router as fund_manager_nav_router
+from app.fund_manager_report_router import router as fund_manager_report_router
 from app.fund_manager_router import router as fund_manager_router
 from app.models import ApprovalRequest, BankTransaction, RejectionRequest
 from app.nav_quality_router import router as nav_quality_router
@@ -43,6 +53,14 @@ engine = get_engine()
 extractor = GeminiDocumentExtractor(settings)
 transaction_adapter = TypeAdapter(list[BankTransaction])
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    yield
+    await asyncio.to_thread(neatlogs.flush)
+    await asyncio.to_thread(neatlogs.shutdown)
+
+
 app = FastAPI(
     title="Cherry Agent API",
     version="0.1.0",
@@ -52,6 +70,7 @@ app = FastAPI(
     ),
     docs_url="/api/docs",
     redoc_url="/api/redoc",
+    lifespan=lifespan,
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, cast(Any, _rate_limit_exceeded_handler))
@@ -71,6 +90,7 @@ app.include_router(contract_router)
 app.include_router(statement_review_router)
 app.include_router(controller_review_router)
 app.include_router(fund_manager_router)
+app.include_router(fund_manager_report_router)
 app.include_router(fund_manager_nav_router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

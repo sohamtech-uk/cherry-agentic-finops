@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any
+from typing import Any, cast
 
+import neatlogs
 from fastapi import APIRouter, HTTPException, Query
 
 from app.cash_application.agent import (
@@ -118,7 +119,8 @@ async def investigate_review_case(case_id: str) -> dict[str, Any]:
 
     try:
         packet = get_controller_review_service().get_packet(case_id)
-        result = await get_cash_application_agent().investigate(packet)
+        with neatlogs.identify(session_id=case_id):
+            result = await get_cash_application_agent().investigate(packet)
     except ControllerReviewError as exc:
         _raise_http_error(exc)
     except AgentInvestigationError as exc:
@@ -129,7 +131,7 @@ async def investigate_review_case(case_id: str) -> dict[str, Any]:
             status_code=status_code,
             detail={"code": exc.code, "message": exc.message},
         ) from exc
-    return result.model_dump(mode="json")
+    return cast(dict[str, Any], result.model_dump(mode="json"))
 
 
 @router.post("/cases/{case_id}/decisions")
