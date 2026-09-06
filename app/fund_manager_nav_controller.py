@@ -86,19 +86,23 @@ def _probe_nav_inputs(case: FundManagerCase) -> dict[str, Any]:
                 except (ValueError, ValidationError, json.JSONDecodeError):
                     pass
 
-        if lowered.endswith(".xlsx") and ledger is None:
-            if source and source.get("detected_type") == "investor_gl":
-                try:
-                    parsed_ledger = parse_investor_level_gl_workbook(content)
-                    ledger = {
-                        "source_id": source_id,
-                        "filename": filename,
-                        "period_start": parsed_ledger.period_start.isoformat(),
-                        "period_end": parsed_ledger.period_end.isoformat(),
-                        "warning_count": len(parsed_ledger.warnings),
-                    }
-                except (ValueError, ValidationError):
-                    pass
+        if (
+            lowered.endswith(".xlsx")
+            and ledger is None
+            and source
+            and source.get("detected_type") == "investor_gl"
+        ):
+            try:
+                parsed_ledger = parse_investor_level_gl_workbook(content)
+                ledger = {
+                    "source_id": source_id,
+                    "filename": filename,
+                    "period_start": parsed_ledger.period_start.isoformat(),
+                    "period_end": parsed_ledger.period_end.isoformat(),
+                    "warning_count": len(parsed_ledger.warnings),
+                }
+            except (ValueError, ValidationError):
+                pass
 
     return {
         "nav_summary": nav_summary,
@@ -326,18 +330,14 @@ def get_case_nav_history(case: FundManagerCase) -> dict[str, Any]:
     if not legal_entity or not period_end:
         return {
             "available": False,
-            "reason": (
-                "NAV reconciliation did not return legal entity and period end."
-            ),
+            "reason": "NAV reconciliation did not return legal entity and period end.",
             "round_reduction_target": ROUND_REDUCTION_TARGET,
         }
     summary = get_nav_review_history_store().case_history(legal_entity, period_end)
     if summary is None:
         return {
             "available": False,
-            "reason": (
-                "No NAV review history has been recorded for this fund and period."
-            ),
+            "reason": "No NAV review history has been recorded for this fund and period.",
             "round_reduction_target": ROUND_REDUCTION_TARGET,
         }
     return {
