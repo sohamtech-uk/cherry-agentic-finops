@@ -183,7 +183,8 @@ def build_nav_readiness(case: FundManagerCase) -> dict[str, Any]:
         "round_reduction_target": ROUND_REDUCTION_TARGET,
         "control_boundary": (
             "Readiness determines which supported NAV checks can run from the evidence supplied. "
-            "Missing optional evidence skips dependent checks rather than blocking all reconciliation."
+            "Missing optional evidence skips dependent checks rather than blocking all "
+            "reconciliation."
         ),
     }
 
