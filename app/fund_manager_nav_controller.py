@@ -56,7 +56,7 @@ def _probe_nav_inputs(case: FundManagerCase) -> dict[str, Any]:
 
         lowered = filename.casefold()
         if lowered.endswith(".json"):
-            if nav_summary is None:
+            if nav_summary is None and source and source.get("detected_type") == "nav_summary":
                 try:
                     parsed = nav_quality.parse_administrator_nav_summary(content)
                     nav_summary = {
@@ -69,7 +69,7 @@ def _probe_nav_inputs(case: FundManagerCase) -> dict[str, Any]:
                     continue
                 except (ValueError, ValidationError, json.JSONDecodeError):
                     pass
-            if rules is None:
+            if rules is None and source and source.get("detected_type") == "side_letter_rules":
                 try:
                     parsed_rules = nav_quality.parse_side_letter_rules(content)
                     if parsed_rules:
