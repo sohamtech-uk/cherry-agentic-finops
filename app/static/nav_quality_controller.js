@@ -338,12 +338,12 @@
   function readinessView(readiness) {
     const inputs = readiness.inputs || {};
     const rows = [
-      ["nav_summary", "Administrator NAV summary", inputs.nav_summary, true],
+      ["nav_summary", "Administrator NAV summary", inputs.nav_summary, false],
       ["source_ledger", "Investor-level GL", inputs.source_ledger, false],
       ["side_letter_rules", "Structured side-letter rules", inputs.side_letter_rules, false],
     ];
     const current = currentStep() === 1;
-    return `<div class="navqc-panel"><h3>Readiness</h3><p>Confirm the required NAV inputs before reconciliation. Missing evidence can be added directly to the relevant section.</p>
+    return `<div class="navqc-panel"><h3>Readiness</h3><p>Confirm the available NAV inputs before reconciliation. Missing optional evidence can be added directly to the relevant section.</p>
       <div class="navqc-grid">${rows.map(([key, label, item, required]) => `<div class="navqc-item"><div class="navqc-item-head"><strong>${esc(label)}</strong>${pill(item ? "ready" : required ? "needs_review" : "optional_evidence")}</div><p>${item ? esc(item.filename) : "Not supplied / not identified"}</p>${!item && current ? `<div class="navqc-actions"><button type="button" class="navqc-button secondary" data-readiness-upload="${esc(key)}">Upload evidence</button><input type="file" hidden data-readiness-file="${esc(key)}" accept="${esc(readinessAccept(key))}"></div>` : ""}</div>`).join("")}</div>
       ${(readiness.blockers || []).map((blocker) => `<div class="navqc-blocker">${esc(blocker)}</div>`).join("")}
       ${current ? evidenceUploadPanel() : ""}<div class="navqc-actions">${backButton()}${current ? `<button class="navqc-button primary" id="navqc-reconcile" ${readiness.status === "ready" ? "" : "disabled"}>Run reconciliation →</button><button class="navqc-button secondary" id="navqc-refresh">Recheck readiness</button>` : historicalNav()}</div></div>`;
