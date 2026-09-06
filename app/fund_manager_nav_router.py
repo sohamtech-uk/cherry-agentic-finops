@@ -111,7 +111,11 @@ async def assess_nav_readiness(
 
 @router.post("/{case_id}/nav/reconcile")
 @limiter.limit("1 per 5 seconds")
-async def reconcile_nav_case(request: Request, response: Response, case_id: str) -> dict[str, Any]:
+async def reconcile_nav_case(
+    request: Request,
+    response: Response,
+    case_id: str,
+) -> dict[str, Any]:
     _require_upload_access()
     case = _case_or_404(case_id)
     if case.nav_readiness is None:
@@ -185,7 +189,11 @@ async def ignore_nav_exception(
 
 @router.post("/{case_id}/nav/review")
 @limiter.limit("1 per 5 seconds")
-async def review_nav_case(request: Request, response: Response, case_id: str) -> dict[str, Any]:
+async def review_nav_case(
+    request: Request,
+    response: Response,
+    case_id: str,
+) -> dict[str, Any]:
     _require_upload_access()
     case = _case_or_404(case_id)
     if case.nav_reconciliation is None:
