@@ -32,7 +32,6 @@ APP_NAME = "cherry_fund_manager_staged"
 USER_ID = "fund-manager-ui"
 settings = get_settings()
 
-
 planning_agent = Agent(
     name="fund_manager_control_planner",
     model=settings.gemini_model,
@@ -67,7 +66,6 @@ Never mark a control executed or passed during planning. Return only valid JSON:
 """.strip(),
     tools=[get_fund_manager_control_catalogue],
 )
-
 
 execution_agent = Agent(
     name="fund_manager_control_executor",
@@ -138,7 +136,6 @@ Return only valid JSON:
         compare_dates,
     ],
 )
-
 
 investigation_agent = Agent(
     name="fund_manager_exception_investigator",
@@ -280,9 +277,7 @@ async def execute_case_controls(
     result["agent_name"] = execution_agent.name
     result["agent_tool_trace"] = trace
     result["issues_found"] = len(result.get("issues", []))
-    result["critical"] = sum(
-        issue.get("severity") == "high" for issue in result.get("issues", [])
-    )
+    result["critical"] = sum(issue.get("severity") == "high" for issue in result.get("issues", []))
     result["material"] = sum(
         issue.get("severity") in {"high", "warning"} for issue in result.get("issues", [])
     )
