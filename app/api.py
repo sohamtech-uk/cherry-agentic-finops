@@ -18,6 +18,7 @@ from app.container import get_engine
 from app.contract_router import router as contract_router
 from app.document_ai import GeminiDocumentExtractor, GeminiUnavailable
 from app.fund_manager_nav_router import router as fund_manager_nav_router
+from app.fund_manager_report_router import router as fund_manager_report_router
 from app.fund_manager_router import router as fund_manager_router
 from app.models import ApprovalRequest, BankTransaction, RejectionRequest
 from app.nav_quality_router import router as nav_quality_router
@@ -69,6 +70,7 @@ app.include_router(nav_quality_router)
 app.include_router(contract_router)
 app.include_router(statement_review_router)
 app.include_router(fund_manager_router)
+app.include_router(fund_manager_report_router)
 app.include_router(fund_manager_nav_router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
