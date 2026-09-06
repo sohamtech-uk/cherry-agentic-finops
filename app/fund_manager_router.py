@@ -220,8 +220,9 @@ async def append_fund_manager_evidence(
         raise HTTPException(
             status_code=409,
             detail=(
-                "These filenames already exist in the case: " + ", ".join(duplicate_names) +
-                ". Upload only new evidence; use the exception-specific upload when replacing or "
+                "These filenames already exist in the case: "
+                + ", ".join(duplicate_names)
+                + ". Upload only new evidence; use the exception-specific upload when replacing or "
                 "supporting an exception."
             ),
         )
