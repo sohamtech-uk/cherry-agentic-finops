@@ -8,7 +8,7 @@ from typing import Any
 from pydantic import ValidationError
 
 import app.nav_quality as nav_quality
-from app.agent_tools import run_nav_quality_review
+from app.agent_tools import reconcile_investor_gl_workbook, run_nav_quality_review
 from app.fund_manager_cases import FundManagerCase
 from app.fund_manager_stages import investigate_case_execution
 from app.nav_review_history import get_nav_review_history_store
@@ -117,18 +117,23 @@ def build_nav_readiness(case: FundManagerCase) -> dict[str, Any]:
     controls = [
         {
             "control": "Balance sheet footing",
-            "status": "ready" if summary else "awaiting_evidence",
+            "status": "ready" if summary else "optional_evidence",
             "requires": ["administrator NAV summary"],
         },
         {
             "control": "NAV bridge footing",
-            "status": "ready" if summary else "awaiting_evidence",
+            "status": "ready" if summary else "optional_evidence",
             "requires": ["administrator NAV summary"],
         },
         {
             "control": "Independent NAV recalculation",
-            "status": "ready" if summary else "awaiting_evidence",
+            "status": "ready" if summary else "optional_evidence",
             "requires": ["administrator NAV summary"],
+        },
+        {
+            "control": "Investor GL source validation",
+            "status": "ready" if ledger else "optional_evidence",
+            "requires": ["investor-level GL"],
         },
         {
             "control": "Balance sheet vs source ledger",
@@ -148,10 +153,10 @@ def build_nav_readiness(case: FundManagerCase) -> dict[str, Any]:
     ]
 
     blockers: list[str] = []
-    if summary is None:
+    if summary is None and ledger is None:
         blockers.append(
-            "A structured administrator NAV summary JSON is required to run the existing "
-            "NAV quality engine."
+            "Add at least one supported NAV evidence source before reconciliation: an "
+            "administrator NAV summary or an investor-level GL."
         )
         if raw_workbooks:
             blockers.append(
@@ -161,13 +166,15 @@ def build_nav_readiness(case: FundManagerCase) -> dict[str, Any]:
 
     return {
         "workflow": "nav_quality_controller",
-        "status": "ready" if summary else "needs_input",
+        "status": "ready" if summary or ledger else "needs_input",
+        "mode": "full_nav_review" if summary else "partial_source_review" if ledger else "waiting",
         "inputs": inputs,
         "controls": controls,
         "blockers": blockers,
         "optional_gaps": [
             label
             for label, present in (
+                ("administrator NAV summary", bool(summary)),
                 ("investor-level GL", bool(ledger)),
                 ("structured side-letter rules", bool(rules)),
             )
@@ -175,8 +182,8 @@ def build_nav_readiness(case: FundManagerCase) -> dict[str, Any]:
         ],
         "round_reduction_target": ROUND_REDUCTION_TARGET,
         "control_boundary": (
-            "Readiness only determines which existing NAV checks can run. No NAV calculation "
-            "or pass/fail decision is made at this stage."
+            "Readiness determines which supported NAV checks can run from the evidence supplied. "
+            "Missing optional evidence skips dependent checks rather than blocking all reconciliation."
         ),
     }
 
@@ -185,7 +192,7 @@ def _materialise_nav_inputs(
     case: FundManagerCase,
     readiness: dict[str, Any],
     directory: str,
-) -> tuple[str, str | None, str | None]:
+) -> tuple[str | None, str | None, str | None]:
     paths: dict[str, str | None] = {
         "nav_summary": None,
         "source_ledger": None,
@@ -203,28 +210,78 @@ def _materialise_nav_inputs(
         path.write_bytes(content)
         paths[key] = str(path)
 
-    if paths["nav_summary"] is None:
-        raise ValueError(
-            "NAV Quality Controller requires a structured administrator NAV summary JSON."
-        )
     return paths["nav_summary"], paths["source_ledger"], paths["side_letter_rules"]
+
+
+def _partial_ledger_result(
+    case: FundManagerCase,
+    readiness: dict[str, Any],
+    source_ledger: str,
+) -> dict[str, Any]:
+    profile = reconcile_investor_gl_workbook(source_ledger)
+    ledger_meta = readiness["inputs"]["source_ledger"]
+    missing_summary_finding = {
+        "code": "nav_summary.optional_missing",
+        "title": "Administrator NAV summary not supplied",
+        "detail": (
+            "Investor-level GL validation completed, but balance-sheet footing, NAV bridge, "
+            "independent NAV recalculation and summary-to-ledger comparisons were skipped."
+        ),
+        "severity": "warning",
+    }
+    return {
+        "case_id": case.case_id,
+        "legal_entity": case.fund_name or "Investor GL case",
+        "ledger_supplied": True,
+        "side_letter_rules_supplied": bool(readiness["inputs"].get("side_letter_rules")),
+        "partial": True,
+        "source_profile": profile,
+        "review": {
+            "action": "needs_review",
+            "controls_passed": 1,
+            "exceptions_open": 1,
+            "findings": [missing_summary_finding],
+            "work_items": [
+                {
+                    "title": "Review partial NAV evidence coverage",
+                    "detail": (
+                        "Continue with the investor GL result or add an administrator NAV summary "
+                        "later to enable the full NAV control set."
+                    ),
+                }
+            ],
+        },
+        "root_causes": [],
+        "iteration": {"round_number": 1, "prior_rounds": 0},
+        "evidence": {"input_sha256": {}, "review_sha256": None},
+        "period_end": ledger_meta.get("period_end"),
+        "financial_boundary": (
+            "This partial review validates the supplied investor GL and records evidence gaps; "
+            "it does not infer missing administrator NAV figures or amend the official NAV."
+        ),
+    }
 
 
 def run_case_nav_reconciliation(case: FundManagerCase) -> dict[str, Any]:
     readiness = case.nav_readiness or build_nav_readiness(case)
     if readiness.get("status") != "ready":
         raise ValueError(
-            "NAV Quality Controller is not ready. Review the readiness blockers first."
+            "NAV Quality Controller is not ready. Add at least one supported NAV evidence source."
         )
 
     with TemporaryDirectory(prefix="cherry-nav-quality-") as directory:
         nav_summary, source_ledger, rules = _materialise_nav_inputs(case, readiness, directory)
-        result = run_nav_quality_review(nav_summary, source_ledger, rules)
+        if nav_summary is not None:
+            result = run_nav_quality_review(nav_summary, source_ledger, rules)
+            summary_meta = readiness["inputs"]["nav_summary"]
+            result["period_end"] = summary_meta["period_end"]
+        elif source_ledger is not None:
+            result = _partial_ledger_result(case, readiness, source_ledger)
+        else:
+            raise ValueError("No supported NAV evidence is available for reconciliation.")
 
-    summary_meta = readiness["inputs"]["nav_summary"]
     result["workflow"] = "nav_quality_controller"
     result["fund_manager_case_id"] = case.case_id
-    result["period_end"] = summary_meta["period_end"]
     result["stage"] = "reconciled"
     result["round_reduction_target"] = ROUND_REDUCTION_TARGET
     return result
