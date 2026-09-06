@@ -39,14 +39,20 @@ def _require_upload_access() -> None:
     if not expected:
         raise HTTPException(
             status_code=503,
-            detail="Fund Manager uploads are disabled until CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN is configured.",
+            detail=(
+                "Fund Manager uploads are disabled until "
+                "CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN is configured."
+            ),
         )
 
 
 def _case_or_404(case_id: str) -> FundManagerCase:
     case = case_store.get(case_id)
     if case is None:
-        raise HTTPException(status_code=404, detail=f"Fund Manager case {case_id} was not found.")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Fund Manager case {case_id} was not found.",
+        )
     return case
 
 
@@ -120,7 +126,10 @@ async def review_nav_case(
     try:
         case.nav_review = await run_case_nav_review(case)
     except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=f"NAV review agent could not complete: {exc}") from exc
+        raise HTTPException(
+            status_code=502,
+            detail=f"NAV review agent could not complete: {exc}",
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     case.touch()
@@ -140,13 +149,18 @@ async def decide_nav_case(
     _require_upload_access()
     case = _case_or_404(case_id)
     if case.nav_reconciliation is None:
-        raise HTTPException(status_code=409, detail="Run NAV reconciliation before recording a NAV decision.")
+        raise HTTPException(
+            status_code=409,
+            detail="Run NAV reconciliation before recording a NAV decision.",
+        )
     case.nav_decision = {
         "action": decision.action,
         "note": decision.note,
         "recorded_at": datetime.now(UTC).isoformat(),
         "actor": "fund-manager-ui-user",
-        "financial_boundary": "Decision recorded only; no journal or official NAV was amended.",
+        "financial_boundary": (
+            "Decision recorded only; no journal or official NAV was amended."
+        ),
     }
     case.touch()
     return case.public_view()
