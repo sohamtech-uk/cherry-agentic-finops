@@ -117,6 +117,19 @@ def _classification_report(
     }
 
 
+def _reset_case_after_new_evidence(case: FundManagerCase) -> None:
+    """Invalidate results that may have depended on the previous evidence set."""
+    case.stage = "classified"
+    case.plan = None
+    case.execution = None
+    case.investigation = None
+    case.decision = None
+    case.nav_readiness = None
+    case.nav_reconciliation = None
+    case.nav_review = None
+    case.nav_decision = None
+
+
 @router.get("/health")
 async def fund_manager_health() -> dict[str, Any]:
     return {
@@ -136,6 +149,7 @@ async def fund_manager_health() -> dict[str, Any]:
         "implemented_stages": [
             "case_creation",
             "file_classification",
+            "incremental_case_evidence",
             "agent_control_planning",
             "deterministic_control_execution",
             "agentic_investigation",
@@ -177,6 +191,50 @@ async def create_fund_manager_case(
         reporting_period=reporting_period,
         as_of_date=as_of_date,
     )
+    return case.public_view()
+
+
+@router.post("/cases/{case_id}/evidence")
+@limiter.limit("1 per 5 seconds")
+async def append_fund_manager_evidence(
+    request: Request,
+    response: Response,
+    case_id: str,
+    files: Annotated[list[UploadFile], File(description="Only newly added evidence files")],
+) -> dict[str, Any]:
+    """Append only newly selected evidence to an existing case and reclassify the case.
+
+    Existing browser-held files must not be resubmitted. New evidence invalidates downstream
+    general and NAV results because those results were produced from the previous evidence set.
+    """
+
+    _require_upload_access()
+    case = _case_or_404(case_id)
+    new_items = await _read_upload_batch(files)
+    if len(case.files) + len(new_items) > MAX_FILES:
+        raise HTTPException(status_code=413, detail=f"Maximum {MAX_FILES} files per case.")
+
+    existing_names = {name for name, _, _ in case.files}
+    duplicate_names = sorted(name for name, _, _ in new_items if name in existing_names)
+    if duplicate_names:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "These filenames already exist in the case: " + ", ".join(duplicate_names) +
+                ". Upload only new evidence; use the exception-specific upload when replacing or "
+                "supporting an exception."
+            ),
+        )
+
+    case.files.extend(new_items)
+    case.classification = _classification_report(
+        case.files,
+        fund_name=case.fund_name,
+        reporting_period=case.reporting_period,
+        as_of_date=case.as_of_date,
+    )
+    _reset_case_after_new_evidence(case)
+    case.touch()
     return case.public_view()
 
 
