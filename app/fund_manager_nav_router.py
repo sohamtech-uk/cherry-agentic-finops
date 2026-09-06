@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import os
 from datetime import UTC, datetime
-from typing import Any, Literal
+from pathlib import Path
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel
 
 from app.config import get_settings
 from app.fund_manager_cases import FundManagerCase, case_store
+from app.fund_manager_classification import classify_and_validate_sources
 from app.fund_manager_nav_controller import (
     build_nav_readiness,
     get_case_nav_history,
@@ -32,6 +34,11 @@ class NAVDecision(BaseModel):
     note: str | None = None
 
 
+class NAVExceptionIgnore(BaseModel):
+    reason: str
+    note: str | None = None
+
+
 def _require_upload_access() -> None:
     expected = os.getenv("CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN", "").strip()
     if settings.environment != "production" and not expected:
@@ -49,11 +56,27 @@ def _require_upload_access() -> None:
 def _case_or_404(case_id: str) -> FundManagerCase:
     case = case_store.get(case_id)
     if case is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Fund Manager case {case_id} was not found.",
-        )
+        raise HTTPException(status_code=404, detail=f"Fund Manager case {case_id} was not found.")
     return case
+
+
+def _safe_file_name(value: str | None) -> str:
+    candidate = Path(value or "evidence").name.strip()
+    return candidate if candidate not in {"", ".", ".."} else "evidence"
+
+
+def _refresh_classification(case: FundManagerCase) -> None:
+    sources = classify_and_validate_sources(case.files)
+    rejected_count = sum(1 for source in sources if source["validation_status"] == "rejected")
+    case.classification = {
+        **case.classification,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "source_count": len(sources),
+        "unknown_count": rejected_count,
+        "accepted_count": len(sources) - rejected_count,
+        "rejected_count": rejected_count,
+        "sources": sources,
+    }
 
 
 @router.get("/{case_id}/nav")
@@ -68,18 +91,13 @@ async def get_nav_workflow(case_id: str) -> dict[str, Any]:
         "reconciliation": case.nav_reconciliation,
         "review": case.nav_review,
         "decision": case.nav_decision,
+        "exception_resolutions": case.nav_exception_resolutions,
     }
 
 
 @router.post("/{case_id}/nav/readiness")
 @limiter.limit("1 per 5 seconds")
-async def assess_nav_readiness(
-    request: Request,
-    response: Response,
-    case_id: str,
-) -> dict[str, Any]:
-    """Assess NAV workflow readiness using evidence already stored on the Fund Manager case."""
-
+async def assess_nav_readiness(request: Request, response: Response, case_id: str) -> dict[str, Any]:
     _require_upload_access()
     case = _case_or_404(case_id)
     case.nav_readiness = build_nav_readiness(case)
@@ -89,13 +107,7 @@ async def assess_nav_readiness(
 
 @router.post("/{case_id}/nav/reconcile")
 @limiter.limit("1 per 5 seconds")
-async def reconcile_nav_case(
-    request: Request,
-    response: Response,
-    case_id: str,
-) -> dict[str, Any]:
-    """Run the existing deterministic NAV Quality Controller after explicit user approval."""
-
+async def reconcile_nav_case(request: Request, response: Response, case_id: str) -> dict[str, Any]:
     _require_upload_access()
     case = _case_or_404(case_id)
     if case.nav_readiness is None:
@@ -110,15 +122,66 @@ async def reconcile_nav_case(
     return case.public_view()
 
 
-@router.post("/{case_id}/nav/review")
+@router.post("/{case_id}/nav/exceptions/{exception_id}/evidence")
 @limiter.limit("1 per 5 seconds")
-async def review_nav_case(
+async def upload_nav_exception_evidence(
     request: Request,
     response: Response,
     case_id: str,
+    exception_id: str,
+    file: Annotated[UploadFile, File(description="Supporting evidence for this NAV exception")],
 ) -> dict[str, Any]:
-    """Ask the existing Fund Manager investigation agent to review deterministic NAV findings."""
+    """Attach evidence to one exception and return the case to NAV readiness for re-validation."""
+    _require_upload_access()
+    case = _case_or_404(case_id)
+    file_name = _safe_file_name(file.filename)
+    content = await file.read()
+    if len(content) > settings.max_upload_mb * 1024 * 1024:
+        raise HTTPException(status_code=413, detail=f"{file_name} exceeds the upload limit.")
+    case.files.append((file_name, content, file.content_type))
+    _refresh_classification(case)
+    case.nav_exception_resolutions[exception_id] = {
+        "status": "evidence_uploaded",
+        "filename": file_name,
+        "recorded_at": datetime.now(UTC).isoformat(),
+    }
+    case.nav_readiness = build_nav_readiness(case)
+    case.nav_reconciliation = None
+    case.nav_review = None
+    case.nav_decision = None
+    case.touch()
+    return case.public_view()
 
+
+@router.post("/{case_id}/nav/exceptions/{exception_id}/ignore")
+@limiter.limit("1 per 5 seconds")
+async def ignore_nav_exception(
+    request: Request,
+    response: Response,
+    case_id: str,
+    exception_id: str,
+    ignore: NAVExceptionIgnore,
+) -> dict[str, Any]:
+    """Record an explicit, auditable human decision to ignore one NAV exception."""
+    _require_upload_access()
+    case = _case_or_404(case_id)
+    reason = ignore.reason.strip()
+    if not reason:
+        raise HTTPException(status_code=422, detail="A reason is required to ignore an exception.")
+    case.nav_exception_resolutions[exception_id] = {
+        "status": "ignored",
+        "reason": reason,
+        "note": ignore.note,
+        "recorded_at": datetime.now(UTC).isoformat(),
+        "actor": "fund-manager-ui-user",
+    }
+    case.touch()
+    return case.public_view()
+
+
+@router.post("/{case_id}/nav/review")
+@limiter.limit("1 per 5 seconds")
+async def review_nav_case(request: Request, response: Response, case_id: str) -> dict[str, Any]:
     _require_upload_access()
     case = _case_or_404(case_id)
     if case.nav_reconciliation is None:
@@ -126,10 +189,7 @@ async def review_nav_case(
     try:
         case.nav_review = await run_case_nav_review(case)
     except RuntimeError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"NAV review agent could not complete: {exc}",
-        ) from exc
+        raise HTTPException(status_code=502, detail=f"NAV review agent could not complete: {exc}") from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     case.touch()
@@ -144,31 +204,18 @@ async def decide_nav_case(
     case_id: str,
     decision: NAVDecision,
 ) -> dict[str, Any]:
-    """Record a NAV-specific human decision without amending the official NAV.
-
-    Requires the agentic NAV review to have run first: the decision is meant to respond to the
-    consolidated remediation package (every finding, root cause and agent investigation in one
-    pass), not to the raw deterministic reconciliation alone.
-    """
-
     _require_upload_access()
     case = _case_or_404(case_id)
     if case.nav_reconciliation is None:
-        raise HTTPException(
-            status_code=409,
-            detail="Run NAV reconciliation before recording a NAV decision.",
-        )
+        raise HTTPException(status_code=409, detail="Run NAV reconciliation before recording a NAV decision.")
     if case.nav_review is None:
-        raise HTTPException(
-            status_code=409,
-            detail="Run the agentic NAV review before recording a NAV decision.",
-        )
+        raise HTTPException(status_code=409, detail="Run the agentic NAV review before recording a NAV decision.")
     case.nav_decision = {
         "action": decision.action,
         "note": decision.note,
         "recorded_at": datetime.now(UTC).isoformat(),
         "actor": "fund-manager-ui-user",
-        "financial_boundary": ("Decision recorded only; no journal or official NAV was amended."),
+        "financial_boundary": "Decision recorded only; no journal or official NAV was amended.",
     }
     case.touch()
     return case.public_view()
@@ -176,6 +223,4 @@ async def decide_nav_case(
 
 @router.get("/{case_id}/nav/history")
 async def nav_case_history(case_id: str) -> dict[str, Any]:
-    """Return the existing NAV review iteration history for this case's fund and period."""
-
     return get_case_nav_history(_case_or_404(case_id))
