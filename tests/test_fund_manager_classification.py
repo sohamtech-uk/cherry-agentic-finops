@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import csv
 import io
 import json
 
+import pytest
 from openpyxl import Workbook
 from reportlab.pdfgen import canvas
 
+from app import fund_manager_classification as fmc
 from app.fund_manager_classification import classify_source, classify_sources
 
 
@@ -114,6 +117,51 @@ def test_classify_source_unsupported_extension_is_unknown() -> None:
 
     assert source["detected_type"] == "unknown"
     assert source["status"] == "unknown"
+
+
+def test_classify_source_survives_a_workbook_inspection_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A corrupt-but-openable xlsx can fail deep in openpyxl (bad zip member, XML parse error,
+    KeyError) rather than at load_workbook() itself, which only raises ValueError. This must be
+    classified unknown, not crash the whole batch."""
+
+    def boom(content: bytes, file_name: str) -> dict[str, object]:
+        raise KeyError("sheet1.xml")
+
+    monkeypatch.setattr(fmc, "inspect_workbook", boom)
+
+    source = classify_source(b"not-a-real-workbook", "broken.xlsx", None)
+
+    assert source["detected_type"] == "unknown_workbook"
+    assert source["status"] == "unknown"
+    assert "could not read workbook" in source["warnings"][0]
+
+
+def test_classify_source_survives_a_document_read_crash(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(content: bytes, mime_type: str, file_name: str) -> list[tuple[int, str]]:
+        raise RuntimeError("native PDF parser crashed")
+
+    monkeypatch.setattr(fmc, "read_document_pages", boom)
+
+    source = classify_source(b"%PDF-1.4 not really a pdf", "broken.pdf", None)
+
+    assert source["detected_type"] == "unknown_pdf"
+    assert source["status"] == "unknown"
+    assert "could not read document" in source["warnings"][0]
+
+
+def test_classify_source_survives_a_csv_parse_crash(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(*args: object, **kwargs: object) -> None:
+        raise csv.Error("line contains NUL")
+
+    monkeypatch.setattr(fmc.csv, "DictReader", boom)
+
+    source = classify_source(b"account,currency,balance\nACC-1,USD,1000\n", "broken.csv", None)
+
+    assert source["detected_type"] == "unknown_csv"
+    assert source["status"] == "unknown"
+    assert "could not parse CSV" in source["warnings"][0]
 
 
 def test_classify_sources_assigns_sequential_ids() -> None:
