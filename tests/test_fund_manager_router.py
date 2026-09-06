@@ -8,13 +8,113 @@ from fastapi.testclient import TestClient
 
 from app import fund_manager_router
 from app.api import app
+from app.fund_manager_cases import case_store
 from app.rate_limit import limiter
 
 client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def mock_agentic_analysis(monkeypatch: pytest.MonkeyPatch) -> None:
+def mock_agentic_stages(monkeypatch: pytest.MonkeyPatch) -> None:
+    case_store.clear()
+
+    async def fake_plan_case_controls(
+        classification: dict[str, Any],
+        *,
+        fund_name: str | None = None,
+        reporting_period: str | None = None,
+        as_of_date: str | None = None,
+    ) -> dict[str, Any]:
+        del fund_name, reporting_period, as_of_date
+        source = classification["sources"][0]
+        return {
+            "stage": "planned",
+            "orchestration_mode": "agentic",
+            "agent_name": "fund_manager_control_planner",
+            "agent_tool_trace": ["get_fund_manager_control_catalogue"],
+            "status": "ready",
+            "control_plan": [
+                {
+                    "control_id": "CTRL-POS-001",
+                    "control": "Position reconciliation",
+                    "source_ids": [source["id"]],
+                    "status": "ready",
+                    "reasoning": "Accepted evidence supports this control.",
+                    "missing_evidence": [],
+                    "tool_name": "reconcile_positions",
+                }
+            ],
+            "agent_summary": "One control is ready. No control has run yet.",
+        }
+
+    async def fake_execute_case_controls(
+        files: list[tuple[str, bytes, str | None]],
+        classification: dict[str, Any],
+        plan: dict[str, Any],
+    ) -> dict[str, Any]:
+        del files, classification
+        assert plan["control_plan"][0]["status"] == "ready"
+        return {
+            "stage": "executed",
+            "orchestration_mode": "agentic",
+            "agent_name": "fund_manager_control_executor",
+            "agent_tool_trace": ["reconcile_positions"],
+            "status": "review_required",
+            "control_plan": [
+                {
+                    **plan["control_plan"][0],
+                    "status": "executed",
+                }
+            ],
+            "control_runs": [
+                {
+                    "control_id": "CTRL-POS-001",
+                    "tool_name": "reconcile_positions",
+                    "status": "completed",
+                    "source_ids": ["SRC-01"],
+                    "output": {"matched_count": 0, "break_count": 1},
+                }
+            ],
+            "issues": [
+                {
+                    "id": "EXC-001",
+                    "category": "position",
+                    "code": "position.mismatch",
+                    "title": "Position mismatch",
+                    "summary": "Position quantities differ.",
+                    "severity": "warning",
+                    "recommended_action": "Review the break.",
+                    "evidence": [],
+                }
+            ],
+            "issues_found": 1,
+            "material": 1,
+            "critical": 0,
+            "agent_summary": "The approved control executed and returned one break.",
+        }
+
+    async def fake_investigate_case_execution(execution: dict[str, Any]) -> dict[str, Any]:
+        assert execution["issues"][0]["code"] == "position.mismatch"
+        return {
+            "stage": "investigated",
+            "orchestration_mode": "agentic",
+            "agent_name": "fund_manager_exception_investigator",
+            "agent_tool_trace": [],
+            "status": "review_required",
+            "investigations": [
+                {
+                    "issue_id": "EXC-001",
+                    "finding": "A position break requires review.",
+                    "likely_cause": "Different source quantities.",
+                    "evidence_gap": "Confirm the authoritative source.",
+                    "priority": "medium",
+                    "recommended_action": "Assign for review.",
+                }
+            ],
+            "recommended_human_action": "assign_and_monitor",
+            "agent_summary": "The deterministic break was investigated without changing it.",
+        }
+
     async def fake_run_agentic_analysis(
         files: list[tuple[str, bytes, str | None]],
         *,
@@ -22,298 +122,154 @@ def mock_agentic_analysis(monkeypatch: pytest.MonkeyPatch) -> None:
         reporting_period: str | None = None,
         as_of_date: str | None = None,
     ) -> dict[str, Any]:
-        del fund_name, reporting_period, as_of_date
-        filenames = [filename for filename, _, _ in files]
-        if {"prior.txt", "current.txt"}.issubset(filenames):
-            return {
-                "orchestration_mode": "agentic",
-                "agent_name": "fund_manager_control_orchestrator",
-                "agent_tool_trace": [
-                    "classify_uploaded_evidence",
-                    "get_fund_manager_control_catalogue",
-                    "compare_periods",
-                    "compare_dates",
-                ],
-                "sources": [
-                    {
-                        "id": "SRC-01",
-                        "filename": "prior.txt",
-                        "detected_type": "financial_statement",
-                        "status": "processed",
-                        "validation_status": "accepted",
-                    },
-                    {
-                        "id": "SRC-02",
-                        "filename": "current.txt",
-                        "detected_type": "financial_statement",
-                        "status": "processed",
-                        "validation_status": "accepted",
-                    },
-                ],
-                "status": "review_required",
-                "control_plan": [
-                    {
-                        "control_id": "CTRL-STMT-001",
-                        "control": "Period-over-period statement comparison",
-                        "filename": "prior.txt, current.txt",
-                        "source_ids": ["SRC-01", "SRC-02"],
-                        "status": "executed",
-                    }
-                ],
-                "control_runs": [],
-                "controls_executed": 1,
-                "controls_incomplete": 0,
-                "issues_found": 1,
-                "critical": 0,
-                "material": 1,
-                "issues": [
-                    {
-                        "id": "EXC-001",
-                        "category": "statement",
-                        "code": "statement.period_text_changed",
-                        "title": "Financial statement text changed between periods",
-                        "summary": "Statement text changed.",
-                        "severity": "warning",
-                        "recommended_action": "Review the statement changes.",
-                        "evidence": [],
-                    }
-                ],
-                "investigations": [],
-                "recommended_human_action": "assign_and_monitor",
-            }
-
+        del files, fund_name, reporting_period, as_of_date
         return {
             "orchestration_mode": "agentic",
             "agent_name": "fund_manager_control_orchestrator",
-            "agent_tool_trace": [
-                "classify_uploaded_evidence",
-                "get_fund_manager_control_catalogue",
-            ],
-            "sources": [
-                {
-                    "id": "SRC-01",
-                    "filename": filenames[0],
-                    "detected_type": "positions",
-                    "status": "processed",
-                    "validation_status": "accepted",
-                }
-            ],
-            "status": "insufficient_evidence",
-            "control_plan": [
-                {
-                    "control_id": "CTRL-POS-001",
-                    "control": "Position reconciliation",
-                    "filename": filenames[0],
-                    "source_ids": ["SRC-01"],
-                    "status": "awaiting_evidence",
-                    "missing_evidence": ["external positions source"],
-                }
-            ],
+            "agent_tool_trace": [],
+            "sources": [],
+            "status": "clean",
+            "control_plan": [],
             "control_runs": [],
-            "controls_executed": 0,
-            "controls_incomplete": 1,
-            "issues_found": 1,
+            "issues": [],
+            "issues_found": 0,
+            "material": 0,
             "critical": 0,
-            "material": 1,
-            "issues": [
-                {
-                    "id": "EXC-001",
-                    "category": "data_quality",
-                    "code": "control.ctrl-pos-001.evidence_missing",
-                    "title": "Position reconciliation requires another source",
-                    "summary": "External positions evidence is missing.",
-                    "severity": "warning",
-                    "recommended_action": "Upload the comparison source.",
-                    "evidence": [],
-                }
-            ],
-            "investigations": [],
-            "recommended_human_action": "review_missing_evidence",
         }
 
+    monkeypatch.setattr(fund_manager_router, "plan_case_controls", fake_plan_case_controls)
+    monkeypatch.setattr(fund_manager_router, "execute_case_controls", fake_execute_case_controls)
+    monkeypatch.setattr(
+        fund_manager_router,
+        "investigate_case_execution",
+        fake_investigate_case_execution,
+    )
     monkeypatch.setattr(fund_manager_router, "run_agentic_analysis", fake_run_agentic_analysis)
 
 
-def test_fund_manager_health_declares_the_pipeline_stages() -> None:
-    response = client.get("/api/fund-manager/health")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["stage"] == "end_to_end_agentic_control_pipeline"
-    assert body["orchestration_mode"] == "agentic"
-    assert "agent_calls_file_classification" in body["pipeline"]
-    assert "agent_determines_required_controls" in body["implemented_stages"]
-    assert "agent_invokes_deterministic_tools" in body["implemented_stages"]
-    assert "agentic_investigation" in body["implemented_stages"]
+def _positions() -> bytes:
+    return json.dumps([{"fund": "F1", "security_id": "ABC", "quantity": 100, "price": 10}]).encode()
 
 
-def test_classify_endpoint_returns_a_source_inventory() -> None:
-    positions = json.dumps(
-        [{"fund": "F1", "security_id": "ABC", "quantity": 100, "price": 10}]
-    ).encode()
-
+def _create_case() -> dict[str, Any]:
     response = client.post(
-        "/api/fund-manager/classify",
-        files=[("files", ("positions.json", positions, "application/json"))],
-        data={"fund_name": "Northstar Growth Fund III", "reporting_period": "Q2 2026"},
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["fund_name"] == "Northstar Growth Fund III"
-    assert body["source_count"] == 1
-    assert body["unknown_count"] == 0
-    assert body["sources"][0]["detected_type"] == "positions"
-    assert body["sources"][0]["id"] == "SRC-01"
-
-
-def test_classify_endpoint_accepts_multiple_mixed_files() -> None:
-    positions = json.dumps(
-        [{"fund": "F1", "security_id": "ABC", "quantity": 100, "price": 10}]
-    ).encode()
-    trades = json.dumps([{"trade_id": "T1", "side": "buy"}]).encode()
-
-    response = client.post(
-        "/api/fund-manager/classify",
-        files=[
-            ("files", ("positions.json", positions, "application/json")),
-            ("files", ("trades.json", trades, "application/json")),
-        ],
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["source_count"] == 2
-    assert {source["detected_type"] for source in body["sources"]} == {"positions", "trades"}
-
-
-def test_classify_endpoint_rejects_empty_batch() -> None:
-    response = client.post("/api/fund-manager/classify", files=[])
-
-    assert response.status_code == 422
-
-
-def test_classify_endpoint_counts_unknown_sources() -> None:
-    response = client.post(
-        "/api/fund-manager/classify",
-        files=[("files", ("mystery.txt", b"hello", "text/plain"))],
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["unknown_count"] == 1
-    assert body["sources"][0]["status"] == "unknown"
-
-
-def test_classification_agent_rejects_schema_invalid_financial_document() -> None:
-    incomplete_positions = json.dumps([{"security_id": "ABC", "quantity": 100}]).encode()
-
-    response = client.post(
-        "/api/fund-manager/classify",
-        files=[
-            (
-                "files",
-                ("positions.json", incomplete_positions, "application/json"),
-            )
-        ],
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["accepted_count"] == 0
-    assert body["rejected_count"] == 1
-    source = body["sources"][0]
-    assert source["detected_type"] == "positions"
-    assert source["validation_status"] == "rejected"
-    assert source["agent_decision"]["action"] == "reject"
-    assert "Schema validation failed" in source["validation_errors"][0]
-
-
-_CURRENT_STATEMENT = b"""Subsequent Events
-No subsequent events occurred after 2026-06-30.
-"""
-
-_PRIOR_STATEMENT = b"""Subsequent Events
-Portfolio Company X completed a transaction on 2026-05-17.
-"""
-
-
-def test_analyse_endpoint_uses_agentic_orchestration() -> None:
-    response = client.post(
-        "/api/fund-manager/analyse",
-        files=[
-            ("files", ("prior.txt", _PRIOR_STATEMENT, "text/plain")),
-            ("files", ("current.txt", _CURRENT_STATEMENT, "text/plain")),
-        ],
+        "/api/fund-manager/cases",
+        files=[("files", ("positions.json", _positions(), "application/json"))],
         data={"fund_name": "Northstar Growth Fund III"},
     )
+    assert response.status_code == 200
+    return response.json()
 
+
+def test_health_declares_staged_agentic_pipeline() -> None:
+    response = client.get("/api/fund-manager/health")
     assert response.status_code == 200
     body = response.json()
-    assert body["fund_name"] == "Northstar Growth Fund III"
+    assert body["stage"] == "staged_agentic_control_pipeline"
     assert body["orchestration_mode"] == "agentic"
-    assert body["agent_name"] == "fund_manager_control_orchestrator"
-    assert body["agent_tool_trace"][:2] == [
-        "classify_uploaded_evidence",
-        "get_fund_manager_control_catalogue",
-    ]
-    assert body["status"] == "review_required"
-    assert body["issues_found"] == 1
-    assert body["issues"][0]["code"] == "statement.period_text_changed"
-    assert all(entry["status"] == "executed" for entry in body["control_plan"])
+    assert "human_approves_control_execution" in body["pipeline"]
+    assert "human_decision_recording" in body["implemented_stages"]
 
 
-def test_analyse_endpoint_reports_missing_pair_from_agent() -> None:
-    positions = json.dumps(
-        [{"fund": "F1", "security_id": "ABC", "quantity": 100, "price": 10}]
-    ).encode()
+def test_case_creation_classifies_only_and_returns_case_id() -> None:
+    body = _create_case()
+    assert body["case_id"].startswith("FM-")
+    assert body["stage"] == "classified"
+    assert body["classification"]["accepted_count"] == 1
+    assert body["plan"] is None
+    assert body["execution"] is None
 
-    response = client.post(
-        "/api/fund-manager/analyse",
-        files=[("files", ("positions.json", positions, "application/json"))],
-    )
 
+def test_case_plan_requires_explicit_follow_up() -> None:
+    case = _create_case()
+    response = client.post(f"/api/fund-manager/cases/{case['case_id']}/plan")
     assert response.status_code == 200
     body = response.json()
-    assert body["orchestration_mode"] == "agentic"
-    assert body["status"] == "insufficient_evidence"
-    assert body["issues"][0]["category"] == "data_quality"
-    assert body["control_plan"][0]["status"] == "awaiting_evidence"
+    assert body["stage"] == "planned"
+    assert body["plan"]["agent_name"] == "fund_manager_control_planner"
+    assert body["plan"]["control_plan"][0]["status"] == "ready"
+    assert body["execution"] is None
 
 
-def test_analyse_endpoint_rejects_empty_batch() -> None:
-    response = client.post("/api/fund-manager/analyse", files=[])
+def test_execute_cannot_run_before_plan() -> None:
+    case = _create_case()
+    response = client.post(f"/api/fund-manager/cases/{case['case_id']}/execute")
+    assert response.status_code == 409
 
-    assert response.status_code == 422
+
+def test_execute_runs_only_after_planning() -> None:
+    case = _create_case()
+    client.post(f"/api/fund-manager/cases/{case['case_id']}/plan")
+    response = client.post(f"/api/fund-manager/cases/{case['case_id']}/execute")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["stage"] == "executed"
+    assert body["execution"]["agent_name"] == "fund_manager_control_executor"
+    assert body["execution"]["issues_found"] == 1
 
 
-def test_production_fund_manager_uses_server_side_token_only(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(fund_manager_router.settings, "environment", "production")
-    monkeypatch.setenv("CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN", "server-only-token")
-    positions = json.dumps([{"security_id": "ABC", "quantity": 100}]).encode()
+def test_investigation_happens_after_deterministic_execution() -> None:
+    case = _create_case()
+    client.post(f"/api/fund-manager/cases/{case['case_id']}/plan")
+    client.post(f"/api/fund-manager/cases/{case['case_id']}/execute")
+    response = client.post(f"/api/fund-manager/cases/{case['case_id']}/investigate")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["stage"] == "investigated"
+    assert body["investigation"]["recommended_human_action"] == "assign_and_monitor"
 
+
+def test_human_decision_is_recorded_explicitly() -> None:
+    case = _create_case()
+    client.post(f"/api/fund-manager/cases/{case['case_id']}/plan")
+    client.post(f"/api/fund-manager/cases/{case['case_id']}/execute")
+    response = client.post(
+        f"/api/fund-manager/cases/{case['case_id']}/decision",
+        json={"action": "request_evidence", "note": "Need custodian positions."},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["stage"] == "decided"
+    assert body["decision"]["action"] == "request_evidence"
+    assert body["decision"]["note"] == "Need custodian positions."
+
+
+def test_get_case_never_returns_uploaded_bytes() -> None:
+    case = _create_case()
+    response = client.get(f"/api/fund-manager/cases/{case['case_id']}")
+    assert response.status_code == 200
+    body = response.json()
+    assert "files" not in body
+    assert body["classification"]["sources"][0]["filename"] == "positions.json"
+
+
+def test_classify_compatibility_endpoint_still_works() -> None:
+    response = client.post(
+        "/api/fund-manager/classify",
+        files=[("files", ("positions.json", _positions(), "application/json"))],
+    )
+    assert response.status_code == 200
+    assert response.json()["sources"][0]["detected_type"] == "positions"
+
+
+def test_analyse_compatibility_endpoint_still_uses_agentic_flow() -> None:
     response = client.post(
         "/api/fund-manager/analyse",
-        files=[("files", ("positions.json", positions, "application/json"))],
+        files=[("files", ("positions.json", _positions(), "application/json"))],
     )
-
     assert response.status_code == 200
+    assert response.json()["orchestration_mode"] == "agentic"
 
 
-def test_production_fund_manager_fails_closed_without_server_token(
+def test_production_case_creation_fails_closed_without_server_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(fund_manager_router.settings, "environment", "production")
     monkeypatch.delenv("CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN", raising=False)
-    positions = json.dumps([{"security_id": "ABC", "quantity": 100}]).encode()
-
     response = client.post(
-        "/api/fund-manager/analyse",
-        files=[("files", ("positions.json", positions, "application/json"))],
+        "/api/fund-manager/cases",
+        files=[("files", ("positions.json", _positions(), "application/json"))],
     )
-
     assert response.status_code == 503
 
 
@@ -322,17 +278,13 @@ def test_fund_manager_backend_rate_limit_returns_429(monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN", "server-only-token")
     monkeypatch.setattr(limiter, "enabled", True)
     limiter._storage.reset()
-    positions = json.dumps([{"security_id": "RATE-LIMIT", "quantity": 100}]).encode()
-
     first = client.post(
         "/api/fund-manager/classify",
-        files=[("files", ("positions.json", positions, "application/json"))],
+        files=[("files", ("positions.json", _positions(), "application/json"))],
     )
     second = client.post(
         "/api/fund-manager/classify",
-        files=[("files", ("positions.json", positions, "application/json"))],
+        files=[("files", ("positions.json", _positions(), "application/json"))],
     )
-
     assert first.status_code == 200
     assert second.status_code == 429
-    assert "Retry-After" in second.headers

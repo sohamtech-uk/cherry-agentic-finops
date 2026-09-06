@@ -3,19 +3,36 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
+from pydantic import BaseModel
 
 from app.config import get_settings
 from app.fund_manager_agentic import run_agentic_analysis
+from app.fund_manager_cases import FundManagerCase, case_store
 from app.fund_manager_classification import classify_and_validate_sources
+from app.fund_manager_stages import (
+    execute_case_controls,
+    investigate_case_execution,
+    plan_case_controls,
+)
 from app.rate_limit import limiter
 
 settings = get_settings()
 router = APIRouter(prefix="/api/fund-manager", tags=["fund-manager"])
 
 MAX_FILES = 25
+
+
+class FundManagerDecision(BaseModel):
+    action: Literal[
+        "accept_and_close",
+        "request_evidence",
+        "assign_and_monitor",
+        "escalate_immediately",
+    ]
+    note: str | None = None
 
 
 def _require_upload_access() -> None:
@@ -56,66 +73,227 @@ async def _read_upload_batch(files: list[UploadFile]) -> list[tuple[str, bytes, 
     return items
 
 
+def _case_or_404(case_id: str) -> FundManagerCase:
+    case = case_store.get(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail=f"Fund Manager case {case_id} was not found.")
+    return case
+
+
+def _require_stage(case: FundManagerCase, allowed: set[str]) -> None:
+    if case.stage not in allowed:
+        expected = ", ".join(sorted(allowed))
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Case {case.case_id} is at stage {case.stage}; this action requires "
+                f"stage {expected}."
+            ),
+        )
+
+
+def _classification_report(
+    items: list[tuple[str, bytes, str | None]],
+    *,
+    fund_name: str | None = None,
+    reporting_period: str | None = None,
+    as_of_date: str | None = None,
+) -> dict[str, Any]:
+    sources = classify_and_validate_sources(items)
+    rejected_count = sum(1 for source in sources if source["validation_status"] == "rejected")
+    return {
+        "fund_name": fund_name,
+        "reporting_period": reporting_period,
+        "as_of_date": as_of_date,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "source_count": len(sources),
+        "unknown_count": rejected_count,
+        "accepted_count": len(sources) - rejected_count,
+        "rejected_count": rejected_count,
+        "sources": sources,
+        "control_boundary": (
+            "This is a source inventory, not a review result. No financial control has run yet."
+        ),
+    }
+
+
 @router.get("/health")
 async def fund_manager_health() -> dict[str, Any]:
     return {
         "status": "ok",
-        "stage": "end_to_end_agentic_control_pipeline",
+        "stage": "staged_agentic_control_pipeline",
         "orchestration_mode": "agentic",
         "pipeline": [
-            "multiple_files",
-            "agent_calls_file_classification",
-            "agent_reads_control_catalogue",
+            "upload_and_classify",
+            "human_continue_to_control_planning",
             "agent_determines_required_controls",
+            "human_approves_control_execution",
             "agent_invokes_deterministic_tools",
+            "human_continue_to_investigation",
             "agentic_investigation",
             "human_decision",
-            "fund_manager_dashboard",
         ],
         "implemented_stages": [
-            "multiple_files",
-            "agent_calls_file_classification",
-            "agent_reads_control_catalogue",
-            "agent_determines_required_controls",
-            "agent_invokes_deterministic_tools",
+            "case_creation",
+            "file_classification",
+            "agent_control_planning",
+            "deterministic_control_execution",
             "agentic_investigation",
-            "lineage",
+            "human_decision_recording",
         ],
-        "partially_implemented_stages": {
-            "control_adapters": (
-                "The agent can select every recognised control, including bank-statement-to-cash "
-                "and bank-statement working-file pairs. Existing deterministic adapters execute "
-                "when available; unsupported controls remain adapter_pending rather than being "
-                "treated as passed."
-            ),
-            "human_decision": (
-                "The agent recommends a human action and exposes whether a decision is required; "
-                "durable decision recording remains a separate workflow capability."
-            ),
-        },
-        "recognised_source_types": [
-            "nav_workbook",
-            "investor_gl",
-            "lp_commitments",
-            "bank_statement_working_file",
-            "loader_template",
-            "capital_call_notice",
-            "lpa",
-            "side_letter",
-            "bank_statement",
-            "financial_statement",
-            "investor_report",
-            "positions",
-            "trades",
-            "bank_transactions",
-            "cash_transactions",
-        ],
+        "case_storage": "process_local",
         "control_boundary": (
-            "The ADK Fund Manager agent classifies evidence and chooses which registered controls "
-            "to invoke. Deterministic tools remain authoritative for financial calculations and "
-            "reconciliations; material decisions remain human-governed."
+            "The Fund Manager agent plans controls and investigates results. Deterministic tools "
+            "remain authoritative for calculations and reconciliations. The UI requires explicit "
+            "human confirmation before execution and before recording the final decision."
         ),
     }
+
+
+@router.post("/cases")
+@limiter.limit("1 per 5 seconds")
+async def create_fund_manager_case(
+    request: Request,
+    response: Response,
+    files: Annotated[list[UploadFile], File(description="One or more mixed evidence files")],
+    fund_name: Annotated[str | None, Form(description="Optional fund/entity name")] = None,
+    reporting_period: Annotated[str | None, Form(description="Optional reporting period")] = None,
+    as_of_date: Annotated[str | None, Form(description="Optional as-of date, YYYY-MM-DD")] = None,
+) -> dict[str, Any]:
+    """Create a case and perform classification only. No control or LLM analysis runs here."""
+
+    _require_upload_access()
+    items = await _read_upload_batch(files)
+    classification = _classification_report(
+        items,
+        fund_name=fund_name,
+        reporting_period=reporting_period,
+        as_of_date=as_of_date,
+    )
+    case = case_store.create(
+        items,
+        classification=classification,
+        fund_name=fund_name,
+        reporting_period=reporting_period,
+        as_of_date=as_of_date,
+    )
+    return case.public_view()
+
+
+@router.get("/cases/{case_id}")
+async def get_fund_manager_case(case_id: str) -> dict[str, Any]:
+    """Return the staged review state without returning uploaded file bytes."""
+
+    return _case_or_404(case_id).public_view()
+
+
+@router.post("/cases/{case_id}/plan")
+@limiter.limit("1 per 5 seconds")
+async def plan_fund_manager_case(
+    request: Request,
+    response: Response,
+    case_id: str,
+) -> dict[str, Any]:
+    """Ask the ADK planning agent which registered controls should run; execute nothing."""
+
+    _require_upload_access()
+    case = _case_or_404(case_id)
+    _require_stage(case, {"classified"})
+    try:
+        case.plan = await plan_case_controls(
+            case.classification,
+            fund_name=case.fund_name,
+            reporting_period=case.reporting_period,
+            as_of_date=case.as_of_date,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Fund Manager planning agent could not complete: {exc}",
+        ) from exc
+    case.stage = "planned"
+    case.touch()
+    return case.public_view()
+
+
+@router.post("/cases/{case_id}/execute")
+@limiter.limit("1 per 5 seconds")
+async def execute_fund_manager_case(
+    request: Request,
+    response: Response,
+    case_id: str,
+) -> dict[str, Any]:
+    """Execute only controls approved by advancing a planned case to this endpoint."""
+
+    _require_upload_access()
+    case = _case_or_404(case_id)
+    _require_stage(case, {"planned"})
+    if case.plan is None:
+        raise HTTPException(status_code=409, detail="The case does not contain a control plan.")
+    try:
+        case.execution = await execute_case_controls(
+            case.files,
+            case.classification,
+            case.plan,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Fund Manager execution agent could not complete: {exc}",
+        ) from exc
+    case.stage = "executed"
+    case.touch()
+    return case.public_view()
+
+
+@router.post("/cases/{case_id}/investigate")
+@limiter.limit("1 per 5 seconds")
+async def investigate_fund_manager_case(
+    request: Request,
+    response: Response,
+    case_id: str,
+) -> dict[str, Any]:
+    """Ask the agent to explain completed deterministic control results without changing them."""
+
+    _require_upload_access()
+    case = _case_or_404(case_id)
+    _require_stage(case, {"executed"})
+    if case.execution is None:
+        raise HTTPException(status_code=409, detail="The case does not contain execution results.")
+    try:
+        case.investigation = await investigate_case_execution(case.execution)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Fund Manager investigation agent could not complete: {exc}",
+        ) from exc
+    case.stage = "investigated"
+    case.touch()
+    return case.public_view()
+
+
+@router.post("/cases/{case_id}/decision")
+@limiter.limit("1 per 5 seconds")
+async def decide_fund_manager_case(
+    request: Request,
+    response: Response,
+    case_id: str,
+    decision: FundManagerDecision,
+) -> dict[str, Any]:
+    """Record the explicit human decision that closes or routes the staged review."""
+
+    _require_upload_access()
+    case = _case_or_404(case_id)
+    _require_stage(case, {"executed", "investigated"})
+    case.decision = {
+        "action": decision.action,
+        "note": decision.note,
+        "recorded_at": datetime.now(UTC).isoformat(),
+        "actor": "fund-manager-ui-user",
+    }
+    case.stage = "decided"
+    case.touch()
+    return case.public_view()
 
 
 @router.post("/classify")
@@ -128,32 +306,16 @@ async def classify_fund_evidence(
     reporting_period: Annotated[str | None, Form(description="Optional reporting period")] = None,
     as_of_date: Annotated[str | None, Form(description="Optional as-of date, YYYY-MM-DD")] = None,
 ) -> dict[str, Any]:
-    """Agent-facing classification tool for a mixed evidence batch.
-
-    The browser UI does not call this endpoint. The Fund Manager ADK flow performs classification
-    internally as its first tool call before it selects any control. This endpoint remains useful
-    for agent/tool integration and diagnostics.
-    """
+    """Compatibility/diagnostic classification endpoint without case creation."""
 
     _require_upload_access()
     items = await _read_upload_batch(files)
-    sources = classify_and_validate_sources(items)
-    rejected_count = sum(1 for source in sources if source["validation_status"] == "rejected")
-
-    return {
-        "fund_name": fund_name,
-        "reporting_period": reporting_period,
-        "as_of_date": as_of_date,
-        "generated_at": datetime.now(UTC).isoformat(),
-        "source_count": len(sources),
-        "unknown_count": rejected_count,
-        "accepted_count": len(sources) - rejected_count,
-        "rejected_count": rejected_count,
-        "sources": sources,
-        "control_boundary": (
-            "This is a source inventory, not a review result. No control has run yet."
-        ),
-    }
+    return _classification_report(
+        items,
+        fund_name=fund_name,
+        reporting_period=reporting_period,
+        as_of_date=as_of_date,
+    )
 
 
 @router.post("/analyse")
@@ -166,12 +328,9 @@ async def analyse_fund_evidence(
     reporting_period: Annotated[str | None, Form(description="Optional reporting period")] = None,
     as_of_date: Annotated[str | None, Form(description="Optional as-of date, YYYY-MM-DD")] = None,
 ) -> dict[str, Any]:
-    """Run the uploaded batch through the ADK Fund Manager control-orchestration agent.
+    """Backward-compatible one-shot agentic analysis endpoint.
 
-    The agent must classify the evidence first, read the closed control catalogue, choose the
-    applicable controls, and invoke deterministic tools for calculations/reconciliations. The agent
-    may investigate and explain tool outputs but cannot override deterministic financial results or
-    silently pass a control that lacks evidence or an implementation.
+    The Fund Manager browser UI uses the staged case endpoints instead.
     """
 
     _require_upload_access()
