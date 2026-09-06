@@ -8,11 +8,11 @@ from typing import Any, Literal
 
 from pydantic import ValidationError
 
-from app.bank_statement_tools import extract_bank_statement_balances
 from app.config import get_settings
 from app.container import get_engine
 from app.exception_investigation import investigate_exception as _investigate_exception
 from app.fund_reconciliation import (
+    CashBalance,
     EvidenceSource,
     ExceptionItem,
     parse_administrator_expenses,
@@ -693,20 +693,34 @@ def reconcile_cash(internal_cash_path: str, external_cash_path: str) -> dict[str
     }
 
 
-def reconcile_bank_statement_cash(
-    bank_statement_path: str, internal_cash_path: str
+def compare_bank_statement_cash(
+    bank_statement_path: str,
+    internal_cash_path: str,
+    account: str,
+    currency: str,
+    balance: str,
 ) -> dict[str, Any]:
-    """Compare internal fund cash balances against a real bank statement's extracted closing
-    balance, matched by (account, currency). This performs the same deterministic comparison as
-    reconcile_cash; use this one instead when the external side is a bank statement PDF rather
-    than a structured cash-balance export.
+    """Compare an internal cash balance against a bank statement's closing balance, matched by
+    (account, currency). This tool performs the arithmetic deterministically -- it never reads or
+    interprets the statement's raw text itself, so report only what it returns, never a figure you
+    computed yourself.
+
+    A bank statement's layout is too varied for a fixed rule to read reliably (label wording,
+    IBAN vs. routing/account number, an implied vs. explicit currency), so extracting the account,
+    currency and closing/available balance is your job: call read_document on
+    bank_statement_path first, find the closing/available balance and the account identifier in
+    its text, and pass exactly what you found here. This tool re-reads the statement file only to
+    stamp tamper-evident lineage (filename, SHA-256 hash) on any resulting exception -- it never
+    re-derives or double-checks the figures you extracted.
 
     Args:
-        bank_statement_path: Local path to the bank statement PDF (external side). Its account/
-            IBAN, currency and closing balance are extracted deterministically from the document
-            text; a statement whose layout does not expose these fails rather than guessing.
+        bank_statement_path: Local path to the bank statement PDF (used only for lineage; its
+            content is not re-parsed here).
         internal_cash_path: Local path to the internal cash-balance export (.json): an array, or
             an object with a cash_balances array, of {fund, account, currency, balance, ...}.
+        account: The account identifier or IBAN you found in the bank statement's text.
+        currency: The ISO currency code you found, or reasonably inferred, from the statement.
+        balance: The closing/available balance you found, as a decimal string (e.g. "12345.67").
     """
 
     internal, internal_source = _parse_input_file_with_evidence(
@@ -717,9 +731,19 @@ def reconcile_bank_statement_cash(
         parser=parse_cash_balances,
     )
     bank_statement_content = _read_file_bytes(bank_statement_path)
-    external = extract_bank_statement_balances(
-        bank_statement_content, Path(bank_statement_path).name
-    )
+    try:
+        external = [
+            CashBalance(
+                fund=Path(bank_statement_path).stem,
+                account=account,
+                currency=currency,
+                balance=balance,
+            )
+        ]
+    except (ValueError, TypeError, ArithmeticError, ValidationError) as exc:
+        raise ValueError(
+            f"Invalid extracted bank statement balance for {bank_statement_path!r}: {exc}"
+        ) from exc
     external_source = EvidenceSource(
         source_id="external_bank_statement",
         filename=Path(bank_statement_path).name,

@@ -9,6 +9,7 @@ from openpyxl import Workbook
 from reportlab.pdfgen import canvas
 
 from app.agent_tools import (
+    compare_bank_statement_cash,
     compare_dates,
     compare_periods,
     detect_exposure_breaches,
@@ -24,7 +25,6 @@ from app.agent_tools import (
     prioritise_exceptions,
     query_database,
     read_document,
-    reconcile_bank_statement_cash,
     reconcile_cash,
     reconcile_expense_allocations,
     reconcile_investor_gl_workbook,
@@ -443,7 +443,7 @@ def test_reconcile_cash_tool_flags_a_break(tmp_path: Path) -> None:
     assert all(ref["locator"] == "ACC1/USD" for ref in evidence)
 
 
-def test_reconcile_bank_statement_cash_tool_flags_a_break(tmp_path: Path) -> None:
+def test_compare_bank_statement_cash_tool_flags_a_break(tmp_path: Path) -> None:
     internal_path = _write_json(
         tmp_path / "internal-cash.json",
         [
@@ -458,12 +458,16 @@ def test_reconcile_bank_statement_cash_tool_flags_a_break(tmp_path: Path) -> Non
     statement_path = _write_pdf(
         tmp_path / "chase_statement.pdf",
         "Statement of Account",
-        "IBAN: GB29NWBK60161331926819",
-        "Currency: GBP",
         "Closing Balance: GBP 12,345.67",
     )
 
-    result = reconcile_bank_statement_cash(statement_path, internal_path)
+    result = compare_bank_statement_cash(
+        statement_path,
+        internal_path,
+        account="GB29NWBK60161331926819",
+        currency="GBP",
+        balance="12345.67",
+    )
 
     assert result["breaks"][0]["break_type"] == "balance_mismatch"
     evidence = result["exceptions"][0]["evidence"]
@@ -471,15 +475,23 @@ def test_reconcile_bank_statement_cash_tool_flags_a_break(tmp_path: Path) -> Non
     assert all(ref["locator"] == "GB29NWBK60161331926819/GBP" for ref in evidence)
 
 
-def test_reconcile_bank_statement_cash_tool_wraps_unreadable_statement(tmp_path: Path) -> None:
+def test_compare_bank_statement_cash_tool_rejects_a_malformed_extracted_balance(
+    tmp_path: Path,
+) -> None:
     internal_path = _write_json(
         tmp_path / "internal-cash.json",
         [{"fund": "Fund X", "account": "ACC1", "currency": "USD", "balance": 1000}],
     )
     statement_path = _write_pdf(tmp_path / "statement.pdf", "Statement of Account")
 
-    with pytest.raises(ValueError, match="closing/ending/current/available balance"):
-        reconcile_bank_statement_cash(statement_path, internal_path)
+    with pytest.raises(ValueError, match="Invalid extracted bank statement balance"):
+        compare_bank_statement_cash(
+            statement_path,
+            internal_path,
+            account="ACC1",
+            currency="USD",
+            balance="not-a-number",
+        )
 
 
 def test_reconcile_trades_tool_flags_a_break(tmp_path: Path) -> None:
