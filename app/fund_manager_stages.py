@@ -193,25 +193,33 @@ async def _run_agent(agent: Agent, prompt: str) -> tuple[dict[str, Any], list[st
     final_text = ""
     tool_trace: list[str] = []
 
-    async for event in runner.run_async(
-        user_id=USER_ID,
-        session_id=session_id,
-        new_message=message,
-    ):
-        content = getattr(event, "content", None)
-        for part in getattr(content, "parts", []) or []:
-            function_call = getattr(part, "function_call", None)
-            if function_call and getattr(function_call, "name", None):
-                tool_trace.append(str(function_call.name))
-        is_final = getattr(event, "is_final_response", None)
-        if callable(is_final) and is_final() and content:
-            texts = [
-                str(part.text)
-                for part in getattr(content, "parts", []) or []
-                if getattr(part, "text", None)
-            ]
-            if texts:
-                final_text = "\n".join(texts)
+    try:
+        async for event in runner.run_async(
+            user_id=USER_ID,
+            session_id=session_id,
+            new_message=message,
+        ):
+            content = getattr(event, "content", None)
+            for part in getattr(content, "parts", []) or []:
+                function_call = getattr(part, "function_call", None)
+                if function_call and getattr(function_call, "name", None):
+                    tool_trace.append(str(function_call.name))
+            is_final = getattr(event, "is_final_response", None)
+            if callable(is_final) and is_final() and content:
+                texts = [
+                    str(part.text)
+                    for part in getattr(content, "parts", []) or []
+                    if getattr(part, "text", None)
+                ]
+                if texts:
+                    final_text = "\n".join(texts)
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        # Network/API failures from the underlying Gemini call (timeouts, auth, quota,
+        # content-safety blocks) surface as google.genai/google.api_core exception types, not
+        # RuntimeError; normalise them so callers' `except RuntimeError` handling covers them too.
+        raise RuntimeError(f"{agent.name} could not complete: {exc}") from exc
 
     if not final_text:
         raise RuntimeError(f"{agent.name} completed without a final response.")

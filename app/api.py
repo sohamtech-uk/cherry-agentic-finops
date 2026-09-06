@@ -97,6 +97,22 @@ async def invalid_workflow_action_handler(_: Request, exc: InvalidWorkflowAction
     return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Backstop for any exception a route doesn't handle itself.
+
+    Without this, an uncaught exception falls through to Starlette's bare-text 500, which the
+    frontend's JSON-parsing error handling can't render cleanly. Logs the full traceback
+    server-side but never returns it to the client.
+    """
+
+    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An unexpected error occurred. Please try again."},
+    )
+
+
 @app.get("/", include_in_schema=False)
 async def home() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")

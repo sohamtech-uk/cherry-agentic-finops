@@ -355,6 +355,44 @@ def test_classify_endpoint_rejects_a_zip_with_too_many_files(
     assert response.status_code == 413
 
 
+def test_classify_endpoint_rejects_a_zip_with_an_encrypted_member(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = _zip_bytes({"positions.json": _positions()})
+
+    def boom(self: zipfile.ZipFile, *args: object, **kwargs: object) -> bytes:
+        raise RuntimeError("File 'positions.json' is encrypted, password required for extraction")
+
+    monkeypatch.setattr(zipfile.ZipFile, "read", boom)
+
+    response = client.post(
+        "/api/fund-manager/classify",
+        files=[("files", ("evidence.zip", archive, "application/zip"))],
+    )
+
+    assert response.status_code == 422
+    assert "password-protected" in response.json()["detail"]
+
+
+def test_classify_endpoint_rejects_a_zip_with_a_corrupt_member(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = _zip_bytes({"positions.json": _positions()})
+
+    def boom(self: zipfile.ZipFile, *args: object, **kwargs: object) -> bytes:
+        raise zipfile.BadZipFile("Bad CRC-32 for file 'positions.json'")
+
+    monkeypatch.setattr(zipfile.ZipFile, "read", boom)
+
+    response = client.post(
+        "/api/fund-manager/classify",
+        files=[("files", ("evidence.zip", archive, "application/zip"))],
+    )
+
+    assert response.status_code == 422
+    assert "could not be decompressed" in response.json()["detail"]
+
+
 def test_analyse_compatibility_endpoint_still_uses_agentic_flow() -> None:
     response = client.post(
         "/api/fund-manager/analyse",

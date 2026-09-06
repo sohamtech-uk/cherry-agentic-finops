@@ -2,6 +2,7 @@
   "use strict";
 
   const REQUEST_COOLDOWN_MS = 5000;
+  const REQUEST_TIMEOUT_MS = 120000;
   const CASE_KEY = "cherry_fund_manager_case_id";
   const TAB_KEY = "cherry_fund_manager_active_tab";
   const STEPS = [
@@ -155,7 +156,21 @@
       throw new Error(`Please wait ${Math.ceil(remaining / 1000)} seconds before retrying.`);
     }
     state.lastRequestAt.set(path, now);
-    const response = await fetch(path, options);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let response;
+    try {
+      response = await fetch(path, { ...options, signal: controller.signal });
+    } catch (error) {
+      if (error.name === "AbortError") {
+        throw new Error("The request timed out. Please try again.");
+      }
+      throw new Error("Could not reach the server. Check your connection and try again.");
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
     let body = {};
     try { body = await response.json(); } catch { body = {}; }
     if (!response.ok) {
