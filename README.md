@@ -11,6 +11,9 @@ The judge-facing experience is prepared for **Rebuild Private Markets: Ylookup Ã
 Hackathon**. Gemini interprets the PDF; deterministic Cherry controls decide whether evidence is
 strong enough to close, needs more evidence or requires independent human verification.
 
+## DEMO VIDEO URL
+https://youtu.be/Gyk8k4IRZW4
+
 ## Documentation
 
 - [Local setup guide](docs/LOCAL_SETUP.md) â€” clone, configure, run, test and troubleshoot Cherry FundOps locally.
