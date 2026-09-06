@@ -395,8 +395,12 @@
   }
 
   function decidedView(decision) {
+    const caseId = encodeURIComponent(state.caseData?.case_id || "");
     return `<div class="navqc-panel"><h3>NAV decision recorded</h3><p><strong>${esc(String(decision.action || "recorded").replaceAll("_", " "))}</strong></p>
-      ${decision.note ? `<p>${esc(decision.note)}</p>` : ""}<div class="navqc-actions"><button class="navqc-button secondary" id="navqc-back">← Back</button><button class="navqc-button secondary" id="navqc-history">View history</button></div></div>`;
+      ${decision.note ? `<p>${esc(decision.note)}</p>` : ""}
+      <div class="navqc-boundary"><strong>Summary report ready</strong><p>Download the final NAV review, evidence summary, findings and recorded human decision.</p>
+      <div class="navqc-actions"><a class="navqc-button primary" href="/api/fund-manager/cases/${caseId}/nav/report.pdf" download>Download summary PDF ↓</a><a class="navqc-button secondary" href="/api/fund-manager/cases/${caseId}/nav/report.xlsx" download>Download Excel report ↓</a></div></div>
+      <div class="navqc-actions"><button class="navqc-button secondary" id="navqc-back">← Back</button><button class="navqc-button secondary" id="navqc-history">View history</button></div></div>`;
   }
 
   function historyView() {
