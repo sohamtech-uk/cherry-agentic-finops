@@ -113,7 +113,6 @@
     busyTimer: null,
     viewStep: null,
   };
-  let launcherObserver = null;
 
   const esc = (value) => String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -152,48 +151,36 @@
     document.querySelector("#fm-workflow-tabs")?.remove();
   }
 
-  function syncContextualLauncher() {
+  function syncPostUploadLauncher() {
     removeLegacyWorkflowTabs();
-    const stage = document.querySelector("#fm-stage");
-    if (!stage || !state.caseData) return;
+    const head = document.querySelector("#fund-manager .fm-head");
+    if (!head) return;
 
-    const planButton = stage.querySelector("#fm-plan");
-    const existingLauncher = stage.querySelector("#fm-start-nav");
-    const existingHint = stage.querySelector("#fm-nav-applicable-hint");
-
-    if (!planButton || !navApplicable()) {
-      existingLauncher?.remove();
-      existingHint?.remove();
+    const existing = document.querySelector("#fm-nav-launcher");
+    if (!state.caseData) {
+      existing?.remove();
       return;
     }
+    if (existing) return;
 
-    planButton.textContent = "Continue General Document Review →";
-    const actions = planButton.closest(".fm-actions");
-    if (!actions || existingLauncher) return;
+    const wrapper = document.createElement("div");
+    wrapper.id = "fm-nav-launcher";
+    wrapper.className = "fm-actions";
 
-    const hint = document.createElement("div");
-    hint.id = "fm-nav-applicable-hint";
-    hint.className = "fm-boundary";
-    hint.innerHTML = "<strong>NAV review available.</strong> NAV-related evidence was recognised in this case. Choose which review you want to run next.";
-    actions.parentElement?.insertBefore(hint, actions);
-
-    const navButton = document.createElement("button");
-    navButton.type = "button";
-    navButton.id = "fm-start-nav";
-    navButton.className = "fm-button secondary";
-    navButton.textContent = "Start NAV Quality Control →";
-    navButton.addEventListener("click", () => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.id = "fm-start-nav";
+    button.className = "fm-button secondary";
+    button.textContent = "NAV Quality Controller →";
+    button.title = navApplicable()
+      ? "Open NAV Quality Controller using the evidence already uploaded to this case."
+      : "Open NAV Quality Controller and add NAV evidence if required.";
+    button.addEventListener("click", () => {
       window.setFundManagerTab?.("nav");
     });
-    actions.appendChild(navButton);
-  }
 
-  function observeGeneralReview() {
-    const stage = document.querySelector("#fm-stage");
-    if (!stage || launcherObserver) return;
-    launcherObserver = new MutationObserver(() => syncContextualLauncher());
-    launcherObserver.observe(stage, { childList: true, subtree: true });
-    syncContextualLauncher();
+    wrapper.appendChild(button);
+    head.appendChild(wrapper);
   }
 
   function rememberCase(payload, { broadcast = true } = {}) {
@@ -202,7 +189,7 @@
     state.viewStep = null;
     localStorage.setItem(CASE_KEY, payload.case_id);
     render();
-    queueMicrotask(syncContextualLauncher);
+    queueMicrotask(syncPostUploadLauncher);
     if (broadcast) {
       window.dispatchEvent(new CustomEvent("fund-manager-case-updated", { detail: payload }));
     }
@@ -277,7 +264,7 @@
   }
 
   function noCase() {
-    return '<div class="navqc-panel"><h3>Upload evidence first</h3><div class="navqc-empty">NAV Quality Control starts only after a Fund Manager case has been created and NAV-related evidence is recognised.</div></div>';
+    return '<div class="navqc-panel"><h3>Upload evidence first</h3><div class="navqc-empty">NAV Quality Control starts after a Fund Manager case has been created.</div></div>';
   }
 
   function busyActionFor(path) {
@@ -348,7 +335,7 @@
     const relevant = sources.filter((source) => NAV_TYPES.has(source.detected_type));
     const current = currentStep() === 0;
     return `<div class="navqc-panel"><h3>NAV Evidence</h3><p>Confirm the NAV-related evidence recognised in this case before checking readiness.</p>
-      <div class="navqc-grid">${relevant.map((source) => `<div class="navqc-item"><div class="navqc-item-head"><strong>${esc(source.filename)}</strong>${pill(source.validation_status === "accepted" ? "ready" : "review")}</div><p>${esc(source.detected_type)}</p></div>`).join("") || '<div class="navqc-empty">No NAV-specific evidence identified yet.</div>'}</div>
+      <div class="navqc-grid">${relevant.map((source) => `<div class="navqc-item"><div class="navqc-item-head"><strong>${esc(source.filename)}</strong>${pill(source.validation_status === "accepted" ? "ready" : "review")}</div><p>${esc(source.detected_type)}</p></div>`).join("") || '<div class="navqc-empty">No NAV-specific evidence identified yet. Add new or missing evidence below if NAV review is required.</div>'}</div>
       ${current ? evidenceUploadPanel() : ""}<div class="navqc-actions">${current ? '<button class="navqc-button primary" id="navqc-readiness">Check readiness →</button>' : historicalNav()}</div></div>`;
   }
 
@@ -521,7 +508,7 @@
     const id = state.caseData?.case_id;
     document.querySelector("#navqc-exit")?.addEventListener("click", () => {
       window.setFundManagerTab?.("general");
-      queueMicrotask(syncContextualLauncher);
+      queueMicrotask(syncPostUploadLauncher);
     });
     document.querySelector("#navqc-back")?.addEventListener("click", goBack);
     document.querySelector("#navqc-current-step")?.addEventListener("click", () => {
@@ -600,17 +587,16 @@
     state.viewStep = null;
     window.setFundManagerTab?.("general");
     render();
-    queueMicrotask(syncContextualLauncher);
+    queueMicrotask(syncPostUploadLauncher);
   });
   window.addEventListener("fund-manager-nav-tab-opened", () => render());
 
   injectStyles();
   document.addEventListener("DOMContentLoaded", async () => {
     mount();
-    observeGeneralReview();
     await restore();
     removeLegacyWorkflowTabs();
     window.setFundManagerTab?.("general");
-    syncContextualLauncher();
+    syncPostUploadLauncher();
   });
 })();
