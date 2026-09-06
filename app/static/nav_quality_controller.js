@@ -147,32 +147,34 @@
     ));
   }
 
-  function syncControlLauncher() {
-    const stage = document.querySelector("#fm-stage");
-    if (!stage) return;
-    const executeButton = stage.querySelector("#fm-execute");
-    const existingLauncher = stage.querySelector("#fm-start-nav");
+  function removeLegacyWorkflowTabs() {
+    document.querySelector("#fm-workflow-tabs")?.remove();
+  }
 
-    if (!executeButton || !state.caseData) {
-      existingLauncher?.remove();
+  function syncPostUploadLauncher() {
+    removeLegacyWorkflowTabs();
+    const head = document.querySelector("#fund-manager .fm-head");
+    if (!head) return;
+    const existing = document.querySelector("#fm-nav-launcher");
+    if (!state.caseData) {
+      existing?.remove();
       return;
     }
-
-    const actions = executeButton.closest(".fm-actions");
-    if (!actions || existingLauncher) return;
-
-    const navButton = document.createElement("button");
-    navButton.type = "button";
-    navButton.id = "fm-start-nav";
-    navButton.className = "fm-button secondary";
-    navButton.textContent = "NAV Quality Controller →";
-    navButton.title = navApplicable()
+    if (existing) return;
+    const wrapper = document.createElement("div");
+    wrapper.id = "fm-nav-launcher";
+    wrapper.className = "fm-actions";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.id = "fm-start-nav";
+    button.className = "fm-button secondary";
+    button.textContent = "NAV Quality Controller →";
+    button.title = navApplicable()
       ? "Open NAV Quality Controller using the evidence already uploaded to this case."
       : "Open NAV Quality Controller and add NAV evidence if required.";
-    navButton.addEventListener("click", () => {
-      window.setFundManagerTab?.("nav");
-    });
-    actions.appendChild(navButton);
+    button.addEventListener("click", () => window.setFundManagerTab?.("nav"));
+    wrapper.appendChild(button);
+    head.appendChild(wrapper);
   }
 
   function rememberCase(payload, { broadcast = true } = {}) {
@@ -181,7 +183,7 @@
     state.viewStep = null;
     localStorage.setItem(CASE_KEY, payload.case_id);
     render();
-    queueMicrotask(syncControlLauncher);
+    queueMicrotask(syncPostUploadLauncher);
     if (broadcast) window.dispatchEvent(new CustomEvent("fund-manager-case-updated", { detail: payload }));
   }
 
@@ -204,6 +206,7 @@
   }
 
   function mount() {
+    removeLegacyWorkflowTabs();
     if (document.querySelector("#nav-quality-controller")) return;
     const anchor = document.querySelector("#fund-manager") || document.querySelector(".source-strip");
     if (!anchor) return;
@@ -335,12 +338,12 @@
   function readinessView(readiness) {
     const inputs = readiness.inputs || {};
     const rows = [
-      ["nav_summary", "Administrator NAV summary", inputs.nav_summary, true],
+      ["nav_summary", "Administrator NAV summary", inputs.nav_summary, false],
       ["source_ledger", "Investor-level GL", inputs.source_ledger, false],
       ["side_letter_rules", "Structured side-letter rules", inputs.side_letter_rules, false],
     ];
     const current = currentStep() === 1;
-    return `<div class="navqc-panel"><h3>Readiness</h3><p>Confirm the required NAV inputs before reconciliation. Missing evidence can be added directly to the relevant section.</p>
+    return `<div class="navqc-panel"><h3>Readiness</h3><p>Confirm the available NAV inputs before reconciliation. Missing optional evidence can be added directly to the relevant section.</p>
       <div class="navqc-grid">${rows.map(([key, label, item, required]) => `<div class="navqc-item"><div class="navqc-item-head"><strong>${esc(label)}</strong>${pill(item ? "ready" : required ? "needs_review" : "optional_evidence")}</div><p>${item ? esc(item.filename) : "Not supplied / not identified"}</p>${!item && current ? `<div class="navqc-actions"><button type="button" class="navqc-button secondary" data-readiness-upload="${esc(key)}">Upload evidence</button><input type="file" hidden data-readiness-file="${esc(key)}" accept="${esc(readinessAccept(key))}"></div>` : ""}</div>`).join("")}</div>
       ${(readiness.blockers || []).map((blocker) => `<div class="navqc-blocker">${esc(blocker)}</div>`).join("")}
       ${current ? evidenceUploadPanel() : ""}<div class="navqc-actions">${backButton()}${current ? `<button class="navqc-button primary" id="navqc-reconcile" ${readiness.status === "ready" ? "" : "disabled"}>Run reconciliation →</button><button class="navqc-button secondary" id="navqc-refresh">Recheck readiness</button>` : historicalNav()}</div></div>`;
@@ -504,7 +507,7 @@
     const id = state.caseData?.case_id;
     document.querySelector("#navqc-exit")?.addEventListener("click", () => {
       window.setFundManagerTab?.("general");
-      queueMicrotask(syncControlLauncher);
+      queueMicrotask(syncPostUploadLauncher);
     });
     document.querySelector("#navqc-back")?.addEventListener("click", goBack);
     document.querySelector("#navqc-current-step")?.addEventListener("click", () => {
@@ -576,7 +579,7 @@
     state.viewStep = null;
     window.setFundManagerTab?.("general");
     render();
-    queueMicrotask(syncControlLauncher);
+    queueMicrotask(syncPostUploadLauncher);
   });
   window.addEventListener("fund-manager-nav-tab-opened", () => render());
 
@@ -584,7 +587,8 @@
   document.addEventListener("DOMContentLoaded", async () => {
     mount();
     await restore();
+    removeLegacyWorkflowTabs();
     window.setFundManagerTab?.("general");
-    syncControlLauncher();
+    syncPostUploadLauncher();
   });
 })();
