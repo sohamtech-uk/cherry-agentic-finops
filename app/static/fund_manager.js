@@ -227,9 +227,9 @@
     if (!state.caseData) return "";
     return `<details class="fm-control-plan fm-add-evidence"><summary>Add new or missing evidence</summary>
       <div class="fm-boundary">Only newly selected files are submitted. Existing case evidence is not uploaded again. Adding evidence resets results that depended on the previous evidence set.</div>
-      <div class="fm-dropzone compact" id="fm-dropzone"><strong>Add new evidence</strong><span>PDF · XLSX · CSV · JSON</span>
+      <div class="fm-dropzone compact" id="fm-dropzone"><strong>Add new evidence</strong><span>PDF · XLSX · CSV · JSON · ZIP</span>
       <button type="button" class="fm-button secondary" id="fm-browse">Browse new files</button>
-      <input type="file" id="fm-file-input" multiple accept=".pdf,.xlsx,.xls,.csv,.json,.txt"></div>
+      <input type="file" id="fm-file-input" multiple accept=".pdf,.xlsx,.xls,.csv,.json,.txt,.zip,application/zip,application/x-zip-compressed"></div>
       <div class="fm-file-list">${pendingFileRows()}</div><div class="fm-actions">
       <button type="button" class="fm-button primary" id="fm-add-evidence" ${state.files.length && !state.busy ? "" : "disabled"}>Add selected evidence</button>
       ${state.files.length ? '<button type="button" class="fm-button ghost" id="fm-clear">Clear selection</button>' : ""}</div></details>`;
@@ -247,9 +247,9 @@
 
   function renderUpload() {
     return `<div class="fm-stage-head"><span class="fm-kicker">Start</span><h3>Upload evidence</h3><p>Create the case with the initial evidence set. No review control runs at this point.</p></div>
-      <div class="fm-dropzone" id="fm-dropzone"><strong>Drop evidence here</strong><span>PDF · XLSX · CSV · JSON</span>
+      <div class="fm-dropzone" id="fm-dropzone"><strong>Drop evidence here</strong><span>PDF · XLSX · CSV · JSON · ZIP</span>
       <button type="button" class="fm-button secondary" id="fm-browse">Browse files</button>
-      <input type="file" id="fm-file-input" multiple accept=".pdf,.xlsx,.xls,.csv,.json,.txt"></div>
+      <input type="file" id="fm-file-input" multiple accept=".pdf,.xlsx,.xls,.csv,.json,.txt,.zip,application/zip,application/x-zip-compressed"></div>
       <div class="fm-file-list">${pendingFileRows()}</div><div class="fm-actions">
       <button type="button" class="fm-button primary" id="fm-classify" ${state.files.length && !state.busy ? "" : "disabled"}>Create case & review evidence</button>
       ${state.files.length ? '<button type="button" class="fm-button ghost" id="fm-clear">Clear selection</button>' : ""}</div>`;

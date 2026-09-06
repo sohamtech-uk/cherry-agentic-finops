@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import io
+import mimetypes
 import os
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -53,6 +56,53 @@ def _safe_file_name(value: str | None, fallback: str) -> str:
     return candidate if candidate not in {"", ".", ".."} else fallback
 
 
+def _extract_zip_entries(
+    content: bytes, zip_name: str, max_bytes: int
+) -> list[tuple[str, bytes, str | None]]:
+    """Decompress an uploaded zip archive into its member files.
+
+    Directories, macOS resource-fork clutter (__MACOSX/, dotfiles) and nested archives are
+    skipped; nested zips are not recursively expanded to keep zip-bomb risk bounded.
+    """
+
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(content))
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(
+            status_code=422, detail=f"{zip_name} is not a valid zip archive."
+        ) from exc
+
+    members = [
+        info
+        for info in archive.infolist()
+        if not info.is_dir()
+        and "__MACOSX" not in info.filename
+        and Path(info.filename).name
+        and not Path(info.filename).name.startswith(".")
+    ]
+    if len(members) > MAX_FILES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"{zip_name} contains more than {MAX_FILES} files.",
+        )
+
+    entries: list[tuple[str, bytes, str | None]] = []
+    for info in members:
+        if info.file_size > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"{zip_name}:{Path(info.filename).name} exceeds the "
+                    f"{settings.max_upload_mb} MB upload limit."
+                ),
+            )
+        member_name = _safe_file_name(Path(info.filename).name, "evidence")
+        member_content = archive.read(info)
+        content_type, _ = mimetypes.guess_type(member_name)
+        entries.append((member_name, member_content, content_type))
+    return entries
+
+
 async def _read_upload_batch(files: list[UploadFile]) -> list[tuple[str, bytes, str | None]]:
     if not files:
         raise HTTPException(status_code=422, detail="At least one file is required.")
@@ -69,7 +119,18 @@ async def _read_upload_batch(files: list[UploadFile]) -> list[tuple[str, bytes, 
                 status_code=413,
                 detail=f"{file_name} exceeds the {settings.max_upload_mb} MB upload limit.",
             )
-        items.append((file_name, content, upload.content_type))
+        if file_name.casefold().endswith(".zip"):
+            items.extend(_extract_zip_entries(content, file_name, max_bytes))
+        else:
+            items.append((file_name, content, upload.content_type))
+
+    if not items:
+        raise HTTPException(status_code=422, detail="At least one file is required.")
+    if len(items) > MAX_FILES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Maximum {MAX_FILES} files per batch (zip archives count their contents).",
+        )
     return items
 
 
