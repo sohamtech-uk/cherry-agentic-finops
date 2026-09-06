@@ -18,6 +18,41 @@
   --fm-danger-soft: #fbecee;
 }
 
+.fm-workflow-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  gap: 4px;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 18px clamp(20px, 5vw, 78px) 0;
+  background: #fff;
+}
+.fm-workflow-tabs button {
+  min-height: 44px;
+  padding: 0 20px;
+  color: var(--fm-muted);
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.fm-workflow-tabs button.active {
+  color: var(--fm-navy);
+  border-bottom-color: var(--fm-red);
+}
+.fm-workflow-tabs button:disabled {
+  opacity: .42;
+  cursor: not-allowed;
+}
+.fm-shell[hidden], .navqc-shell[hidden] { display: none !important; }
+.fm-add-evidence { margin-top: 22px; padding: 16px; border: 1px solid var(--fm-line); border-radius: 12px; background: #fbfcff; }
+.fm-add-evidence .fm-boundary { margin-top: 12px; }
+.fm-dropzone.compact { min-height: 120px; margin-top: 14px; padding: 18px; }
+
 .fm-shell {
   padding: 92px clamp(20px, 5vw, 78px) 104px;
   color: var(--fm-ink);
@@ -92,7 +127,6 @@
 .fm-plan-file { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
 .fm-plan-control { color: var(--fm-muted); }
 .fm-plan-reason { grid-column: 1 / -1; color: var(--fm-muted); line-height: 1.45; }
-
 .fm-stepper { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 28px; }
 .fm-step { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--fm-line); border-radius: 10px; color: var(--fm-muted); background: var(--fm-paper); }
 .fm-step span { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: white; border: 1px solid var(--fm-line); font-size: 10px; font-weight: 900; }
@@ -112,6 +146,8 @@
 .fm-decision-card > p { margin: 0 0 16px; color: var(--fm-navy); font-size: 13px; }
 
 @media (max-width: 780px) {
+  .fm-workflow-tabs { position: static; padding: 12px 16px 0; overflow-x: auto; }
+  .fm-workflow-tabs button { white-space: nowrap; }
   .fm-stepper { grid-template-columns: 1fr; }
   .fm-step { display: none; }
   .fm-step.active { display: flex; }
