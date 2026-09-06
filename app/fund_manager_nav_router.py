@@ -97,7 +97,11 @@ async def get_nav_workflow(case_id: str) -> dict[str, Any]:
 
 @router.post("/{case_id}/nav/readiness")
 @limiter.limit("1 per 5 seconds")
-async def assess_nav_readiness(request: Request, response: Response, case_id: str) -> dict[str, Any]:
+async def assess_nav_readiness(
+    request: Request,
+    response: Response,
+    case_id: str,
+) -> dict[str, Any]:
     _require_upload_access()
     case = _case_or_404(case_id)
     case.nav_readiness = build_nav_readiness(case)
@@ -189,7 +193,10 @@ async def review_nav_case(request: Request, response: Response, case_id: str) ->
     try:
         case.nav_review = await run_case_nav_review(case)
     except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=f"NAV review agent could not complete: {exc}") from exc
+        raise HTTPException(
+            status_code=502,
+            detail=f"NAV review agent could not complete: {exc}",
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     case.touch()
@@ -207,9 +214,15 @@ async def decide_nav_case(
     _require_upload_access()
     case = _case_or_404(case_id)
     if case.nav_reconciliation is None:
-        raise HTTPException(status_code=409, detail="Run NAV reconciliation before recording a NAV decision.")
+        raise HTTPException(
+            status_code=409,
+            detail="Run NAV reconciliation before recording a NAV decision.",
+        )
     if case.nav_review is None:
-        raise HTTPException(status_code=409, detail="Run the agentic NAV review before recording a NAV decision.")
+        raise HTTPException(
+            status_code=409,
+            detail="Run the agentic NAV review before recording a NAV decision.",
+        )
     case.nav_decision = {
         "action": decision.action,
         "note": decision.note,
