@@ -1,4 +1,3 @@
-# ruff: noqa: I001
 from __future__ import annotations
 
 import json
@@ -6,13 +5,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from pydantic import ValidationError
-
 import app.nav_quality as nav_quality
 from app.agent_tools import run_nav_quality_review
 from app.fund_manager_cases import FundManagerCase
 from app.fund_manager_stages import investigate_case_execution
 from app.nav_review_history import get_nav_review_history_store
+from pydantic import ValidationError
 
 
 ROUND_REDUCTION_TARGET = {
