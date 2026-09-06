@@ -7,6 +7,7 @@
   <title>Cherry CFO — NAV Close Workbench</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2216%22 fill=%22%23dff7cf%22/><text x=%2232%22 y=%2243%22 text-anchor=%22middle%22 font-size=%2236%22 font-family=%22Arial%22 font-weight=%22700%22 fill=%22%23163c32%22>C</text></svg>">
   <link rel="stylesheet" href="/static/cfo_canvas.css">
+  <link rel="stylesheet" href="/static/cfo_canvas_patch.css">
 </head>
 <body>
   <div class="app-shell">
@@ -165,10 +166,10 @@
       <div class="dialog-icon">＋</div>
       <p class="eyebrow">Add to NAV close workbench</p>
       <h2>Upload evidence</h2>
-      <p class="dialog-lead">Bring the pack as it exists. Cherry will classify each file and only enable controls supported by the evidence.</p>
+      <p class="dialog-lead">Bring the pack as it exists. Mix files from different evidence sources; Cherry will classify each file and only enable controls supported by the evidence.</p>
       <button class="drop-card" type="button" id="choose-files">
         <span>Drop files here or choose files</span>
-        <small>PDF, Excel, CSV, JSON, text, Markdown or ZIP · up to 25 files</small>
+        <small>PDF, Excel, CSV, JSON, text, Markdown or ZIP · select several batches · up to 25 files</small>
       </button>
       <div class="selected-files" id="selected-files"></div>
       <div class="metadata-grid">
@@ -203,5 +204,6 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="/static/cfo_canvas.js" defer></script>
+  <script src="/static/cfo_canvas_patch.js" defer></script>
 </body>
 </html>
