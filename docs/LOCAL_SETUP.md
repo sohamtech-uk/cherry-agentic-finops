@@ -129,6 +129,18 @@ GOOGLE_API_KEY=
 
 Some Fund Manager agentic stages will not be able to complete without a configured Gemini provider.
 
+### Neatlogs tracing
+
+To send Google ADK and Gemini agent traces to the project's Neatlogs workspace, set the project
+API key in the ignored `.env` file:
+
+```env
+NEATLOGS_API_KEY=YOUR_PROJECT_KEY
+NEATLOGS_WORKFLOW_NAME=fund-manager-control-review
+```
+
+Leave `NEATLOGS_API_KEY` empty to run without exporting traces. Never commit a populated key.
+
 ### Option B — Gemini Developer API
 
 Set:

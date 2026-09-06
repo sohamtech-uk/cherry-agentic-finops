@@ -60,6 +60,14 @@ class Settings(BaseSettings):
         default=None,
         validation_alias="VERCEL_OIDC_TOKEN",
     )
+    neatlogs_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias="NEATLOGS_API_KEY",
+    )
+    neatlogs_workflow_name: str = Field(
+        default="fund-manager-control-review",
+        validation_alias="NEATLOGS_WORKFLOW_NAME",
+    )
 
     google_cloud_project: str | None = Field(default=None, validation_alias="GOOGLE_CLOUD_PROJECT")
     google_cloud_location: str = Field(default="global", validation_alias="GOOGLE_CLOUD_LOCATION")

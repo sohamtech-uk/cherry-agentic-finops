@@ -1,3 +1,4 @@
+# ruff: noqa: E402, I001
 from __future__ import annotations
 
 import json
@@ -6,6 +7,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 from uuid import uuid4
+
+import neatlogs
+
+from app.observability import initialize_neatlogs
+
+initialize_neatlogs()
 
 from google.adk.agents import Agent
 from google.adk.runners import Runner
@@ -188,7 +195,9 @@ async def _run_agent(agent: Agent, prompt: str) -> tuple[dict[str, Any], list[st
         user_id=USER_ID,
         session_id=session_id,
     )
-    runner = Runner(agent=agent, app_name=APP_NAME, session_service=session_service)
+    runner = neatlogs.wrap(
+        Runner(agent=agent, app_name=APP_NAME, session_service=session_service)
+    )
     message = types.Content(role="user", parts=[types.Part(text=prompt)])
     final_text = ""
     tool_trace: list[str] = []

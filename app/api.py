@@ -1,10 +1,15 @@
+# ruff: noqa: E402, I001
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, cast
 
+import neatlogs
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -12,6 +17,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import TypeAdapter, ValidationError
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+
+from app.observability import initialize_neatlogs
+
+initialize_neatlogs()
 
 from app.cash_application.router import router as controller_review_router
 from app.config import get_settings
@@ -44,6 +53,14 @@ engine = get_engine()
 extractor = GeminiDocumentExtractor(settings)
 transaction_adapter = TypeAdapter(list[BankTransaction])
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    yield
+    await asyncio.to_thread(neatlogs.flush)
+    await asyncio.to_thread(neatlogs.shutdown)
+
+
 app = FastAPI(
     title="Cherry Agent API",
     version="0.1.0",
@@ -53,6 +70,7 @@ app = FastAPI(
     ),
     docs_url="/api/docs",
     redoc_url="/api/redoc",
+    lifespan=lifespan,
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, cast(Any, _rate_limit_exceeded_handler))

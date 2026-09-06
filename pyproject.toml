@@ -27,6 +27,7 @@ dependencies = [
   "pypdf>=5,<7",
   "reportlab>=4.2,<5",
   "slowapi>=0.1.9,<1",
+  "neatlogs==1.4.21",
 ]
 
 [project.optional-dependencies]
@@ -85,3 +86,7 @@ exclude = ["tests"]
 [[tool.mypy.overrides]]
 module = ["app.private_markets", "app.document_ai"]
 disable_error_code = ["arg-type"]
+
+[[tool.mypy.overrides]]
+module = ["neatlogs"]
+ignore_missing_imports = true
