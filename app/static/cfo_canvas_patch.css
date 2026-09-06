@@ -1,0 +1,183 @@
+/* Syndicate NAV workbench accessibility + viewport fixes.
+   Loaded after cfo_canvas.css so these rules intentionally override the base canvas theme. */
+
+:root {
+  --ink: #111714;
+  --muted: #46534d;
+}
+
+body {
+  color: #18201c;
+}
+
+/* Increase contrast for secondary text. The original palette was too faint on bright displays. */
+.breadcrumbs { color: #4f5b55; }
+.breadcrumbs > span:not(:last-child) { color: #87918c; }
+.side-heading { color: #5e6a64; }
+.empty-docs { color: #5e6964; background: rgba(255,255,255,.8); }
+.new-document { color: #4f5a55; }
+.workflow-row { color: #39443f; }
+.workflow-row:disabled { opacity: .68; }
+.workflow-row small { color: #65716b; }
+.workflow-icon { color: #59655f; }
+.side-boundary small { color: #5f6b65; }
+.runtime-pill { color: #53605a; }
+.eyebrow { color: #65716b; }
+.empty-state { color: #3e4944; z-index: 8; }
+.empty-state h1 { color: #17201b; }
+.empty-state > p:not(.eyebrow) { color: #55625c; }
+.empty-actions span { color: #65716b; }
+.accepted-types { color: #68746e; }
+.board-toolbar button,.board-toolbar span { color: #4e5b55; }
+.flow-actions button { color: #48554f; }
+.flow-actions button:disabled { opacity: .62; }
+.node-kicker { color: #66726c; }
+.node-source { color: #56625c; }
+.node-subtitle { color: #58655f; }
+.node-metric span { color: #65716b; }
+.node-foot { color: #5e6b65; }
+.inspector-summary { color: #53605a; }
+.detail-row span { color: #65716b; }
+.source-item small { color: #65716b; }
+.composer input { color: #202a25; }
+.composer input::placeholder { color: #69766f; opacity: 1; }
+.dock-empty,.dock-item span { color: #66726c; }
+.dialog-lead { color: #53605a; }
+.drop-card { color: #2e3934; }
+.drop-card small { color: #5f6c66; }
+.selected-file { color: #222c27; }
+.selected-file small { color: #61706a; }
+.metadata-grid small,.decision-note small { color: #65716b; }
+.metadata-grid input::placeholder,.decision-note textarea::placeholder { color: #737e78; opacity: 1; }
+
+/* The empty-state hero lives inside an 1800px virtual canvas. JS repositions it to the
+   visible viewport; these rules make that viewport-first state compact enough that the CTA
+   cannot be covered by the composer/dock on laptop screens. */
+.empty-state {
+  width: min(660px, calc(100vw - 360px));
+  max-width: 660px;
+}
+.empty-state h1 {
+  font-size: clamp(30px, 3vw, 44px);
+  line-height: 1.08;
+}
+.empty-state > p:not(.eyebrow) {
+  max-width: 610px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.empty-actions { margin-top: 20px; }
+.empty-actions button {
+  min-height: 44px;
+  padding: 0 20px;
+  font-size: 12px;
+}
+.accepted-types { font-size: 9px; }
+
+/* Before the user uploads evidence, keep the hero action unobstructed. The chat composer
+   and asset dock become useful once a case exists, so hide them only in the initial state. */
+.app-shell:has(.empty-state:not(.hidden)) .composer,
+.app-shell:has(.empty-state:not(.hidden)) .asset-dock {
+  display: none;
+}
+
+/* Upload dialog: clearer hierarchy and better behaviour on 13-inch / 768px-high displays. */
+dialog[open] {
+  max-height: 94vh;
+}
+.dialog-card {
+  max-height: 92vh;
+  overflow-y: auto;
+  color: #17201b;
+}
+.dialog-card h2 { color: #101713; }
+.drop-card {
+  border: 1.5px dashed #8d9b93;
+  background: #fbfcfa;
+}
+.drop-card:hover { border-color: var(--forest); background: #f6faf4; }
+.selected-files { max-height: 190px; }
+.selected-file {
+  gap: 10px;
+  padding: 9px 8px;
+}
+.selected-file > span { flex: 1; min-width: 0; }
+.selected-file small { flex: 0 0 auto; }
+.selected-file-remove {
+  width: 25px;
+  height: 25px;
+  flex: 0 0 auto;
+  border: 1px solid #dfe4df;
+  border-radius: 7px;
+  color: #5d6963;
+  background: #fff;
+  font-size: 13px;
+  line-height: 1;
+}
+.selected-file-remove:hover { color: #9e4335; border-color: #e8b9b0; background: #fff4f1; }
+
+.multi-source-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #e1e6e1;
+  border-radius: 10px;
+  background: #f7f9f6;
+}
+.multi-source-tools strong {
+  width: 100%;
+  color: #334039;
+  font-size: 9px;
+}
+.multi-source-tools button {
+  min-height: 31px;
+  padding: 0 10px;
+  border: 1px solid #ced6cf;
+  border-radius: 8px;
+  color: #34413a;
+  background: #fff;
+  font-size: 9px;
+  font-weight: 700;
+}
+.multi-source-tools button:hover { border-color: #91aa87; background: #f4faf1; }
+.multi-source-tools small {
+  width: 100%;
+  color: #5f6c66;
+  font-size: 8.5px;
+  line-height: 1.45;
+}
+.selected-file-count {
+  margin-right: auto;
+  color: #52605a;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+/* Keep the top upload action prominent even when the workflow buttons are disabled. */
+.upload-primary {
+  min-width: 126px;
+  box-shadow: 0 4px 12px rgba(22,63,53,.12);
+}
+
+@media (max-height: 780px) and (min-width: 721px) {
+  .empty-logo { width: 56px; height: 56px; margin-bottom: 12px; box-shadow: inset 0 0 0 11px #f5f9f2; }
+  .empty-state h1 { font-size: 31px; }
+  .empty-state > p:not(.eyebrow) { margin-top: 10px; font-size: 11px; }
+  .empty-actions { margin-top: 14px; }
+  .accepted-types { margin-top: 9px; }
+  .dialog-card { padding: 20px; }
+  .dialog-icon { margin-bottom: 10px; }
+  .dialog-lead { margin-bottom: 12px; }
+  .drop-card { padding: 16px; }
+}
+
+@media (max-width: 720px) {
+  .empty-state { width: calc(100vw - 32px); }
+  .empty-state h1 { font-size: 28px; }
+  .empty-actions { flex-direction: column; gap: 8px; }
+  .empty-actions button { width: 100%; }
+  .upload-primary { min-width: 0; }
+}
