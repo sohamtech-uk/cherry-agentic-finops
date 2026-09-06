@@ -40,7 +40,6 @@
   };
 
   const q = (selector, root = document) => root.querySelector(selector);
-  const qAll = (selector, root = document) => [...root.querySelectorAll(selector)];
   const esc = (value) => String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -62,11 +61,7 @@
   }
 
   function shellMarkup() {
-    return `<div class="fm-workflow-tabs" id="fm-workflow-tabs" role="tablist" aria-label="Fund Manager workflow">
-      <button type="button" class="active" role="tab" aria-selected="true" data-fm-tab="general">General Document Review</button>
-      <button type="button" role="tab" aria-selected="false" data-fm-tab="nav" disabled>NAV Quality Controller</button>
-    </div>
-    <section class="fm-shell" id="fund-manager" aria-labelledby="fm-title"><div class="fm-inner">
+    return `<section class="fm-shell" id="fund-manager" aria-labelledby="fm-title"><div class="fm-inner">
       <div class="fm-head"><p class="fm-kicker">Cherry Fund Manager · document controls</p>
       <h2 id="fm-title">General Document Review</h2>
       <p>Upload evidence once, review the proposed controls, inspect results and findings, then record a decision.</p></div>
@@ -95,18 +90,11 @@
     const nav = q("#nav-quality-controller");
     if (general) general.hidden = requested !== "general";
     if (nav) nav.hidden = requested !== "nav";
-    qAll("[data-fm-tab]").forEach((button) => {
-      const active = button.dataset.fmTab === requested;
-      button.classList.toggle("active", active);
-      button.setAttribute("aria-selected", String(active));
-    });
     localStorage.setItem(TAB_KEY, requested);
     if (requested === "nav") window.dispatchEvent(new CustomEvent("fund-manager-nav-tab-opened"));
   }
 
   function refreshTabAvailability() {
-    const navButton = q('[data-fm-tab="nav"]');
-    if (navButton) navButton.disabled = !state.caseData;
     setTab(localStorage.getItem(TAB_KEY) || "general");
   }
 
@@ -403,10 +391,6 @@
   }
 
   function wireEvents() {
-    q("#fm-workflow-tabs")?.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-fm-tab]");
-      if (button && !button.disabled) setTab(button.dataset.fmTab);
-    });
     q("#fm-stage")?.addEventListener("click", (event) => {
       const target = event.target.closest("button");
       if (!target) return;
