@@ -11,7 +11,108 @@
     "lpa",
   ]);
   const STEPS = ["NAV Evidence", "Readiness", "Reconcile", "Exception Review", "Decision"];
-  const state = { caseData: null, history: null, busy: false, viewStep: null };
+  const BUSY_STATES = {
+    readiness: {
+      kicker: "Readiness check in progress",
+      title: "Checking NAV control readiness",
+      copy: "Cherry is mapping the case evidence to the inputs required for NAV quality control before any reconciliation runs.",
+      targetStep: 1,
+      stages: [
+        ["Evidence inventory", "done", "Using the evidence already stored in this case"],
+        ["NAV input mapping", "active", "Locating the NAV summary, investor GL and rule evidence"],
+        ["Readiness rules", "queued", "Confirm required inputs and surface blockers"],
+        ["Reconciliation", "queued", "Runs only after readiness is confirmed"],
+      ],
+    },
+    reconcile: {
+      kicker: "Analysis in progress",
+      title: "Running NAV reconciliation",
+      copy: "Deterministic NAV controls are comparing the accepted evidence. Findings will appear only when the server returns the completed control result.",
+      targetStep: 2,
+      stages: [
+        ["Evidence & rules", "done", "Readiness confirmed for this case"],
+        ["NAV / fund controls", "active", "Footing, bridges and source comparisons are running"],
+        ["Exception consolidation", "queued", "Breaks will be grouped after controls complete"],
+        ["Review evidence", "queued", "Supporting evidence remains attached to returned findings"],
+      ],
+    },
+    review: {
+      kicker: "Review preparation in progress",
+      title: "Consolidating NAV findings",
+      copy: "Cherry is turning the completed reconciliation output into a focused exception review for the Fund Manager.",
+      targetStep: 3,
+      stages: [
+        ["Reconciliation result", "done", "Completed control output retained"],
+        ["Exception consolidation", "active", "Grouping related findings and evidence gaps"],
+        ["Recommended actions", "queued", "Prepare review-ready next steps"],
+        ["Human decision", "queued", "Decision authority remains with the Fund Manager"],
+      ],
+    },
+    decision: {
+      kicker: "Decision recording in progress",
+      title: "Recording the Fund Manager decision",
+      copy: "Cherry is writing the explicit human outcome to the case audit trail. It is not inferring approval or changing the official NAV.",
+      targetStep: 4,
+      stages: [
+        ["Review pack", "done", "Findings and evidence reviewed"],
+        ["Human instruction", "active", "Recording the selected decision and note"],
+        ["Audit trail", "queued", "Persist the explicit decision on this case"],
+      ],
+    },
+    evidence: {
+      kicker: "Evidence update in progress",
+      title: "Adding evidence to the case",
+      copy: "Only the newly selected evidence is being added. Existing case evidence is not uploaded again.",
+      targetStep: 0,
+      stages: [
+        ["New evidence", "active", "Upload and classify the selected file"],
+        ["Case inventory", "queued", "Refresh recognised NAV evidence"],
+        ["NAV readiness", "queued", "Recheck affected workflow inputs when requested"],
+      ],
+    },
+    exception_evidence: {
+      kicker: "Exception evidence in progress",
+      title: "Attaching supporting evidence",
+      copy: "The selected file is being attached to this NAV exception so the next review round can use explicit evidence.",
+      targetStep: 2,
+      stages: [
+        ["Supporting file", "active", "Upload and link evidence to the exception"],
+        ["Exception state", "queued", "Refresh the auditable exception record"],
+        ["Review round", "queued", "Updated evidence will be available to the next review step"],
+      ],
+    },
+    exception_ignore: {
+      kicker: "Exception update in progress",
+      title: "Recording the ignore decision",
+      copy: "Cherry is preserving the Fund Manager's explicit reason and note against this exception.",
+      targetStep: 2,
+      stages: [
+        ["Human reason", "done", "Explicit reason supplied by the reviewer"],
+        ["Audit update", "active", "Record the ignore decision against the exception"],
+        ["Exception queue", "queued", "Refresh the remaining NAV findings"],
+      ],
+    },
+    processing: {
+      kicker: "NAV workflow in progress",
+      title: "Processing this NAV control step",
+      copy: "Cherry is waiting for the server to complete the requested workflow action.",
+      targetStep: null,
+      stages: [
+        ["Request received", "done", "The workflow request has started"],
+        ["Server processing", "active", "Waiting for the completed response"],
+        ["Case refresh", "queued", "The UI will update from returned case data"],
+      ],
+    },
+  };
+  const state = {
+    caseData: null,
+    history: null,
+    busy: false,
+    busyAction: null,
+    busyStartedAt: null,
+    busyTimer: null,
+    viewStep: null,
+  };
   let launcherObserver = null;
 
   const esc = (value) => String(value ?? "")
@@ -146,15 +247,20 @@
     return `<div class="navqc-head"><div><p class="eyebrow">Fund Manager · NAV controls</p><h2>NAV Quality Controller</h2>
       <p>Uses the evidence already uploaded to this case. Add only new or missing evidence when required.</p></div>
       <div class="navqc-actions"><span class="navqc-case">${state.caseData ? `Case ${esc(state.caseData.case_id)}` : "No active case"}</span>
-      <button type="button" class="navqc-button secondary" id="navqc-exit">← Back to General Document Review</button></div></div>`;
+      <button type="button" class="navqc-button secondary" id="navqc-exit" ${state.busy ? "disabled" : ""}>← Back to General Document Review</button></div></div>`;
+  }
+
+  function busyTargetStep() {
+    const configured = BUSY_STATES[state.busyAction]?.targetStep;
+    return configured == null ? currentStep() : configured;
   }
 
   function stepper() {
-    const current = currentStep();
-    const viewing = displayedStep();
+    const current = state.busy ? busyTargetStep() : currentStep();
+    const viewing = state.busy ? current : displayedStep();
     return `<div class="navqc-stepper">${STEPS.map((label, index) => {
       const cls = index < current ? "done" : index === current ? "active" : "";
-      const historical = index === viewing && viewing !== current ? " viewing" : "";
+      const historical = !state.busy && index === viewing && viewing !== current ? " viewing" : "";
       return `<div class="navqc-step ${cls}${historical}"><span>${index + 1}</span><strong>${label}</strong></div>`;
     }).join("")}</div>`;
   }
@@ -172,6 +278,63 @@
 
   function noCase() {
     return '<div class="navqc-panel"><h3>Upload evidence first</h3><div class="navqc-empty">NAV Quality Control starts only after a Fund Manager case has been created and NAV-related evidence is recognised.</div></div>';
+  }
+
+  function busyActionFor(path) {
+    if (path.endsWith("/nav/readiness")) return "readiness";
+    if (path.endsWith("/nav/reconcile")) return "reconcile";
+    if (path.endsWith("/nav/review")) return "review";
+    if (path.endsWith("/nav/decision")) return "decision";
+    if (path.includes("/nav/exceptions/") && path.endsWith("/evidence")) return "exception_evidence";
+    if (path.includes("/nav/exceptions/") && path.endsWith("/ignore")) return "exception_ignore";
+    if (path.endsWith("/evidence")) return "evidence";
+    return "processing";
+  }
+
+  function navEvidenceCount() {
+    const sources = state.caseData?.classification?.sources || [];
+    return sources.filter((source) => (
+      source.validation_status === "accepted" && NAV_TYPES.has(source.detected_type)
+    )).length;
+  }
+
+  function elapsedText() {
+    if (!state.busyStartedAt) return "Starting…";
+    const seconds = Math.max(0, Math.floor((Date.now() - state.busyStartedAt) / 1000));
+    if (seconds < 60) return `${seconds}s elapsed`;
+    return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s elapsed`;
+  }
+
+  function refreshBusyClock() {
+    const node = document.querySelector("#navqc-busy-elapsed");
+    if (node) node.textContent = elapsedText();
+  }
+
+  function stopBusyClock() {
+    if (state.busyTimer != null) window.clearInterval(state.busyTimer);
+    state.busyTimer = null;
+  }
+
+  function startBusyClock() {
+    stopBusyClock();
+    refreshBusyClock();
+    state.busyTimer = window.setInterval(refreshBusyClock, 1000);
+  }
+
+  function busyView() {
+    const config = BUSY_STATES[state.busyAction] || BUSY_STATES.processing;
+    const sourceCount = navEvidenceCount();
+    const stages = config.stages.map(([label, status, detail]) => `<div class="navqc-activity-row ${esc(status)}">
+      <span class="navqc-activity-icon" aria-hidden="true"></span><div><strong>${esc(label)}</strong><small>${esc(detail)}</small></div>
+      <span class="navqc-activity-state">${status === "done" ? "Complete" : status === "active" ? "In progress" : "Waiting"}</span></div>`).join("");
+    return `<div class="navqc-panel navqc-busy-panel" role="status" aria-live="polite">
+      <div class="navqc-busy-hero"><div class="navqc-spinner" aria-hidden="true"></div><div class="navqc-busy-copy">
+        <p class="eyebrow">${esc(config.kicker)}</p><h3>${esc(config.title)}</h3><p>${esc(config.copy)}</p>
+        <div class="navqc-busy-meta"><span>${state.caseData ? `Case ${esc(state.caseData.case_id)}` : "NAV workflow"}</span><span>${sourceCount} NAV source${sourceCount === 1 ? "" : "s"}</span><span id="navqc-busy-elapsed">${esc(elapsedText())}</span></div>
+      </div></div>
+      <div class="navqc-activity" aria-label="NAV processing activity">${stages}</div>
+      <div class="navqc-busy-note"><strong>Live status, not a fake percentage.</strong><span>This endpoint returns a completed step rather than streaming stage progress. Cherry keeps the current server activity visible and updates the control result only when the response arrives.</span></div>
+    </div>`;
   }
 
   function evidenceUploadPanel() {
@@ -266,9 +429,10 @@
   function render() {
     const root = document.querySelector("#navqc-content");
     if (!root) return;
+    root.setAttribute("aria-busy", String(state.busy));
     const nav = workflow();
-    let body = noCase();
-    if (state.caseData) {
+    let body = state.busy ? busyView() : noCase();
+    if (!state.busy && state.caseData) {
       const view = displayedStep();
       if (view === 0) body = evidence();
       else if (view === 1) body = readinessView(nav.readiness || {});
@@ -276,20 +440,31 @@
       else if (view === 3) body = reviewView(nav.review || {});
       else body = nav.decision ? decidedView(nav.decision) : decisionView(nav.review || {});
     }
-    root.innerHTML = `${header()}${stepper()}${body}${historyView()}`;
+    root.innerHTML = `${header()}${stepper()}${body}${state.busy ? "" : historyView()}`;
     bind();
   }
 
   async function run(path, options = { method: "POST" }) {
-    if (state.busy || !state.caseData) return;
+    if (state.busy || !state.caseData) return false;
     state.busy = true;
+    state.busyAction = busyActionFor(path);
+    state.busyStartedAt = Date.now();
+    render();
+    startBusyClock();
+    let succeeded = false;
     try {
       rememberCase(await api(path, options));
+      succeeded = true;
     } catch (error) {
       notify(error.message || "NAV workflow step failed.", true);
     } finally {
+      stopBusyClock();
       state.busy = false;
+      state.busyAction = null;
+      state.busyStartedAt = null;
+      render();
     }
+    return succeeded;
   }
 
   async function uploadGenericEvidence() {
@@ -298,34 +473,34 @@
     if (!file || !state.caseData) return;
     const form = new FormData();
     form.append("files", file);
-    await run(`/api/fund-manager/cases/${encodeURIComponent(state.caseData.case_id)}/evidence`, {
+    const succeeded = await run(`/api/fund-manager/cases/${encodeURIComponent(state.caseData.case_id)}/evidence`, {
       method: "POST",
       body: form,
     });
-    notify("Evidence added. NAV workflow state has been refreshed.");
+    if (succeeded) notify("Evidence added. NAV workflow state has been refreshed.");
   }
 
   async function uploadEvidence(key, file) {
     if (!file || state.busy) return;
     const form = new FormData();
     form.append("file", file);
-    await run(`/api/fund-manager/cases/${encodeURIComponent(state.caseData.case_id)}/nav/exceptions/${encodeURIComponent(key)}/evidence`, {
+    const succeeded = await run(`/api/fund-manager/cases/${encodeURIComponent(state.caseData.case_id)}/nav/exceptions/${encodeURIComponent(key)}/evidence`, {
       method: "POST",
       body: form,
     });
-    notify("Supporting evidence added to this exception.");
+    if (succeeded) notify("Supporting evidence added to this exception.");
   }
 
   async function ignoreException(key) {
     const reason = window.prompt("Reason for ignoring this exception (required):");
     if (!reason?.trim()) return;
     const note = window.prompt("Optional supporting note:") || null;
-    await run(`/api/fund-manager/cases/${encodeURIComponent(state.caseData.case_id)}/nav/exceptions/${encodeURIComponent(key)}/ignore`, {
+    const succeeded = await run(`/api/fund-manager/cases/${encodeURIComponent(state.caseData.case_id)}/nav/exceptions/${encodeURIComponent(key)}/ignore`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reason: reason.trim(), note }),
     });
-    notify("Exception ignored with an auditable reason.");
+    if (succeeded) notify("Exception ignored with an auditable reason.");
   }
 
   async function loadHistory() {
@@ -416,8 +591,12 @@
     if (event.detail?.case_id) rememberCase(event.detail, { broadcast: false });
   });
   window.addEventListener("fund-manager-case-cleared", () => {
+    stopBusyClock();
     state.caseData = null;
     state.history = null;
+    state.busy = false;
+    state.busyAction = null;
+    state.busyStartedAt = null;
     state.viewStep = null;
     window.setFundManagerTab?.("general");
     render();
