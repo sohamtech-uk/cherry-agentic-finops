@@ -1,0 +1,164 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1080" viewBox="0 0 1600 1080" role="img" aria-labelledby="title desc">
+  <title id="title">Cherry FundOps system architecture and end-to-end workflow</title>
+  <desc id="desc">Architecture showing evidence sources flowing into Cherry FundOps, FastAPI services, Gemini and Google ADK, deterministic controls, Firestore or memory persistence, optional integrations, and the staged Fund Manager workflow through human decision and report download.</desc>
+  <defs>
+    <style>
+      .bg{fill:#fbfaf7}.ink{fill:#13231f}.muted{fill:#52635e}.green{fill:#123c32}.lime{fill:#bdf28d}.pale{fill:#eef8f3}.blue{fill:#edf5fb}.purple{fill:#f3effc}.amber{fill:#fff5dd}.coral{fill:#fff0ed}.white{fill:#fff}.line{stroke:#2c5b4e;stroke-width:3;fill:none}.dash{stroke:#7d8f88;stroke-width:2;stroke-dasharray:7 7;fill:none}.box{stroke:#cbd9d3;stroke-width:2}.small{font:500 18px Arial,sans-serif}.body{font:500 20px Arial,sans-serif}.label{font:700 20px Arial,sans-serif}.h2{font:700 31px Arial,sans-serif}.title{font:700 46px Georgia,serif}.sub{font:500 23px Arial,sans-serif}.tiny{font:500 16px Arial,sans-serif}.num{font:700 24px Arial,sans-serif}.center{text-anchor:middle}.end{text-anchor:end}
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#2c5b4e"/></marker>
+    <marker id="arrowGrey" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#7d8f88"/></marker>
+  </defs>
+
+  <rect width="1600" height="1080" class="bg"/>
+
+  <!-- Header -->
+  <text x="38" y="58" class="title ink">Cherry FundOps — System Architecture</text>
+  <text x="40" y="92" class="sub muted">AI-assisted, human-governed finance operations for private markets</text>
+  <rect x="1328" y="28" width="230" height="74" rx="18" class="green"/>
+  <text x="1443" y="58" class="h2 white center">Cherry FundOps</text>
+  <text x="1443" y="84" class="tiny white center">Controls today. Capital tomorrow.</text>
+
+  <!-- Data sources -->
+  <rect x="30" y="130" width="260" height="560" rx="18" class="blue box"/>
+  <text x="52" y="168" class="h2 ink">Evidence Sources</text>
+
+  <g>
+    <rect x="50" y="190" width="220" height="66" rx="12" class="white box"/>
+    <text x="70" y="219" class="label ink">Bank Statements</text><text x="70" y="244" class="tiny muted">PDF · Excel · CSV</text>
+    <rect x="50" y="270" width="220" height="66" rx="12" class="white box"/>
+    <text x="70" y="299" class="label ink">Investor GL</text><text x="70" y="324" class="tiny muted">Excel · CSV</text>
+    <rect x="50" y="350" width="220" height="66" rx="12" class="white box"/>
+    <text x="70" y="379" class="label ink">NAV / Accounting</text><text x="70" y="404" class="tiny muted">Workbooks · JSON</text>
+    <rect x="50" y="430" width="220" height="66" rx="12" class="white box"/>
+    <text x="70" y="459" class="label ink">Contracts</text><text x="70" y="484" class="tiny muted">LPA · Side letters</text>
+    <rect x="50" y="510" width="220" height="66" rx="12" class="white box"/>
+    <text x="70" y="539" class="label ink">Capital Calls</text><text x="70" y="564" class="tiny muted">PDF notices · cash data</text>
+    <rect x="50" y="590" width="220" height="66" rx="12" class="white box"/>
+    <text x="70" y="619" class="label ink">Other Evidence</text><text x="70" y="644" class="tiny muted">Statements · positions · trades</text>
+  </g>
+
+  <!-- Upload and classification -->
+  <rect x="330" y="260" width="190" height="300" rx="18" class="purple box"/>
+  <text x="425" y="306" class="h2 ink center">Upload &amp;</text>
+  <text x="425" y="340" class="h2 ink center">Classify</text>
+  <text x="355" y="388" class="small ink">• Mixed-file upload</text>
+  <text x="355" y="422" class="small ink">• Type detection</text>
+  <text x="355" y="456" class="small ink">• Validation</text>
+  <text x="355" y="490" class="small ink">• Source metadata</text>
+  <text x="355" y="524" class="small ink">• SHA-256 identity</text>
+  <path d="M290 410 H328" class="line" marker-end="url(#arrow)"/>
+
+  <!-- Central application -->
+  <rect x="560" y="130" width="720" height="560" rx="22" class="green"/>
+  <text x="920" y="174" class="h2 white center">Cherry FundOps Application</text>
+
+  <!-- Frontend -->
+  <rect x="585" y="195" width="670" height="110" rx="16" class="pale box"/>
+  <text x="610" y="230" class="label ink">Web Application</text>
+  <text x="610" y="262" class="small ink">Fund Manager · Control Room · Analyse Files · NAV Quality Controller · Reports · API Docs</text>
+
+  <!-- Backend -->
+  <rect x="585" y="325" width="670" height="230" rx="16" class="blue box"/>
+  <text x="610" y="360" class="label ink">Backend Services — Python / FastAPI</text>
+
+  <rect x="610" y="382" width="190" height="70" rx="12" class="white box"/>
+  <text x="705" y="410" class="label ink center">Evidence Parser</text><text x="705" y="436" class="tiny muted center">extract &amp; classify</text>
+  <rect x="815" y="382" width="190" height="70" rx="12" class="white box"/>
+  <text x="910" y="410" class="label ink center">ADK Agents</text><text x="910" y="436" class="tiny muted center">plan &amp; investigate</text>
+  <rect x="1020" y="382" width="210" height="70" rx="12" class="white box"/>
+  <text x="1125" y="410" class="label ink center">Control Engine</text><text x="1125" y="436" class="tiny muted center">deterministic checks</text>
+
+  <rect x="610" y="466" width="190" height="70" rx="12" class="white box"/>
+  <text x="705" y="494" class="label ink center">Case Models</text><text x="705" y="520" class="tiny muted center">funds · evidence · results</text>
+  <rect x="815" y="466" width="190" height="70" rx="12" class="white box"/>
+  <text x="910" y="494" class="label ink center">Workflow State</text><text x="910" y="520" class="tiny muted center">staged case lifecycle</text>
+  <rect x="1020" y="466" width="210" height="70" rx="12" class="white box"/>
+  <text x="1125" y="494" class="label ink center">Reporting</text><text x="1125" y="520" class="tiny muted center">PDF · Excel review packs</text>
+
+  <!-- AI row -->
+  <rect x="585" y="575" width="670" height="88" rx="16" class="coral box"/>
+  <text x="610" y="610" class="label ink">Gemini + Google ADK</text>
+  <text x="610" y="640" class="small ink">Document interpretation · constrained planning · exception explanation · no financial authority</text>
+
+  <path d="M520 410 H558" class="line" marker-end="url(#arrow)"/>
+
+  <!-- Right infrastructure -->
+  <rect x="1320" y="130" width="250" height="340" rx="18" class="blue box"/>
+  <text x="1342" y="168" class="h2 ink">Data &amp; Runtime</text>
+  <rect x="1340" y="190" width="210" height="62" rx="12" class="white box"/>
+  <text x="1360" y="218" class="label ink">Google Cloud Run</text><text x="1360" y="240" class="tiny muted">FastAPI runtime</text>
+  <rect x="1340" y="266" width="210" height="62" rx="12" class="white box"/>
+  <text x="1360" y="294" class="label ink">Firestore</text><text x="1360" y="316" class="tiny muted">durable case state / evidence</text>
+  <rect x="1340" y="342" width="210" height="62" rx="12" class="white box"/>
+  <text x="1360" y="370" class="label ink">Memory</text><text x="1360" y="392" class="tiny muted">local / demo persistence</text>
+  <rect x="1340" y="418" width="210" height="32" rx="10" class="white box"/>
+  <text x="1445" y="440" class="tiny ink center">Deployment-configured secrets</text>
+
+  <rect x="1320" y="490" width="250" height="200" rx="18" class="purple box"/>
+  <text x="1342" y="528" class="h2 ink">Optional Integrations</text>
+  <rect x="1340" y="550" width="210" height="54" rx="12" class="white box"/>
+  <text x="1360" y="582" class="label ink">FundOps Agent Studio</text>
+  <rect x="1340" y="616" width="210" height="54" rx="12" class="white box"/>
+  <text x="1360" y="648" class="label ink">Cherry Money</text>
+  <path d="M1280 300 H1318" class="line" marker-end="url(#arrow)"/>
+  <path d="M1280 605 H1318" class="dash" marker-end="url(#arrowGrey)"/>
+
+  <!-- Control boundary ribbon -->
+  <rect x="30" y="715" width="1540" height="62" rx="16" class="pale box"/>
+  <text x="80" y="754" class="label ink">✓ AI interprets and coordinates</text>
+  <text x="625" y="754" class="label ink">✓ Deterministic controls calculate and validate</text>
+  <text x="1195" y="754" class="label ink">✓ Humans retain final authority</text>
+
+  <!-- Workflow -->
+  <text x="38" y="835" class="title ink">Cherry FundOps — End-to-End Workflow</text>
+  <text x="40" y="870" class="sub muted">From uploaded evidence to reviewed results, final decision, and downloadable report</text>
+
+  <!-- Step cards -->
+  <g>
+    <rect x="35" y="900" width="190" height="135" rx="16" class="blue box"/>
+    <text x="55" y="932" class="num ink">1. Upload</text>
+    <text x="55" y="963" class="small ink">Mixed evidence</text>
+    <text x="55" y="992" class="tiny muted">PDF · XLSX · CSV</text><text x="55" y="1015" class="tiny muted">JSON · ZIP · TXT</text>
+
+    <rect x="250" y="900" width="190" height="135" rx="16" class="pale box"/>
+    <text x="270" y="932" class="num ink">2. Evidence Review</text>
+    <text x="270" y="963" class="small ink">Classify &amp; validate</text>
+    <text x="270" y="992" class="tiny muted">Preserve identity</text><text x="270" y="1015" class="tiny muted">Show gaps early</text>
+
+    <rect x="465" y="900" width="190" height="135" rx="16" class="purple box"/>
+    <text x="485" y="932" class="num ink">3. Review Plan</text>
+    <text x="485" y="963" class="small ink">Select permitted</text>
+    <text x="485" y="992" class="tiny muted">controls only</text><text x="485" y="1015" class="tiny muted">Human continues</text>
+
+    <rect x="680" y="900" width="190" height="135" rx="16" class="amber box"/>
+    <text x="700" y="932" class="num ink">4. Run Controls</text>
+    <text x="700" y="963" class="small ink">Deterministic checks</text>
+    <text x="700" y="992" class="tiny muted">Reconcile · compare</text><text x="700" y="1015" class="tiny muted">surface exceptions</text>
+
+    <rect x="895" y="900" width="190" height="135" rx="16" class="coral box"/>
+    <text x="915" y="932" class="num ink">5. Findings</text>
+    <text x="915" y="963" class="small ink">Review exceptions</text>
+    <text x="915" y="992" class="tiny muted">Explain cause</text><text x="915" y="1015" class="tiny muted">identify evidence gap</text>
+
+    <rect x="1110" y="900" width="190" height="135" rx="16" class="blue box"/>
+    <text x="1130" y="932" class="num ink">6. Human Decision</text>
+    <text x="1130" y="963" class="small ink">Accept · request</text>
+    <text x="1130" y="992" class="tiny muted">assign · escalate</text><text x="1130" y="1015" class="tiny muted">record rationale</text>
+
+    <rect x="1325" y="900" width="240" height="135" rx="16" class="pale box"/>
+    <text x="1345" y="932" class="num ink">7. Complete &amp; Download</text>
+    <text x="1345" y="963" class="small ink">Final decision is terminal</text>
+    <text x="1345" y="992" class="tiny muted">PDF / Excel report</text><text x="1345" y="1015" class="tiny muted">or start a new case</text>
+  </g>
+
+  <path d="M225 968 H248" class="line" marker-end="url(#arrow)"/>
+  <path d="M440 968 H463" class="line" marker-end="url(#arrow)"/>
+  <path d="M655 968 H678" class="line" marker-end="url(#arrow)"/>
+  <path d="M870 968 H893" class="line" marker-end="url(#arrow)"/>
+  <path d="M1085 968 H1108" class="line" marker-end="url(#arrow)"/>
+  <path d="M1300 968 H1323" class="line" marker-end="url(#arrow)"/>
+
+  <!-- Feedback loop -->
+  <path d="M1205 1038 V1062 H345 V1038" class="dash" marker-end="url(#arrowGrey)"/>
+  <text x="775" y="1072" class="tiny muted center">Add or correct evidence when required, then re-run the governed review</text>
+</svg>
