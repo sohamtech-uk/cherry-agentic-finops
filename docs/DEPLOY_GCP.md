@@ -77,8 +77,10 @@ the same restricted-IAM runtime configuration as `scripts/deploy-gcplab.sh`:
 
 - `GOOGLE_GENAI_USE_VERTEXAI=false`;
 - `GOOGLE_API_KEY` is passed to Cloud Run without being printed;
-- `CHERRY_PERSISTENCE_BACKEND=memory`;
-- no custom runtime service account, Firestore, bucket or Pub/Sub dependency is required.
+- `CHERRY_PERSISTENCE_BACKEND=firestore`;
+- Fund Manager case state is stored in `fund_manager_cases`, with uploaded evidence split into
+  integrity-checked Firestore chunks so the workflow survives Cloud Run instance changes;
+- no custom runtime service account, bucket or Pub/Sub dependency is required.
 
 `GOOGLE_API_KEY` authenticates Gemini requests only. It cannot authenticate a GitHub runner to
 Artifact Registry or Cloud Run. The three `GCP_*` variables must describe an identity that can

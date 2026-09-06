@@ -42,7 +42,7 @@ jobs:
           test -n "${CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN}" || { echo "Missing production secret CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN." >&2; exit 1; }
           echo "Target project: ${PROJECT_ID}"
           echo "Target service: ${SERVICE} (${REGION})"
-          echo "Runtime mode: Gemini API key with memory persistence"
+          echo "Runtime mode: Gemini API key with Firestore persistence"
 
       - id: auth
         uses: google-github-actions/auth@v3
@@ -62,6 +62,13 @@ jobs:
           test -n "${ACTIVE_ACCOUNT}" || { echo "Google Cloud authentication produced no active account." >&2; exit 1; }
           echo "Authenticated deployment identity: ${ACTIVE_ACCOUNT}"
           echo "Verified target project access: ${PROJECT_ID}"
+          gcloud firestore databases describe \
+            --database='(default)' \
+            --project="${PROJECT_ID}" \
+            --format='value(name)' >/dev/null || {
+              echo "The default Firestore database is missing or inaccessible in ${PROJECT_ID}." >&2
+              exit 1
+            }
 
       - name: Configure Artifact Registry authentication
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
@@ -84,7 +91,8 @@ jobs:
           wait: true
           env_vars: |-
             CHERRY_ENVIRONMENT=production
-            CHERRY_PERSISTENCE_BACKEND=memory
+            CHERRY_PERSISTENCE_BACKEND=firestore
+            CHERRY_FUND_MANAGER_FIRESTORE_COLLECTION=fund_manager_cases
             CHERRY_GEMINI_MODEL=gemini-3.7-flash
             CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN=${{ secrets.CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN }}
             GOOGLE_GENAI_USE_VERTEXAI=false
@@ -138,9 +146,21 @@ jobs:
               config = json.load(config_file)
           if not config.get("google_ready"):
               raise SystemExit("Runtime reports that Gemini is not configured.")
-          if config.get("persistence_backend") != "memory":
-              raise SystemExit("Runtime is not using restricted-lab memory persistence.")
-          print("Runtime configuration verified: Gemini ready, memory persistence.")
+          if config.get("persistence_backend") != "firestore":
+              raise SystemExit("Runtime is not using Firestore persistence.")
+          print("Runtime configuration verified: Gemini ready, Firestore persistence.")
+          PY
+          curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors \
+            "${SERVICE_URL}/api/fund-manager/health" > "${RUNNER_TEMP}/fund-manager-health.json"
+          python3 - "${RUNNER_TEMP}/fund-manager-health.json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as health_file:
+              health = json.load(health_file)
+          if health.get("case_storage") != "firestore":
+              raise SystemExit("Fund Manager cases are not using Firestore persistence.")
+          print("Runtime configuration verified: Fund Manager case storage is durable.")
           PY
           curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors \
             "${SERVICE_URL}/api/private-markets/health" > "${RUNNER_TEMP}/private-markets-health.json"

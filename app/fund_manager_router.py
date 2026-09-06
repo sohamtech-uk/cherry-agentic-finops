@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import mimetypes
 import os
 import zipfile
@@ -13,7 +14,11 @@ from pydantic import BaseModel
 
 from app.config import get_settings
 from app.fund_manager_agentic import run_agentic_analysis
-from app.fund_manager_cases import FundManagerCase, case_store
+from app.fund_manager_cases import (
+    FundManagerCase,
+    FundManagerCaseStorageError,
+    case_store,
+)
 from app.fund_manager_classification import classify_and_validate_sources
 from app.fund_manager_stages import (
     execute_case_controls,
@@ -24,6 +29,7 @@ from app.rate_limit import limiter
 
 settings = get_settings()
 router = APIRouter(prefix="/api/fund-manager", tags=["fund-manager"])
+logger = logging.getLogger(__name__)
 
 MAX_FILES = 25
 
@@ -135,10 +141,30 @@ async def _read_upload_batch(files: list[UploadFile]) -> list[tuple[str, bytes, 
 
 
 def _case_or_404(case_id: str) -> FundManagerCase:
-    case = case_store.get(case_id)
+    try:
+        case = case_store.get(case_id)
+    except FundManagerCaseStorageError as exc:
+        logger.exception("Could not load Fund Manager case %s", case_id)
+        raise HTTPException(
+            status_code=503,
+            detail="The Fund Manager case store is temporarily unavailable or failed integrity "
+            "verification.",
+        ) from exc
     if case is None:
         raise HTTPException(status_code=404, detail=f"Fund Manager case {case_id} was not found.")
     return case
+
+
+def _save_case(case: FundManagerCase) -> None:
+    try:
+        case_store.save(case)
+    except FundManagerCaseStorageError as exc:
+        logger.exception("Could not save Fund Manager case %s", case.case_id)
+        raise HTTPException(
+            status_code=503,
+            detail="The Fund Manager case could not be stored. Retry this step without closing "
+            "the page.",
+        ) from exc
 
 
 def _require_stage(case: FundManagerCase, allowed: set[str]) -> None:
@@ -216,7 +242,7 @@ async def fund_manager_health() -> dict[str, Any]:
             "agentic_investigation",
             "human_decision_recording",
         ],
-        "case_storage": "process_local",
+        "case_storage": case_store.backend_name,
         "control_boundary": (
             "The Fund Manager agent plans controls and investigates results. Deterministic tools "
             "remain authoritative for calculations and reconciliations. The UI requires explicit "
@@ -245,13 +271,20 @@ async def create_fund_manager_case(
         reporting_period=reporting_period,
         as_of_date=as_of_date,
     )
-    case = case_store.create(
-        items,
-        classification=classification,
-        fund_name=fund_name,
-        reporting_period=reporting_period,
-        as_of_date=as_of_date,
-    )
+    try:
+        case = case_store.create(
+            items,
+            classification=classification,
+            fund_name=fund_name,
+            reporting_period=reporting_period,
+            as_of_date=as_of_date,
+        )
+    except FundManagerCaseStorageError as exc:
+        logger.exception("Could not create Fund Manager case")
+        raise HTTPException(
+            status_code=503,
+            detail="The Fund Manager case could not be stored. Retry the upload.",
+        ) from exc
     return case.public_view()
 
 
@@ -297,6 +330,7 @@ async def append_fund_manager_evidence(
     )
     _reset_case_after_new_evidence(case)
     case.touch()
+    _save_case(case)
     return case.public_view()
 
 
@@ -333,6 +367,7 @@ async def plan_fund_manager_case(
         ) from exc
     case.stage = "planned"
     case.touch()
+    _save_case(case)
     return case.public_view()
 
 
@@ -363,6 +398,7 @@ async def execute_fund_manager_case(
         ) from exc
     case.stage = "executed"
     case.touch()
+    _save_case(case)
     return case.public_view()
 
 
@@ -389,6 +425,7 @@ async def investigate_fund_manager_case(
         ) from exc
     case.stage = "investigated"
     case.touch()
+    _save_case(case)
     return case.public_view()
 
 
@@ -413,6 +450,7 @@ async def decide_fund_manager_case(
     }
     case.stage = "decided"
     case.touch()
+    _save_case(case)
     return case.public_view()
 
 
