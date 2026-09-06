@@ -34,6 +34,7 @@ class FundManagerCase:
     nav_reconciliation: dict[str, Any] | None = None
     nav_review: dict[str, Any] | None = None
     nav_decision: dict[str, Any] | None = None
+    nav_exception_resolutions: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def touch(self) -> None:
         self.updated_at = datetime.now(UTC).isoformat()
@@ -65,6 +66,7 @@ class FundManagerCase:
                     "reconciliation": self.nav_reconciliation,
                     "review": self.nav_review,
                     "decision": self.nav_decision,
+                    "exception_resolutions": self.nav_exception_resolutions,
                 },
             },
         }
