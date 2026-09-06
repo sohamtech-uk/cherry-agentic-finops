@@ -30,6 +30,10 @@ class FundManagerCase:
     execution: dict[str, Any] | None = None
     investigation: dict[str, Any] | None = None
     decision: dict[str, Any] | None = None
+    nav_readiness: dict[str, Any] | None = None
+    nav_reconciliation: dict[str, Any] | None = None
+    nav_review: dict[str, Any] | None = None
+    nav_decision: dict[str, Any] | None = None
 
     def touch(self) -> None:
         self.updated_at = datetime.now(UTC).isoformat()
@@ -48,11 +52,26 @@ class FundManagerCase:
             "execution": self.execution,
             "investigation": self.investigation,
             "decision": self.decision,
+            "workflows": {
+                "general_control_review": {
+                    "stage": self.stage,
+                    "plan": self.plan,
+                    "execution": self.execution,
+                    "investigation": self.investigation,
+                    "decision": self.decision,
+                },
+                "nav_quality_controller": {
+                    "readiness": self.nav_readiness,
+                    "reconciliation": self.nav_reconciliation,
+                    "review": self.nav_review,
+                    "decision": self.nav_decision,
+                },
+            },
         }
 
 
 class FundManagerCaseStore:
-    """Small process-local case store for the staged Fund Manager review UI.
+    """Small process-local case store for staged Fund Manager workflows.
 
     Uploaded bytes never return to the browser after case creation. Production deployments that
     require cross-instance or restart durability should replace this store with a shared database
