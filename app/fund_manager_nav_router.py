@@ -158,9 +158,7 @@ async def decide_nav_case(
         "note": decision.note,
         "recorded_at": datetime.now(UTC).isoformat(),
         "actor": "fund-manager-ui-user",
-        "financial_boundary": (
-            "Decision recorded only; no journal or official NAV was amended."
-        ),
+        "financial_boundary": ("Decision recorded only; no journal or official NAV was amended."),
     }
     case.touch()
     return case.public_view()

@@ -5,13 +5,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
+from pydantic import ValidationError
+
 import app.nav_quality as nav_quality
 from app.agent_tools import run_nav_quality_review
 from app.fund_manager_cases import FundManagerCase
 from app.fund_manager_stages import investigate_case_execution
 from app.nav_review_history import get_nav_review_history_store
-from pydantic import ValidationError
-
 
 ROUND_REDUCTION_TARGET = {
     "transcript_baseline": "3-7 review iterations",
@@ -218,9 +218,7 @@ def run_case_nav_reconciliation(case: FundManagerCase) -> dict[str, Any]:
         )
 
     with TemporaryDirectory(prefix="cherry-nav-quality-") as directory:
-        nav_summary, source_ledger, rules = _materialise_nav_inputs(
-            case, readiness, directory
-        )
+        nav_summary, source_ledger, rules = _materialise_nav_inputs(case, readiness, directory)
         result = run_nav_quality_review(nav_summary, source_ledger, rules)
 
     summary_meta = readiness["inputs"]["nav_summary"]
@@ -235,9 +233,7 @@ def run_case_nav_reconciliation(case: FundManagerCase) -> dict[str, Any]:
 def _nav_execution_for_agent(result: dict[str, Any]) -> dict[str, Any]:
     review = result.get("review", {})
     findings = review.get("findings", [])
-    exception_findings = [
-        finding for finding in findings if finding.get("severity") != "pass"
-    ]
+    exception_findings = [finding for finding in findings if finding.get("severity") != "pass"]
     issues = []
     for index, finding in enumerate(exception_findings, start=1):
         issues.append(
@@ -269,9 +265,7 @@ def _build_remediation_package(
 ) -> dict[str, Any]:
     review = reconciliation.get("review", {})
     findings = review.get("findings", [])
-    exception_findings = [
-        finding for finding in findings if finding.get("severity") != "pass"
-    ]
+    exception_findings = [finding for finding in findings if finding.get("severity") != "pass"]
     work_items = review.get("work_items", [])
     root_causes = reconciliation.get("root_causes", [])
     investigations = investigation.get("investigations", [])
@@ -303,9 +297,7 @@ async def run_case_nav_review(case: FundManagerCase) -> dict[str, Any]:
     )
     investigation["workflow"] = "nav_quality_controller"
     investigation["stage"] = "reviewed"
-    investigation["deterministic_action"] = case.nav_reconciliation.get("review", {}).get(
-        "action"
-    )
+    investigation["deterministic_action"] = case.nav_reconciliation.get("review", {}).get("action")
     investigation["root_causes"] = case.nav_reconciliation.get("root_causes", [])
     investigation["remediation_package"] = _build_remediation_package(
         case.nav_reconciliation, investigation
