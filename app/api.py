@@ -96,8 +96,13 @@ async def invalid_workflow_action_handler(_: Request, exc: InvalidWorkflowAction
 
 
 @app.get("/", include_in_schema=False)
-async def home() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+async def home() -> Response:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    html = html.replace(
+        "</body>",
+        '<script src="/static/nav_quality_controller.js"></script>\n</body>',
+    )
+    return Response(content=html, media_type="text/html")
 
 
 @app.get("/health", tags=["operations"])
