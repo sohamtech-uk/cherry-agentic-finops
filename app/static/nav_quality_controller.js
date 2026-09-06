@@ -147,34 +147,30 @@
     ));
   }
 
-  function removeLegacyWorkflowTabs() {
-    document.querySelector("#fm-workflow-tabs")?.remove();
-  }
+  function syncControlLauncher() {
+    const stage = document.querySelector("#fm-stage");
+    if (!stage) return;
+    const executeButton = stage.querySelector("#fm-execute");
+    const existingLauncher = stage.querySelector("#fm-start-nav");
 
-  function syncPostUploadLauncher() {
-    removeLegacyWorkflowTabs();
-    const head = document.querySelector("#fund-manager .fm-head");
-    if (!head) return;
-    const existing = document.querySelector("#fm-nav-launcher");
-    if (!state.caseData) {
-      existing?.remove();
+    if (!executeButton || !state.caseData) {
+      existingLauncher?.remove();
       return;
     }
-    if (existing) return;
-    const wrapper = document.createElement("div");
-    wrapper.id = "fm-nav-launcher";
-    wrapper.className = "fm-actions";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.id = "fm-start-nav";
-    button.className = "fm-button secondary";
-    button.textContent = "NAV Quality Controller →";
-    button.title = navApplicable()
+
+    const actions = executeButton.closest(".fm-actions");
+    if (!actions || existingLauncher) return;
+
+    const navButton = document.createElement("button");
+    navButton.type = "button";
+    navButton.id = "fm-start-nav";
+    navButton.className = "fm-button secondary";
+    navButton.textContent = "NAV Quality Controller →";
+    navButton.title = navApplicable()
       ? "Open NAV Quality Controller using the evidence already uploaded to this case."
       : "Open NAV Quality Controller and add NAV evidence if required.";
-    button.addEventListener("click", () => window.setFundManagerTab?.("nav"));
-    wrapper.appendChild(button);
-    head.appendChild(wrapper);
+    navButton.addEventListener("click", () => window.setFundManagerTab?.("nav"));
+    actions.appendChild(navButton);
   }
 
   function rememberCase(payload, { broadcast = true } = {}) {
@@ -183,7 +179,7 @@
     state.viewStep = null;
     localStorage.setItem(CASE_KEY, payload.case_id);
     render();
-    queueMicrotask(syncPostUploadLauncher);
+    queueMicrotask(syncControlLauncher);
     if (broadcast) window.dispatchEvent(new CustomEvent("fund-manager-case-updated", { detail: payload }));
   }
 
@@ -206,7 +202,6 @@
   }
 
   function mount() {
-    removeLegacyWorkflowTabs();
     if (document.querySelector("#nav-quality-controller")) return;
     const anchor = document.querySelector("#fund-manager") || document.querySelector(".source-strip");
     if (!anchor) return;
@@ -511,7 +506,7 @@
     const id = state.caseData?.case_id;
     document.querySelector("#navqc-exit")?.addEventListener("click", () => {
       window.setFundManagerTab?.("general");
-      queueMicrotask(syncPostUploadLauncher);
+      queueMicrotask(syncControlLauncher);
     });
     document.querySelector("#navqc-back")?.addEventListener("click", goBack);
     document.querySelector("#navqc-current-step")?.addEventListener("click", () => {
@@ -583,7 +578,7 @@
     state.viewStep = null;
     window.setFundManagerTab?.("general");
     render();
-    queueMicrotask(syncPostUploadLauncher);
+    queueMicrotask(syncControlLauncher);
   });
   window.addEventListener("fund-manager-nav-tab-opened", () => render());
 
@@ -591,8 +586,7 @@
   document.addEventListener("DOMContentLoaded", async () => {
     mount();
     await restore();
-    removeLegacyWorkflowTabs();
     window.setFundManagerTab?.("general");
-    syncPostUploadLauncher();
+    syncControlLauncher();
   });
 })();
