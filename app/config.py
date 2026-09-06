@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     amount_tolerance_percent: float = Field(
         default=2.0, ge=0, le=100, validation_alias="CHERRY_AMOUNT_TOLERANCE_PERCENT"
     )
-    max_upload_mb: int = Field(default=12, ge=1, le=50, validation_alias="CHERRY_MAX_UPLOAD_MB")
+    max_upload_mb: int = Field(default=50, ge=1, le=50, validation_alias="CHERRY_MAX_UPLOAD_MB")
 
     google_cloud_project: str | None = Field(default=None, validation_alias="GOOGLE_CLOUD_PROJECT")
     google_cloud_location: str = Field(default="global", validation_alias="GOOGLE_CLOUD_LOCATION")
