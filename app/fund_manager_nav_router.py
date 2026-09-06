@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,7 +10,11 @@ from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFil
 from pydantic import BaseModel
 
 from app.config import get_settings
-from app.fund_manager_cases import FundManagerCase, case_store
+from app.fund_manager_cases import (
+    FundManagerCase,
+    FundManagerCaseStorageError,
+    case_store,
+)
 from app.fund_manager_classification import classify_and_validate_sources
 from app.fund_manager_nav_controller import (
     build_nav_readiness,
@@ -21,6 +26,7 @@ from app.rate_limit import limiter
 
 settings = get_settings()
 router = APIRouter(prefix="/api/fund-manager/cases", tags=["fund-manager-nav"])
+logger = logging.getLogger(__name__)
 
 
 class NAVDecision(BaseModel):
@@ -54,10 +60,30 @@ def _require_upload_access() -> None:
 
 
 def _case_or_404(case_id: str) -> FundManagerCase:
-    case = case_store.get(case_id)
+    try:
+        case = case_store.get(case_id)
+    except FundManagerCaseStorageError as exc:
+        logger.exception("Could not load Fund Manager case %s", case_id)
+        raise HTTPException(
+            status_code=503,
+            detail="The Fund Manager case store is temporarily unavailable or failed integrity "
+            "verification.",
+        ) from exc
     if case is None:
         raise HTTPException(status_code=404, detail=f"Fund Manager case {case_id} was not found.")
     return case
+
+
+def _save_case(case: FundManagerCase) -> None:
+    try:
+        case_store.save(case)
+    except FundManagerCaseStorageError as exc:
+        logger.exception("Could not save Fund Manager case %s", case.case_id)
+        raise HTTPException(
+            status_code=503,
+            detail="The Fund Manager case could not be stored. Retry this step without closing "
+            "the page.",
+        ) from exc
 
 
 def _safe_file_name(value: str | None) -> str:
@@ -106,6 +132,7 @@ async def assess_nav_readiness(
     case = _case_or_404(case_id)
     case.nav_readiness = build_nav_readiness(case)
     case.touch()
+    _save_case(case)
     return case.public_view()
 
 
@@ -127,6 +154,7 @@ async def reconcile_nav_case(
     case.nav_review = None
     case.nav_decision = None
     case.touch()
+    _save_case(case)
     return case.public_view()
 
 
@@ -158,6 +186,7 @@ async def upload_nav_exception_evidence(
     case.nav_review = None
     case.nav_decision = None
     case.touch()
+    _save_case(case)
     return case.public_view()
 
 
@@ -184,6 +213,7 @@ async def ignore_nav_exception(
         "actor": "fund-manager-ui-user",
     }
     case.touch()
+    _save_case(case)
     return case.public_view()
 
 
@@ -208,6 +238,7 @@ async def review_nav_case(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     case.touch()
+    _save_case(case)
     return case.public_view()
 
 
@@ -239,6 +270,7 @@ async def decide_nav_case(
         "financial_boundary": "Decision recorded only; no journal or official NAV was amended.",
     }
     case.touch()
+    _save_case(case)
     return case.public_view()
 
 

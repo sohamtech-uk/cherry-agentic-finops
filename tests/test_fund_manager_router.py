@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from app import fund_manager_router
 from app.api import app
-from app.fund_manager_cases import case_store
+from app.fund_manager_cases import FundManagerCaseStorageError, case_store
 from app.rate_limit import limiter
 
 client = TestClient(app)
@@ -179,6 +179,7 @@ def test_health_declares_staged_agentic_pipeline() -> None:
     assert body["orchestration_mode"] == "agentic"
     assert "human_approves_control_execution" in body["pipeline"]
     assert "human_decision_recording" in body["implemented_stages"]
+    assert body["case_storage"] == case_store.backend_name
 
 
 def test_case_creation_classifies_only_and_returns_case_id() -> None:
@@ -251,6 +252,19 @@ def test_get_case_never_returns_uploaded_bytes() -> None:
     body = response.json()
     assert "files" not in body
     assert body["classification"]["sources"][0]["filename"] == "positions.json"
+
+
+def test_case_storage_failure_is_not_reported_as_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_to_load(_: str) -> None:
+        raise FundManagerCaseStorageError("database unavailable")
+
+    monkeypatch.setattr(case_store, "get", fail_to_load)
+    response = client.get("/api/fund-manager/cases/FM-UNAVAILABLE")
+
+    assert response.status_code == 503
+    assert "temporarily unavailable" in response.json()["detail"]
 
 
 def test_classify_compatibility_endpoint_still_works() -> None:

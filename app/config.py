@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     firestore_collection: str = Field(
         default="finance_workflows", validation_alias="CHERRY_FIRESTORE_COLLECTION"
     )
+    fund_manager_firestore_collection: str = Field(
+        default="fund_manager_cases",
+        validation_alias="CHERRY_FUND_MANAGER_FIRESTORE_COLLECTION",
+    )
     evidence_bucket: str | None = Field(default=None, validation_alias="CHERRY_EVIDENCE_BUCKET")
     pubsub_topic: str | None = Field(
         default="finance-workflow-events", validation_alias="CHERRY_PUBSUB_TOPIC"
