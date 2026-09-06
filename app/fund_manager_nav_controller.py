@@ -7,14 +7,10 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from app import nav_quality
 from app.agent_tools import run_nav_quality_review
 from app.fund_manager_cases import FundManagerCase
 from app.fund_manager_stages import investigate_case_execution
-from app.nav_quality import (
-    parse_administrator_nav_summary,
-    parse_investor_level_gl_workbook,
-    parse_side_letter_rules,
-)
 from app.nav_review_history import get_nav_review_history_store
 
 
@@ -63,7 +59,7 @@ def _probe_nav_inputs(case: FundManagerCase) -> dict[str, Any]:
         if lowered.endswith(".json"):
             if nav_summary is None:
                 try:
-                    parsed = parse_administrator_nav_summary(content)
+                    parsed = nav_quality.parse_administrator_nav_summary(content)
                     nav_summary = {
                         "source_id": source_id,
                         "filename": filename,
@@ -76,7 +72,7 @@ def _probe_nav_inputs(case: FundManagerCase) -> dict[str, Any]:
                     pass
             if rules is None:
                 try:
-                    parsed_rules = parse_side_letter_rules(content)
+                    parsed_rules = nav_quality.parse_side_letter_rules(content)
                     if parsed_rules:
                         rules = {
                             "source_id": source_id,
@@ -93,7 +89,7 @@ def _probe_nav_inputs(case: FundManagerCase) -> dict[str, Any]:
             and source.get("detected_type") == "investor_gl"
         ):
             try:
-                parsed_ledger = parse_investor_level_gl_workbook(content)
+                parsed_ledger = nav_quality.parse_investor_level_gl_workbook(content)
                 ledger = {
                     "source_id": source_id,
                     "filename": filename,
@@ -240,8 +236,11 @@ def run_case_nav_reconciliation(case: FundManagerCase) -> dict[str, Any]:
 def _nav_execution_for_agent(result: dict[str, Any]) -> dict[str, Any]:
     review = result.get("review", {})
     findings = review.get("findings", [])
+    exception_findings = [
+        finding for finding in findings if finding.get("severity") != "pass"
+    ]
     issues = []
-    for index, finding in enumerate(findings, start=1):
+    for index, finding in enumerate(exception_findings, start=1):
         issues.append(
             {
                 "id": f"NAV-{index:03d}",
@@ -271,6 +270,9 @@ def _build_remediation_package(
 ) -> dict[str, Any]:
     review = reconciliation.get("review", {})
     findings = review.get("findings", [])
+    exception_findings = [
+        finding for finding in findings if finding.get("severity") != "pass"
+    ]
     work_items = review.get("work_items", [])
     root_causes = reconciliation.get("root_causes", [])
     investigations = investigation.get("investigations", [])
@@ -281,10 +283,10 @@ def _build_remediation_package(
             "Return every detectable NAV break, grouped root cause, evidence gap and required "
             "administrator action together in one package."
         ),
-        "finding_count": len(findings),
+        "finding_count": len(exception_findings),
         "root_cause_count": len(root_causes),
         "work_item_count": len(work_items),
-        "findings": findings,
+        "findings": exception_findings,
         "root_causes": root_causes,
         "work_items": work_items,
         "agent_investigations": investigations,
