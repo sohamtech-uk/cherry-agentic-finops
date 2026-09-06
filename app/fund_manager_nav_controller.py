@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from app import nav_quality
+import app.nav_quality as nav_quality
 from app.agent_tools import run_nav_quality_review
 from app.fund_manager_cases import FundManagerCase
 from app.fund_manager_stages import investigate_case_execution
