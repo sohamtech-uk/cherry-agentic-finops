@@ -1,78 +1,68 @@
 (() => {
   'use strict';
 
-  const stage = document.getElementById('board-stage');
-  const board = document.getElementById('board-inner');
-  const nodesLayer = document.getElementById('nodes');
-  const svg = document.getElementById('connections');
-  const emptyState = document.getElementById('empty-state');
-  const planPanel = document.getElementById('plan-panel');
-  const planTitle = document.getElementById('plan-title');
-  const planIntro = document.getElementById('plan-intro');
-  const planSteps = document.getElementById('plan-steps');
-  const confirmPlan = document.getElementById('confirm-plan');
-  const closePlan = document.getElementById('close-plan');
-  const inspector = document.getElementById('inspector');
-  const closeInspector = document.getElementById('close-inspector');
-  const composer = document.getElementById('composer');
-  const composerInput = document.getElementById('composer-input');
-  const toast = document.getElementById('toast');
-  const environmentPill = document.getElementById('environment-pill');
-  const scenarioActions = document.getElementById('scenario-actions');
-  const scenarioStatus = document.getElementById('scenario-status');
-  const investigateButton = document.getElementById('investigate-case');
-  const openReview = document.getElementById('open-review');
-  const zoomLabel = document.getElementById('zoom-label');
-
-  const inspectorKind = document.getElementById('inspector-kind');
-  const inspectorTitle = document.getElementById('inspector-title');
-  const inspectorSummary = document.getElementById('inspector-summary');
-  const inspectorDetails = document.getElementById('inspector-details');
-  const inspectorSources = document.getElementById('inspector-sources');
-  const inspectorRaw = document.getElementById('inspector-raw');
-
-  let pendingScenario = null;
-  let currentScenario = null;
-  let currentCaseId = null;
-  let zoom = 1;
-  let edgeDefs = [];
-  const nodeDefs = new Map();
-
-  const plans = {
-    clean: {
-      title: 'Apply the £12.4k Northstar receipt',
-      intro: 'A straight-through case should complete without controller intervention when evidence and arithmetic agree.',
-      steps: [
-        'Read the booked bank receipt and exact source identity.',
-        'Link remittance lines to the two open AR invoices.',
-        'Run deterministic amount, currency and invoice-state controls.',
-        'Apply cash in the simulated ledger and preserve the audit evidence.'
-      ]
-    },
-    shortpay: {
-      title: 'Investigate the £500 short-pay',
-      intro: 'The receipt can be matched, but the residual exceeds the approved automatic policy and must become a decision-ready exception.',
-      steps: [
-        'Read the booked receipt, remittance and open invoice snapshot.',
-        'Match Northstar and INV-2208 using evidence, not name similarity alone.',
-        'Run deterministic ledger invariants and retrieve SHORTPAY-01 v3.',
-        'Hold the £9.5k cash because the £500 deduction exceeds the £50 auto limit.',
-        'Assemble the policy, evidence and remaining AR state for controller review.'
-      ]
-    }
+  const $ = (id) => document.getElementById(id);
+  const state = {
+    case: null,
+    selectedFiles: [],
+    zoom: 1,
+    nodes: new Map(),
+    edges: [],
+    view: 'canvas',
+    busy: false,
   };
 
-  const moneyFormatter = new Intl.NumberFormat('en-GB', {
-    style: 'currency',
-    currency: 'GBP',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2
-  });
-
-  function money(value) {
-    const number = Number(value ?? 0);
-    return Number.isFinite(number) ? moneyFormatter.format(number) : '—';
-  }
+  const dom = {
+    runtime: $('runtime-pill'),
+    caseCrumb: $('case-crumb'),
+    boardStage: $('board-stage'),
+    board: $('board-inner'),
+    nodes: $('nodes'),
+    connections: $('connections'),
+    empty: $('empty-state'),
+    inspector: $('inspector'),
+    inspectorKind: $('inspector-kind'),
+    inspectorTitle: $('inspector-title'),
+    inspectorSummary: $('inspector-summary'),
+    inspectorDetails: $('inspector-details'),
+    inspectorSources: $('inspector-sources'),
+    inspectorRaw: $('inspector-raw'),
+    closeInspector: $('close-inspector'),
+    documentList: $('document-list'),
+    dockItems: $('dock-items'),
+    dropOverlay: $('drop-overlay'),
+    fileInput: $('file-input'),
+    uploadDialog: $('upload-dialog'),
+    selectedFiles: $('selected-files'),
+    chooseFiles: $('choose-files'),
+    uploadSubmit: $('upload-submit'),
+    fundName: $('fund-name'),
+    reportingPeriod: $('reporting-period'),
+    asOfDate: $('as-of-date'),
+    readiness: $('run-readiness'),
+    reconcile: $('run-reconcile'),
+    review: $('run-review'),
+    decision: $('open-decision'),
+    decisionDialog: $('decision-dialog'),
+    decisionNote: $('decision-note'),
+    stageReadiness: $('stage-readiness'),
+    stageReconcile: $('stage-reconcile'),
+    stageReview: $('stage-review'),
+    stageDecision: $('stage-decision'),
+    composer: $('composer'),
+    composerInput: $('composer-input'),
+    toast: $('toast'),
+    zoomLabel: $('zoom-label'),
+    reportDate: $('report-date'),
+    reportFund: $('report-fund'),
+    reportPeriod: $('report-period'),
+    reportStatus: $('report-status'),
+    reportSummary: $('report-summary'),
+    reportEvidence: $('report-evidence'),
+    reportControls: $('report-controls'),
+    reportFindings: $('report-findings'),
+    reportDecision: $('report-decision'),
+  };
 
   function esc(value) {
     return String(value ?? '')
@@ -83,13 +73,30 @@
       .replaceAll("'", '&#039;');
   }
 
-  async function fetchJSON(url, options = {}) {
-    const response = await fetch(url, {
-      ...options,
-      headers: { 'Accept': 'application/json', ...(options.headers || {}) }
-    });
+  function pretty(value) {
+    return String(value ?? '')
+      .replaceAll('_', ' ')
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  function shortHash(value) {
+    const text = String(value || '');
+    return text ? `${text.slice(0, 8)}…${text.slice(-6)}` : '—';
+  }
+
+  function notify(message, error = false) {
+    dom.toast.textContent = message;
+    dom.toast.classList.toggle('error', error);
+    dom.toast.classList.add('show');
+    clearTimeout(notify.timer);
+    notify.timer = setTimeout(() => dom.toast.classList.remove('show'), 3000);
+  }
+
+  async function api(url, options = {}) {
+    const headers = { Accept: 'application/json', ...(options.headers || {}) };
+    const response = await fetch(url, { ...options, headers });
     let payload = null;
-    try { payload = await response.json(); } catch (_) { /* no-op */ }
+    try { payload = await response.json(); } catch (_) { /* non-json */ }
     if (!response.ok) {
       const detail = payload?.detail?.message || payload?.detail || payload?.message || `${response.status} ${response.statusText}`;
       throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
@@ -97,86 +104,95 @@
     return payload;
   }
 
-  function notify(message, isError = false) {
-    toast.textContent = message;
-    toast.classList.toggle('error', isError);
-    toast.classList.add('show');
-    window.clearTimeout(notify.timer);
-    notify.timer = window.setTimeout(() => toast.classList.remove('show'), 2800);
+  function setBusy(busy, label) {
+    state.busy = busy;
+    [dom.readiness, dom.reconcile, dom.review, dom.decision, dom.uploadSubmit].forEach((button) => {
+      if (button) button.dataset.busy = busy ? '1' : '0';
+    });
+    if (label) notify(label);
+    refreshControls();
   }
 
-  function setEnvironmentReady(text = 'Runtime ready') {
-    environmentPill.classList.add('ready');
-    environmentPill.querySelector('span').textContent = text;
+  function workflow() {
+    return state.case?.workflows?.nav_quality_controller || {};
   }
 
-  async function checkRuntime() {
-    try {
-      const config = await fetchJSON('/api/config');
-      const model = config?.gemini_model ? ` · ${config.gemini_model}` : '';
-      setEnvironmentReady(`Ready${model}`);
-    } catch (_) {
-      environmentPill.querySelector('span').textContent = 'Demo runtime';
+  function sources() {
+    return state.case?.classification?.sources || [];
+  }
+
+  function fileExt(name) {
+    const bits = String(name || '').toLowerCase().split('.');
+    return bits.length > 1 ? bits.pop() : 'file';
+  }
+
+  function fileLabel(source) {
+    const type = source.detected_type || 'unknown';
+    const labels = {
+      nav_summary: 'NAV summary',
+      nav_workbook: 'NAV workbook',
+      investor_gl: 'Investor GL',
+      side_letter_rules: 'Side-letter rules',
+      financial_statement: 'Financial statement',
+      investor_report: 'Investor report',
+      bank_statement: 'Bank statement',
+      cash_transactions: 'Cash data',
+      bank_transactions: 'Bank transactions',
+      positions: 'Positions',
+      trades: 'Trades',
+      lpa: 'LPA',
+      side_letter: 'Side letter',
+      capital_call_notice: 'Capital call',
+    };
+    return labels[type] || pretty(type);
+  }
+
+  function renderDocuments() {
+    const items = sources();
+    if (!items.length) {
+      dom.documentList.innerHTML = '<div class="empty-docs">Upload NAV evidence to start the workbench.</div>';
+      return;
     }
-  }
-
-  function resetBoard() {
-    nodeDefs.clear();
-    edgeDefs = [];
-    nodesLayer.innerHTML = '';
-    svg.innerHTML = '';
-    emptyState.classList.remove('hidden');
-    inspector.classList.add('hidden');
-    scenarioActions.classList.add('hidden');
-    investigateButton.classList.add('hidden');
-    openReview.classList.add('hidden');
-    currentScenario = null;
-    currentCaseId = null;
-    stage.scrollTo({ left: 0, top: 0, behavior: 'smooth' });
-  }
-
-  function showPlan(scenario) {
-    const plan = plans[scenario];
-    if (!plan) return;
-    pendingScenario = scenario;
-    planTitle.textContent = plan.title;
-    planIntro.textContent = plan.intro;
-    planSteps.innerHTML = plan.steps.map((step, index) => `<li data-step="${index + 1}">${esc(step)}</li>`).join('');
-    planPanel.classList.remove('hidden');
-  }
-
-  function hidePlan() {
-    planPanel.classList.add('hidden');
-    pendingScenario = null;
+    dom.documentList.innerHTML = items.map((source) => {
+      const ext = fileExt(source.filename);
+      const rejected = source.validation_status !== 'accepted';
+      return `<button class="document-item" type="button" data-node-target="source-${esc(source.id)}">
+        <span class="doc-icon ${esc(ext)}">${esc(ext.slice(0, 4).toUpperCase())}</span>
+        <span><b>${esc(source.filename)}</b><small>${esc(fileLabel(source))}</small></span>
+        <span class="doc-status ${rejected ? 'rejected' : ''}">${rejected ? 'Review' : 'Ready'}</span>
+      </button>`;
+    }).join('');
+    dom.documentList.querySelectorAll('[data-node-target]').forEach((button) => {
+      button.addEventListener('click', () => selectNode(button.dataset.nodeTarget));
+    });
   }
 
   function statusClass(status = '') {
     const value = String(status).toUpperCase();
-    if (value.includes('PASS') || value.includes('POSTED') || value.includes('APPLIED') || value.includes('READY')) return 'good';
-    if (value.includes('REVIEW') || value.includes('HELD') || value.includes('EVIDENCE')) return 'warn';
-    if (value.includes('BLOCK') || value.includes('REJECT') || value.includes('EXCEEDED')) return 'bad';
+    if (value.includes('PASS') || value.includes('READY') || value.includes('APPROVE') || value.includes('ACCEPT')) return 'good';
+    if (value.includes('REVIEW') || value.includes('WARNING') || value.includes('OPTIONAL') || value.includes('RETURN')) return 'warn';
+    if (value.includes('BLOCK') || value.includes('REJECT') || value.includes('FAIL') || value.includes('ESCALATE')) return 'bad';
     return 'info';
   }
 
   function makeNode(def) {
     const el = document.createElement('article');
-    el.className = `finance-node ${def.tone || ''}`.trim();
+    el.className = `finance-node ${def.tone || ''} ${def.wide ? 'wide' : ''}`.trim();
     el.dataset.nodeId = def.id;
     el.style.left = `${def.x}px`;
     el.style.top = `${def.y}px`;
     el.innerHTML = `
       <div class="node-top">
         <span class="node-kicker">${esc(def.kicker)}</span>
-        <span class="node-source">${esc(def.sourceLabel || 'finance state')}</span>
+        <span class="node-source">${esc(def.sourceLabel || 'NAV state')}</span>
       </div>
       <h3>${esc(def.title)}</h3>
       <div class="node-subtitle">${esc(def.subtitle || '')}</div>
       ${def.metric ? `<div class="node-metric"><strong>${esc(def.metric)}</strong><span>${esc(def.metricLabel || '')}</span></div>` : ''}
       <div class="node-foot">
         <span class="node-status ${statusClass(def.status)}">${esc(def.status || 'Ready')}</span>
-        <span class="node-count">${esc(def.foot || 'Open details')}</span>
+        <span>${esc(def.foot || 'Open details')}</span>
       </div>`;
-
     enableDrag(el);
     el.addEventListener('click', () => {
       if (el.dataset.dragged === '1') {
@@ -185,18 +201,17 @@
       }
       selectNode(def.id);
     });
-    nodesLayer.appendChild(el);
+    dom.nodes.appendChild(el);
     requestAnimationFrame(() => el.classList.add('landed'));
-    return el;
+  }
+
+  function addNode(def) {
+    state.nodes.set(def.id, def);
+    makeNode(def);
   }
 
   function enableDrag(el) {
-    let startX = 0;
-    let startY = 0;
-    let startLeft = 0;
-    let startTop = 0;
-    let moved = false;
-
+    let startX = 0, startY = 0, startLeft = 0, startTop = 0, moved = false;
     el.addEventListener('pointerdown', (event) => {
       if (event.button !== 0) return;
       startX = event.clientX;
@@ -206,439 +221,672 @@
       moved = false;
       el.setPointerCapture(event.pointerId);
     });
-
     el.addEventListener('pointermove', (event) => {
       if (!el.hasPointerCapture(event.pointerId)) return;
-      const dx = (event.clientX - startX) / zoom;
-      const dy = (event.clientY - startY) / zoom;
+      const dx = (event.clientX - startX) / state.zoom;
+      const dy = (event.clientY - startY) / state.zoom;
       if (Math.abs(dx) + Math.abs(dy) > 4) moved = true;
       if (!moved) return;
-      const left = Math.max(12, Math.min(1215, startLeft + dx));
-      const top = Math.max(12, Math.min(700, startTop + dy));
+      const left = Math.max(12, Math.min(1480, startLeft + dx));
+      const top = Math.max(12, Math.min(900, startTop + dy));
       el.style.left = `${left}px`;
       el.style.top = `${top}px`;
-      const def = nodeDefs.get(el.dataset.nodeId);
+      const def = state.nodes.get(el.dataset.nodeId);
       if (def) { def.x = left; def.y = top; }
       updateConnections();
     });
-
     el.addEventListener('pointerup', (event) => {
       if (el.hasPointerCapture(event.pointerId)) el.releasePointerCapture(event.pointerId);
       if (moved) el.dataset.dragged = '1';
     });
   }
 
-  function addNode(def) {
-    nodeDefs.set(def.id, def);
-    return makeNode(def);
-  }
-
   function edgePath(from, to) {
-    const fromEl = nodesLayer.querySelector(`[data-node-id="${from}"]`);
-    const toEl = nodesLayer.querySelector(`[data-node-id="${to}"]`);
-    if (!fromEl || !toEl) return null;
-    const x1 = fromEl.offsetLeft + fromEl.offsetWidth;
-    const y1 = fromEl.offsetTop + fromEl.offsetHeight / 2;
-    const x2 = toEl.offsetLeft;
-    const y2 = toEl.offsetTop + toEl.offsetHeight / 2;
-    const bend = Math.max(60, Math.abs(x2 - x1) * .44);
+    const a = dom.nodes.querySelector(`[data-node-id="${CSS.escape(from)}"]`);
+    const b = dom.nodes.querySelector(`[data-node-id="${CSS.escape(to)}"]`);
+    if (!a || !b) return null;
+    const x1 = a.offsetLeft + a.offsetWidth;
+    const y1 = a.offsetTop + a.offsetHeight / 2;
+    const x2 = b.offsetLeft;
+    const y2 = b.offsetTop + b.offsetHeight / 2;
+    const bend = Math.max(55, Math.abs(x2 - x1) * .42);
     return { d: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`, x1, y1, x2, y2 };
   }
 
   function updateConnections() {
-    svg.innerHTML = '';
-    for (const edge of edgeDefs) {
-      const pathData = edgePath(edge.from, edge.to);
-      if (!pathData) continue;
+    dom.connections.innerHTML = '';
+    state.edges.forEach((edge) => {
+      const data = edgePath(edge.from, edge.to);
+      if (!data) return;
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('d', pathData.d);
+      path.setAttribute('d', data.d);
       if (edge.tone) path.setAttribute('class', edge.tone);
-      svg.appendChild(path);
-      for (const [cx, cy] of [[pathData.x1, pathData.y1], [pathData.x2, pathData.y2]]) {
+      dom.connections.appendChild(path);
+      [[data.x1, data.y1], [data.x2, data.y2]].forEach(([cx, cy]) => {
         const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        circle.setAttribute('cx', cx);
-        circle.setAttribute('cy', cy);
-        circle.setAttribute('r', '3');
-        svg.appendChild(circle);
-      }
-    }
+        circle.setAttribute('cx', cx); circle.setAttribute('cy', cy); circle.setAttribute('r', '3');
+        dom.connections.appendChild(circle);
+      });
+    });
   }
 
-  async function landBoard(defs, edges) {
-    emptyState.classList.add('hidden');
-    nodeDefs.clear();
-    edgeDefs = [];
-    nodesLayer.innerHTML = '';
-    svg.innerHTML = '';
-    inspector.classList.add('hidden');
+  function sourceDetails(source) {
+    const warnings = source.validation_errors || source.warnings || [];
+    return [
+      { label: 'Detected type', value: fileLabel(source) },
+      { label: 'Validation', value: pretty(source.validation_status || source.status) },
+      { label: 'Source ID', value: source.id || '—' },
+      { label: 'SHA-256', value: shortHash(source.sha256) },
+      ...(warnings.length ? [{ label: 'Warnings', value: `${warnings.length}` }] : []),
+    ];
+  }
 
-    for (const def of defs) {
-      addNode(def);
-      await new Promise(resolve => window.setTimeout(resolve, 230));
+  function sourceLineage(source) {
+    const warnings = source.validation_errors || source.warnings || [];
+    const items = [{ label: 'Uploaded evidence', detail: `${source.filename} · ${shortHash(source.sha256)}` }];
+    warnings.forEach((warning) => items.push({ label: 'Validation note', detail: warning }));
+    return items;
+  }
+
+  function buildBoard() {
+    state.nodes.clear();
+    state.edges = [];
+    dom.nodes.innerHTML = '';
+    dom.connections.innerHTML = '';
+    dom.inspector.classList.add('hidden');
+
+    const items = sources();
+    const nav = workflow();
+    const readiness = nav.readiness;
+    const reconciliation = nav.reconciliation;
+    const review = nav.review;
+    const decision = nav.decision;
+
+    if (!items.length) {
+      dom.empty.classList.remove('hidden');
+      renderDock();
+      return;
     }
-    edgeDefs = edges;
+    dom.empty.classList.add('hidden');
+
+    const sourcePositions = items.map((_, index) => ({
+      x: 70 + (index % 2) * 320,
+      y: 120 + Math.floor(index / 2) * 205,
+    }));
+
+    items.forEach((source, index) => {
+      const rejected = source.validation_status !== 'accepted';
+      const pos = sourcePositions[index];
+      addNode({
+        id: `source-${source.id}`,
+        x: pos.x, y: pos.y,
+        kicker: `${String(index + 1).padStart(2, '0')} · Evidence`,
+        sourceLabel: source.id,
+        title: source.filename,
+        subtitle: fileLabel(source),
+        metric: rejected ? 'Review' : 'Accepted',
+        metricLabel: 'classification',
+        status: rejected ? 'REVIEW' : 'READY',
+        tone: rejected ? 'alert' : '',
+        foot: shortHash(source.sha256),
+        summary: rejected
+          ? 'This source remains in the evidence manifest but is excluded from control planning until its input contract is satisfied.'
+          : 'Recognised evidence passed the deterministic input contract and is available to the NAV controller.',
+        details: sourceDetails(source),
+        sources: sourceLineage(source),
+        raw: source,
+      });
+    });
+
+    if (readiness) {
+      const controls = readiness.controls || [];
+      const readyCount = controls.filter((item) => item.status === 'ready').length;
+      addNode({
+        id: 'nav-readiness', x: 760, y: 190, wide: true,
+        kicker: 'NAV controller · Readiness', sourceLabel: readiness.mode || 'waiting',
+        title: 'Evidence readiness', subtitle: readiness.status === 'ready'
+          ? 'Supported checks are enabled from the evidence supplied.'
+          : 'More NAV evidence is needed before controls can run.',
+        metric: `${readyCount}/${controls.length}`, metricLabel: 'controls ready',
+        status: readiness.status === 'ready' ? 'READY' : 'NEEDS INPUT',
+        tone: readiness.status === 'ready' ? 'dark' : 'alert',
+        foot: `${(readiness.optional_gaps || []).length} optional gaps`,
+        summary: readiness.control_boundary,
+        details: [
+          { label: 'Mode', value: pretty(readiness.mode) },
+          { label: 'Controls ready', value: `${readyCount} of ${controls.length}` },
+          { label: 'Optional gaps', value: (readiness.optional_gaps || []).join(', ') || 'None' },
+          { label: 'Blockers', value: `${(readiness.blockers || []).length}` },
+        ],
+        sources: Object.entries(readiness.inputs || {}).filter(([, value]) => value).map(([key, value]) => ({
+          label: pretty(key), detail: `${value.filename || value.source_id || ''}`,
+        })),
+        raw: readiness,
+      });
+      items.filter((source) => source.validation_status === 'accepted').forEach((source) => {
+        state.edges.push({ from: `source-${source.id}`, to: 'nav-readiness', tone: 'strong' });
+      });
+    }
+
+    if (reconciliation) {
+      const recReview = reconciliation.review || {};
+      const findings = recReview.findings || [];
+      const exceptions = Number(recReview.exceptions_open ?? findings.filter((f) => f.severity !== 'pass').length);
+      addNode({
+        id: 'nav-reconciliation', x: 1110, y: 190, wide: true,
+        kicker: 'NAV controller · Deterministic', sourceLabel: 'control result',
+        title: reconciliation.partial ? 'Partial NAV reconciliation' : 'NAV reconciliation',
+        subtitle: reconciliation.legal_entity || state.case.fund_name || 'NAV control result',
+        metric: `${recReview.controls_passed ?? '—'}`, metricLabel: 'controls passed',
+        status: recReview.action || (exceptions ? 'NEEDS REVIEW' : 'PASS'),
+        tone: exceptions ? 'alert' : 'dark',
+        foot: `${exceptions} open exception${exceptions === 1 ? '' : 's'}`,
+        summary: reconciliation.financial_boundary || 'Deterministic NAV controls completed from supplied evidence.',
+        details: [
+          { label: 'Legal entity', value: reconciliation.legal_entity || '—' },
+          { label: 'Period end', value: reconciliation.period_end || '—' },
+          { label: 'Controls passed', value: recReview.controls_passed ?? '—' },
+          { label: 'Exceptions open', value: exceptions },
+          { label: 'Round', value: reconciliation.iteration?.round_number ?? '1' },
+        ],
+        sources: Object.entries(reconciliation.evidence?.input_sha256 || {}).map(([key, value]) => ({
+          label: pretty(key), detail: shortHash(value),
+        })),
+        raw: reconciliation,
+      });
+      if (readiness) state.edges.push({ from: 'nav-readiness', to: 'nav-reconciliation', tone: exceptions ? 'alert' : 'strong' });
+
+      findings.filter((finding) => finding.severity !== 'pass').slice(0, 4).forEach((finding, index) => {
+        const id = `finding-${index + 1}`;
+        addNode({
+          id, x: 1070 + (index % 2) * 320, y: 450 + Math.floor(index / 2) * 195,
+          kicker: `Open item · ${finding.severity || 'warning'}`, sourceLabel: finding.code || 'nav.finding',
+          title: finding.title || 'NAV exception', subtitle: finding.detail || '',
+          metric: finding.amount ? String(finding.amount) : 'Open', metricLabel: finding.amount ? 'amount' : 'exception',
+          status: finding.severity || 'REVIEW', tone: 'alert', foot: 'Deterministic finding',
+          summary: finding.detail || 'A deterministic NAV control identified an open item.',
+          details: [
+            { label: 'Code', value: finding.code || '—' },
+            { label: 'Severity', value: pretty(finding.severity || 'warning') },
+            { label: 'Recommended action', value: pretty(recReview.action || 'needs_review') },
+          ],
+          sources: [{ label: 'Control result', detail: 'Generated by deterministic NAV reconciliation.' }],
+          raw: finding,
+        });
+        state.edges.push({ from: 'nav-reconciliation', to: id, tone: 'alert' });
+      });
+    }
+
+    if (review) {
+      const pack = review.remediation_package || {};
+      addNode({
+        id: 'nav-agent-review', x: 1450, y: 190, wide: true,
+        kicker: 'NAV controller · Agentic review', sourceLabel: 'read-only agent',
+        title: 'Consolidated remediation', subtitle: 'Root causes, evidence gaps and administrator actions in one pass.',
+        metric: String(pack.finding_count ?? (review.investigations || []).length), metricLabel: 'findings consolidated',
+        status: pack.recommended_action || review.deterministic_action || 'REVIEWED',
+        tone: 'dark', foot: `${pack.root_cause_count ?? 0} root causes`,
+        summary: review.control_boundary || pack.purpose,
+        details: [
+          { label: 'Findings', value: pack.finding_count ?? '—' },
+          { label: 'Root causes', value: pack.root_cause_count ?? '—' },
+          { label: 'Work items', value: pack.work_item_count ?? '—' },
+          { label: 'Recommended action', value: pretty(pack.recommended_action || '—') },
+        ],
+        sources: [{ label: 'Deterministic control result', detail: 'Agent explanation cannot change the NAV calculation or control result.' }],
+        raw: review,
+      });
+      if (reconciliation) state.edges.push({ from: 'nav-reconciliation', to: 'nav-agent-review', tone: 'strong' });
+    }
+
+    if (decision) {
+      addNode({
+        id: 'nav-decision', x: 1450, y: 485, wide: true,
+        kicker: 'Human judgement', sourceLabel: 'recorded decision',
+        title: pretty(decision.action), subtitle: decision.note || 'Decision recorded by the fund-manager UI user.',
+        metric: 'Human', metricLabel: 'decision owner',
+        status: decision.action, tone: decision.action.includes('approve') ? 'dark' : 'alert',
+        foot: decision.recorded_at ? new Date(decision.recorded_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recorded',
+        summary: decision.financial_boundary,
+        details: [
+          { label: 'Action', value: pretty(decision.action) },
+          { label: 'Actor', value: decision.actor || 'fund-manager-ui-user' },
+          { label: 'Recorded', value: decision.recorded_at ? new Date(decision.recorded_at).toLocaleString() : '—' },
+        ],
+        sources: [{ label: 'Review state', detail: 'Human decision is recorded after deterministic reconciliation and agentic review.' }],
+        raw: decision,
+      });
+      if (review) state.edges.push({ from: 'nav-agent-review', to: 'nav-decision', tone: 'strong' });
+    }
+
     updateConnections();
-    window.setTimeout(updateConnections, 350);
+    setTimeout(updateConnections, 300);
+    renderDock();
   }
 
-  function detailRows(details = []) {
-    return details.map(item => `<div class="detail-row"><span>${esc(item.label)}</span><b>${esc(item.value)}</b></div>`).join('');
+  function detailRows(items = []) {
+    return items.map((item) => `<div class="detail-row"><span>${esc(item.label)}</span><b>${esc(item.value)}</b></div>`).join('');
   }
 
-  function sourceRows(sources = []) {
-    if (!sources.length) return '<div class="source-item"><b>Derived state</b><small>No external source locator on this component.</small></div>';
-    return sources.map(source => `
-      <div class="source-item">
-        <b>${esc(source.label || source.id || 'Evidence')}</b>
-        <small>${esc(source.detail || source.locator || source.hash || '')}</small>
-      </div>`).join('');
+  function sourceRows(items = []) {
+    if (!items.length) return '<div class="source-item"><b>Derived state</b><small>No external locator is exposed for this component.</small></div>';
+    return items.map((item) => `<div class="source-item"><b>${esc(item.label)}</b><small>${esc(item.detail)}</small></div>`).join('');
   }
 
   function selectNode(id) {
-    const def = nodeDefs.get(id);
+    const def = state.nodes.get(id);
     if (!def) return;
-    document.querySelectorAll('.finance-node').forEach(node => node.classList.toggle('selected', node.dataset.nodeId === id));
-    inspectorKind.textContent = def.kicker || 'Component';
-    inspectorTitle.textContent = def.title;
-    inspectorSummary.textContent = def.summary || def.subtitle || 'Finance component';
-    inspectorDetails.innerHTML = detailRows(def.details || []);
-    inspectorSources.innerHTML = sourceRows(def.sources || []);
-    inspectorRaw.textContent = JSON.stringify(def.raw || {}, null, 2);
-    inspector.classList.remove('hidden');
+    document.querySelectorAll('.finance-node').forEach((node) => node.classList.toggle('selected', node.dataset.nodeId === id));
+    dom.inspectorKind.textContent = def.kicker || 'Component';
+    dom.inspectorTitle.textContent = def.title;
+    dom.inspectorSummary.textContent = def.summary || def.subtitle || '';
+    dom.inspectorDetails.innerHTML = detailRows(def.details || []);
+    dom.inspectorSources.innerHTML = sourceRows(def.sources || []);
+    dom.inspectorRaw.textContent = JSON.stringify(def.raw || {}, null, 2);
+    dom.inspector.classList.remove('hidden');
   }
 
-  function cleanBoard(data) {
-    const receipt = data.receipt_context || {};
-    const remittance = data.remittance || {};
-    const outcome = data.outcome || {};
-    const lines = remittance.lines || [];
-    const invoices = outcome.invoices || [];
-    const applications = outcome.applications || [];
-    const audit = outcome.audit_events || [];
-    const calls = outcome.trace?.tool_calls || [];
-    const applied = outcome.receipt?.applied_amount ?? receipt.amount;
-    const status = outcome.application?.status || 'POSTED_SIMULATED';
+  function renderDock() {
+    const items = sources();
+    const generated = [];
+    const nav = workflow();
+    if (nav.readiness) generated.push({ id: 'nav-readiness', label: 'Readiness', mark: 'R', cls: 'generated' });
+    if (nav.reconciliation) generated.push({ id: 'nav-reconciliation', label: 'Controls', mark: '✓', cls: nav.reconciliation.review?.exceptions_open ? 'alert' : 'generated' });
+    if (nav.review) generated.push({ id: 'nav-agent-review', label: 'Review', mark: '✦', cls: 'generated' });
+    if (nav.decision) generated.push({ id: 'nav-decision', label: 'Decision', mark: 'H', cls: nav.decision.action?.includes('approve') ? 'generated' : 'alert' });
 
-    return {
-      defs: [
-        {
-          id: 'receipt', x: 70, y: 190, kicker: '01 · Bank evidence', sourceLabel: 'SYNTHETIC_BANK',
-          title: receipt.id || 'RCPT-1041', subtitle: `${receipt.payer_name || 'Northstar Retail Ltd'} · ${receipt.settlement_status || 'BOOKED'}`,
-          metric: money(receipt.amount), metricLabel: 'booked receipt', status: receipt.settlement_status || 'BOOKED', foot: 'Exact source identity',
-          summary: 'A booked bank receipt is the cash-side source of truth for the application.',
-          details: [
-            { label: 'Receipt', value: receipt.id || 'RCPT-1041' },
-            { label: 'Payer', value: receipt.payer_name || 'Northstar Retail Ltd' },
-            { label: 'Reference', value: receipt.reference || 'REM-1041' },
-            { label: 'Amount', value: money(receipt.amount) }
-          ],
-          sources: [{ label: 'Bank source', detail: `${receipt.source_system || 'SYNTHETIC_BANK'} · ${receipt.source_transaction_id || 'TX-1041'}` }], raw: receipt
-        },
-        {
-          id: 'remittance', x: 370, y: 75, kicker: '02 · Remittance', sourceLabel: 'remittance',
-          title: remittance.id || 'REM-1041', subtitle: `${lines.length} evidenced allocation lines`,
-          metric: `${lines.length}`, metricLabel: 'invoice references', status: 'EVIDENCE LINKED', foot: 'Click for line detail',
-          summary: 'Remittance tells Cherry CFO which invoices the customer intended to settle.',
-          details: lines.map((line, i) => ({ label: line.invoice_id || `Line ${i + 1}`, value: money(line.amount) })),
-          sources: (remittance.evidence_refs || []).map(ref => ({ label: 'Remittance locator', detail: ref })), raw: remittance
-        },
-        {
-          id: 'invoices', x: 370, y: 385, kicker: '03 · Open AR', sourceLabel: 'ERP snapshot',
-          title: 'Northstar open invoices', subtitle: 'Open-item state before application',
-          metric: `${invoices.length || lines.length}`, metricLabel: 'matched invoices', status: 'MATCHED', foot: 'Balance state',
-          summary: 'The deterministic adapter applies only against supplied open invoices and preserves resulting balances.',
-          details: (invoices.length ? invoices : lines).map((invoice, i) => ({
-            label: invoice.invoice_id || invoice.id || `Invoice ${i + 1}`,
-            value: invoice.balance_after !== undefined ? `${money(invoice.balance_after)} after` : money(invoice.amount)
-          })),
-          sources: [{ label: 'AR ledger', detail: 'Synthetic open-AR snapshot supplied to the control adapter' }], raw: invoices
-        },
-        {
-          id: 'controls', x: 700, y: 220, kicker: '04 · Deterministic controls', sourceLabel: 'control engine',
-          title: 'Cash application controls', subtitle: 'Amount · currency · invoice state · idempotency',
-          metric: 'PASS', metricLabel: 'all required checks', status: 'PASS', foot: `${calls.length} tool calls`, tone: 'dark',
-          summary: 'The model does not invent accounting figures. Deterministic code validates the application before simulated posting.',
-          details: [
-            { label: 'Application', value: status },
-            { label: 'Applied', value: money(applied) },
-            { label: 'Production write', value: outcome.production_write_performed ? 'Yes' : 'No' },
-            { label: 'Tool calls', value: String(calls.length) }
-          ],
-          sources: calls.map(call => ({ label: call.name || 'Tool', detail: call.deterministic === false ? 'Model-assisted' : 'Deterministic finance operation' })), raw: outcome.trace || {}
-        },
-        {
-          id: 'post', x: 1015, y: 120, kicker: '05 · Simulated ledger', sourceLabel: 'AR outcome',
-          title: 'Straight-through application', subtitle: 'Receipt applied across the evidenced invoices',
-          metric: money(applied), metricLabel: 'cash applied', status, foot: 'No human needed',
-          summary: 'The clean case reaches a simulated posted state without unnecessary controller intervention.',
-          details: [
-            { label: 'Status', value: status },
-            { label: 'Applications', value: String(applications.length || lines.length) },
-            { label: 'Unapplied cash', value: money(outcome.receipt?.unapplied_amount || 0) }
-          ],
-          sources: [{ label: 'Simulation boundary', detail: data.boundary || 'No production accounting write' }], raw: outcome
-        },
-        {
-          id: 'audit', x: 1015, y: 430, kicker: '06 · Evidence trail', sourceLabel: 'audit chain',
-          title: 'Review-ready provenance', subtitle: 'Every state transition carries supplied evidence',
-          metric: `${audit.length}`, metricLabel: 'audit events', status: 'READY', foot: 'Inspect provenance',
-          summary: 'The board ends with verifiable state and an evidence trail rather than an ungrounded narrative answer.',
-          details: [
-            { label: 'Audit events', value: String(audit.length) },
-            { label: 'Simulation only', value: outcome.simulation_only === false ? 'No' : 'Yes' },
-            { label: 'Production write', value: outcome.production_write_performed ? 'Yes' : 'No' }
-          ],
-          sources: audit.map(event => ({ label: event.event_type || 'Audit event', detail: (event.evidence_refs || []).join(' · ') })), raw: audit
-        }
-      ],
-      edges: [
-        { from: 'receipt', to: 'controls', tone: 'strong' },
-        { from: 'remittance', to: 'controls', tone: 'strong' },
-        { from: 'invoices', to: 'controls', tone: 'strong' },
-        { from: 'controls', to: 'post', tone: 'strong' },
-        { from: 'controls', to: 'audit' },
-        { from: 'post', to: 'audit' }
-      ]
-    };
-  }
-
-  function shortPayBoard(packet) {
-    const receipt = packet.receipt || {};
-    const match = packet.customer_invoice_match || {};
-    const policy = packet.policy || {};
-    const checks = packet.control_checks || [];
-    const stops = packet.automation_stopped || [];
-    const evidence = packet.evidence || [];
-    const allowedActions = packet.allowed_actions || [];
-    const audit = packet.audit_events || [];
-
-    const byType = (type) => evidence.filter(item => item.source_type === type).map(item => ({
-      label: `${item.source_type} · ${item.evidence_id}`,
-      detail: `${item.locator} · ${String(item.source_sha256 || '').slice(0, 12)}…`
-    }));
-
-    return {
-      defs: [
-        {
-          id: 'receipt', x: 55, y: 205, kicker: '01 · Bank evidence', sourceLabel: receipt.source_system || 'bank',
-          title: receipt.receipt_id || 'RCPT-1042', subtitle: `${receipt.payer_name || 'Northstar Retail Ltd'} · ${receipt.settlement_status || 'BOOKED'}`,
-          metric: money(receipt.amount), metricLabel: 'booked receipt', status: receipt.allocation_status || 'HELD', foot: `v${receipt.version || 1}`,
-          summary: 'The cash is booked, but remains held until the material short-pay decision is valid.',
-          details: [
-            { label: 'Receipt', value: receipt.receipt_id || 'RCPT-1042' },
-            { label: 'Transaction', value: receipt.source_transaction_id || 'TX-1042' },
-            { label: 'Amount', value: money(receipt.amount) },
-            { label: 'Allocation', value: receipt.allocation_status || 'HELD' }
-          ], sources: byType('BANK_FEED'), raw: receipt
-        },
-        {
-          id: 'remittance', x: 340, y: 70, kicker: '02 · Remittance', sourceLabel: 'customer evidence',
-          title: 'DAMAGED_GOODS claim', subtitle: `${match.customer_name || 'Northstar Retail Ltd'} · ${match.invoice_id || 'INV-2208'}`,
-          metric: money(packet.amount_at_risk), metricLabel: 'claimed deduction', status: 'EVIDENCED CLAIM', foot: 'Not independently proven',
-          summary: 'The remittance supports the customer claim and invoice reference. The claim remains evidence, not an automatic accounting authority.',
-          details: [
-            { label: 'Customer', value: match.customer_name || 'Northstar Retail Ltd' },
-            { label: 'Invoice', value: match.invoice_id || 'INV-2208' },
-            { label: 'Reason', value: match.remittance_canonical_reason_code || match.remittance_raw_reason || '—' },
-            { label: 'Cash proposed', value: money(match.proposed_cash_application) }
-          ], sources: byType('REMITTANCE_PDF'), raw: match
-        },
-        {
-          id: 'invoice', x: 340, y: 395, kicker: '03 · Open AR', sourceLabel: 'ERP snapshot',
-          title: match.invoice_id || 'INV-2208', subtitle: `${match.customer_name || 'Northstar Retail Ltd'} · ${match.invoice_status_at_snapshot || 'OPEN'}`,
-          metric: money(match.invoice_open_balance_before), metricLabel: 'open before', status: match.invoice_status_at_snapshot || 'OPEN', foot: `ledger v${match.invoice_ledger_version || 1}`,
-          summary: 'The open AR snapshot is preserved until a valid controller decision determines the residual treatment.',
-          details: [
-            { label: 'Open before', value: money(match.invoice_open_balance_before) },
-            { label: 'Cash proposed', value: money(match.proposed_cash_application) },
-            { label: 'Residual', value: money(packet.amount_at_risk) },
-            { label: 'Currency', value: match.invoice_currency || 'GBP' }
-          ], sources: byType('AR_LEDGER'), raw: packet.remaining_ar_state || {}
-        },
-        {
-          id: 'policy', x: 640, y: 70, kicker: '04 · Finance policy', sourceLabel: 'approved policy',
-          title: `${policy.policy_id || 'SHORTPAY-01'} v${policy.version || 3}`, subtitle: 'Effective, versioned automation boundary',
-          metric: money(policy.max_auto_writeoff_gbp), metricLabel: 'max auto write-off', status: policy.status || 'APPROVED', foot: `${(policy.clauses || []).length} clauses`,
-          summary: 'Policy is an explicit control surface. Historical approvals cannot silently become a new automatic rule.',
-          details: [
-            { label: 'Policy', value: `${policy.policy_id || 'SHORTPAY-01'} v${policy.version || 3}` },
-            { label: 'Effective', value: policy.effective_from || '—' },
-            { label: 'Auto limit', value: money(policy.max_auto_writeoff_gbp) },
-            { label: 'Auto reasons', value: (policy.allowed_auto_reason_codes || []).join(', ') || '—' }
-          ], sources: byType('POLICY'), raw: policy
-        },
-        {
-          id: 'controls', x: 640, y: 395, kicker: '05 · Deterministic controls', sourceLabel: 'control engine',
-          title: 'Accounting invariants', subtitle: 'Receipt identity · versions · currency · allocation · balance',
-          metric: `${checks.filter(check => check.outcome === 'PASS').length}/${checks.length || 0}`, metricLabel: 'fundamental checks pass', status: checks.some(check => check.outcome === 'BLOCK') ? 'BLOCK' : 'PASS', foot: 'Cannot be bypassed', tone: 'dark',
-          summary: 'Fundamental ledger invariants are authoritative and cannot be overridden by a model or an approval button.',
-          details: checks.map(check => ({ label: check.code, value: check.outcome })),
-          sources: checks.map(check => ({ label: check.code, detail: check.explanation })), raw: checks
-        },
-        {
-          id: 'exception', x: 935, y: 220, kicker: '06 · Exception', sourceLabel: 'policy + evidence',
-          title: 'Material short-pay', subtitle: stops[0]?.explanation || 'Automatic treatment is not permitted',
-          metric: money(packet.amount_at_risk), metricLabel: 'amount at risk', status: packet.exception_status || 'WAITING_REVIEW', foot: `${stops.length} stop reasons`, tone: 'alert',
-          summary: 'Cherry CFO has done the investigation. The remaining step is a finance judgement, not more data gathering.',
-          details: [
-            { label: 'Disposition', value: packet.control_disposition || 'REVIEW_REQUIRED' },
-            { label: 'Application', value: packet.application_status || 'REVIEW_REQUIRED' },
-            { label: 'Amount at risk', value: money(packet.amount_at_risk) },
-            ...stops.map(stop => ({ label: stop.code, value: money(stop.excess_over_auto_limit) + ' over limit' }))
-          ],
-          sources: evidence.map(item => ({ label: `${item.source_type} · ${item.evidence_id}`, detail: item.supports })), raw: { stops, evidence }
-        },
-        {
-          id: 'review', x: 1190, y: 220, kicker: '07 · Human judgement', sourceLabel: 'controller packet',
-          title: 'Decision-ready review', subtitle: 'Evidence, policy, financial impact and allowed actions',
-          metric: `${allowedActions.length}`, metricLabel: 'governed actions', status: packet.review_status || 'AWAITING_CONTROLLER', foot: 'Open controller review',
-          summary: 'The controller receives a compact accounting decision packet instead of a vague confidence score.',
-          details: allowedActions.map(action => ({ label: action.label, value: action.authority_required ? 'Authority required' : 'Available' })),
-          sources: evidence.map(item => ({ label: item.evidence_id, detail: item.locator })), raw: packet
-        },
-        {
-          id: 'audit', x: 935, y: 550, kicker: '08 · Audit trail', sourceLabel: 'hash chain',
-          title: 'Evidence-linked state', subtitle: 'Every review transition is reproducible',
-          metric: `${audit.length}`, metricLabel: 'audit events', status: 'READY', foot: 'No production write',
-          summary: 'The workflow preserves evidence identities, policy versions and review state without mutating production accounting systems.',
-          details: [
-            { label: 'Events', value: String(audit.length) },
-            { label: 'Simulation only', value: packet.simulation_only ? 'Yes' : 'No' },
-            { label: 'Production write', value: packet.production_write_performed ? 'Yes' : 'No' },
-            { label: 'Review version', value: String(packet.review_version || 1) }
-          ],
-          sources: audit.map(event => ({ label: `${event.sequence}. ${event.action}`, detail: String(event.event_hash || '').slice(0, 16) + '…' })), raw: audit
-        }
-      ],
-      edges: [
-        { from: 'receipt', to: 'controls', tone: 'strong' },
-        { from: 'remittance', to: 'exception', tone: 'alert' },
-        { from: 'invoice', to: 'controls', tone: 'strong' },
-        { from: 'policy', to: 'exception', tone: 'alert' },
-        { from: 'controls', to: 'exception', tone: 'alert' },
-        { from: 'exception', to: 'review', tone: 'alert' },
-        { from: 'exception', to: 'audit' },
-        { from: 'review', to: 'audit' }
-      ]
-    };
-  }
-
-  async function runScenario(scenario) {
-    currentScenario = scenario;
-    currentCaseId = null;
-    scenarioActions.classList.remove('hidden');
-    investigateButton.classList.add('hidden');
-    openReview.classList.add('hidden');
-    scenarioStatus.textContent = 'Running controls…';
-
-    if (scenario === 'clean') {
-      const data = await fetchJSON('/api/controller-review/demo/clean-multi-invoice', { method: 'POST' });
-      const boardData = cleanBoard(data);
-      await landBoard(boardData.defs, boardData.edges);
-      scenarioStatus.textContent = 'Straight-through application complete';
-      notify('Clean cash application completed with deterministic controls.');
+    if (!items.length && !generated.length) {
+      dom.dockItems.innerHTML = '<span class="dock-empty">Uploaded evidence and generated controls appear here.</span>';
       return;
     }
-
-    const packet = await fetchJSON('/api/controller-review/demo/short-pay-500/reset', { method: 'POST' });
-    currentCaseId = packet.case_id;
-    const boardData = shortPayBoard(packet);
-    await landBoard(boardData.defs, boardData.edges);
-    scenarioStatus.textContent = `${packet.case_id} · controller judgement required`;
-    investigateButton.classList.remove('hidden');
-    openReview.classList.remove('hidden');
-    notify('£500 short-pay held and routed to controller review.');
+    const docs = items.map((source) => ({
+      id: `source-${source.id}`,
+      label: source.filename,
+      mark: fileExt(source.filename).slice(0, 3).toUpperCase(),
+      cls: source.validation_status === 'accepted' ? '' : 'alert',
+    }));
+    dom.dockItems.innerHTML = [...docs, ...generated].map((item) =>
+      `<button class="dock-item ${item.cls}" type="button" data-node-target="${esc(item.id)}"><i>${esc(item.mark)}</i><span>${esc(item.label)}</span></button>`
+    ).join('');
+    dom.dockItems.querySelectorAll('[data-node-target]').forEach((button) => button.addEventListener('click', () => selectNode(button.dataset.nodeTarget)));
   }
 
-  async function confirmPendingPlan() {
-    if (!pendingScenario) return;
-    const scenario = pendingScenario;
-    confirmPlan.disabled = true;
-    confirmPlan.innerHTML = 'Running finance controls…';
+  function refreshControls() {
+    const nav = workflow();
+    const hasCase = Boolean(state.case?.case_id);
+    const readinessReady = nav.readiness?.status === 'ready';
+    dom.readiness.disabled = !hasCase || state.busy;
+    dom.reconcile.disabled = !readinessReady || state.busy;
+    dom.review.disabled = !nav.reconciliation || state.busy;
+    dom.decision.disabled = !nav.review || state.busy;
+
+    const rows = document.querySelectorAll('.workflow-row');
+    rows[0].disabled = !hasCase;
+    rows[1].disabled = !readinessReady;
+    rows[2].disabled = !nav.reconciliation;
+    rows[3].disabled = !nav.review;
+
+    if (!hasCase) {
+      dom.stageReadiness.textContent = 'Waiting for evidence';
+      dom.stageReconcile.textContent = 'Not run';
+      dom.stageReview.textContent = 'Not run';
+      dom.stageDecision.textContent = 'Not recorded';
+      return;
+    }
+    const controls = nav.readiness?.controls || [];
+    const readyCount = controls.filter((item) => item.status === 'ready').length;
+    dom.stageReadiness.textContent = nav.readiness ? `${readyCount}/${controls.length} controls ready` : 'Evidence uploaded';
+    const rec = nav.reconciliation?.review;
+    dom.stageReconcile.textContent = rec ? `${rec.controls_passed ?? '—'} passed · ${rec.exceptions_open ?? 0} open` : 'Not run';
+    const pack = nav.review?.remediation_package;
+    dom.stageReview.textContent = nav.review ? `${pack?.finding_count ?? 0} findings consolidated` : 'Not run';
+    dom.stageDecision.textContent = nav.decision ? pretty(nav.decision.action) : 'Not recorded';
+  }
+
+  function updateCase(response) {
+    state.case = response;
+    if (response?.case_id) {
+      sessionStorage.setItem('cherryCfoNavCaseId', response.case_id);
+      dom.caseCrumb.textContent = response.case_id;
+    }
+    renderDocuments();
+    buildBoard();
+    refreshControls();
+    renderReport();
+  }
+
+  async function assessReadiness(silent = false) {
+    if (!state.case?.case_id || state.busy) return;
     try {
-      planPanel.classList.add('hidden');
-      await runScenario(scenario);
-      pendingScenario = null;
+      setBusy(true, silent ? null : 'Assessing NAV evidence readiness…');
+      const response = await api(`/api/fund-manager/cases/${encodeURIComponent(state.case.case_id)}/nav/readiness`, { method: 'POST' });
+      updateCase(response);
+      if (!silent) notify(response.workflows?.nav_quality_controller?.readiness?.status === 'ready' ? 'NAV controller is ready to run supported checks.' : 'Readiness completed — additional evidence may be useful.');
     } catch (error) {
-      notify(error.message || 'Unable to run case.', true);
-      planPanel.classList.remove('hidden');
+      notify(error.message, true);
     } finally {
-      confirmPlan.disabled = false;
-      confirmPlan.innerHTML = 'Confirm &amp; run <span>→</span>';
+      setBusy(false);
     }
   }
 
-  async function investigateCurrentCase() {
-    if (!currentCaseId) return;
-    investigateButton.disabled = true;
-    investigateButton.textContent = 'Investigating…';
+  async function runReconciliation() {
+    if (!state.case?.case_id || state.busy) return;
     try {
-      const result = await fetchJSON(`/api/controller-review/cases/${encodeURIComponent(currentCaseId)}/agent-investigation`, { method: 'POST' });
-      const node = {
-        id: 'investigation', x: 1190, y: 540, kicker: '09 · Agent investigation', sourceLabel: 'read-only agent',
-        title: 'Exception investigation', subtitle: result.summary || result.narrative || result.recommended_action || 'Evidence-grounded investigation completed',
-        metric: 'READ', metricLabel: 'no ledger authority', status: 'ADVISORY', foot: 'Inspect agent output',
-        summary: 'The agent can investigate and explain context, but it cannot override deterministic finance controls or record the controller decision.',
-        details: Object.entries(result).slice(0, 7).map(([key, value]) => ({ label: key, value: typeof value === 'object' ? JSON.stringify(value) : String(value) })),
-        sources: [{ label: 'Controller packet', detail: currentCaseId }, { label: 'Authority boundary', detail: 'Read-only investigation; no decision mutation.' }], raw: result
-      };
-      addNode(node);
-      edgeDefs.push({ from: 'exception', to: 'investigation' });
-      window.setTimeout(updateConnections, 180);
-      selectNode('investigation');
-      notify('Agent investigation added to the board.');
+      setBusy(true, 'Running deterministic NAV controls…');
+      const response = await api(`/api/fund-manager/cases/${encodeURIComponent(state.case.case_id)}/nav/reconcile`, { method: 'POST' });
+      updateCase(response);
+      notify('NAV reconciliation complete. Deterministic findings are on the canvas.');
+      selectNode('nav-reconciliation');
     } catch (error) {
-      notify(`Agent investigation unavailable: ${error.message}`, true);
+      notify(error.message, true);
     } finally {
-      investigateButton.disabled = false;
-      investigateButton.textContent = 'Investigate with agent';
+      setBusy(false);
     }
   }
 
-  function inferScenario(query) {
-    const text = query.toLowerCase();
-    if (/500|short.?pay|damaged|deduction|exception|review|held/.test(text)) return 'shortpay';
-    return 'clean';
+  async function runReview() {
+    if (!state.case?.case_id || state.busy) return;
+    try {
+      setBusy(true, 'Agent is consolidating exceptions and remediation…');
+      const response = await api(`/api/fund-manager/cases/${encodeURIComponent(state.case.case_id)}/nav/review`, { method: 'POST' });
+      updateCase(response);
+      notify('Agentic NAV review complete. Human judgement remains required for sign-off.');
+      selectNode('nav-agent-review');
+    } catch (error) {
+      notify(error.message, true);
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function setZoom(next) {
-    zoom = Math.max(.65, Math.min(1.35, next));
-    board.style.transform = `scale(${zoom})`;
-    zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+  async function recordDecision(action) {
+    if (!state.case?.case_id || state.busy) return;
+    try {
+      setBusy(true, 'Recording human NAV decision…');
+      const response = await api(`/api/fund-manager/cases/${encodeURIComponent(state.case.case_id)}/nav/decision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, note: dom.decisionNote.value.trim() || null }),
+      });
+      updateCase(response);
+      dom.decisionDialog.close();
+      notify(`Decision recorded: ${pretty(action)}.`);
+      selectNode('nav-decision');
+    } catch (error) {
+      notify(error.message, true);
+    } finally {
+      setBusy(false);
+    }
   }
 
-  document.querySelectorAll('[data-scenario]').forEach(button => {
-    button.addEventListener('click', () => showPlan(button.dataset.scenario));
-  });
+  function openUpload() {
+    state.selectedFiles = [];
+    dom.selectedFiles.innerHTML = '';
+    dom.uploadSubmit.disabled = true;
+    if (state.case) {
+      dom.fundName.value = state.case.fund_name || '';
+      dom.reportingPeriod.value = state.case.reporting_period || '';
+      dom.asOfDate.value = state.case.as_of_date || '';
+      [dom.fundName, dom.reportingPeriod, dom.asOfDate].forEach((input) => input.disabled = true);
+    } else {
+      [dom.fundName, dom.reportingPeriod, dom.asOfDate].forEach((input) => input.disabled = false);
+    }
+    dom.uploadDialog.showModal();
+  }
 
-  document.querySelectorAll('[data-action="reset-board"]').forEach(button => {
-    button.addEventListener('click', resetBoard);
-  });
+  function setSelectedFiles(files) {
+    state.selectedFiles = Array.from(files || []).slice(0, 25);
+    dom.selectedFiles.innerHTML = state.selectedFiles.map((file) =>
+      `<div class="selected-file"><span>${esc(file.name)}</span><small>${(file.size / 1024 / 1024).toFixed(file.size > 1048576 ? 1 : 2)} MB</small></div>`
+    ).join('');
+    dom.uploadSubmit.disabled = !state.selectedFiles.length;
+  }
 
-  confirmPlan.addEventListener('click', confirmPendingPlan);
-  closePlan.addEventListener('click', hidePlan);
-  closeInspector.addEventListener('click', () => {
-    inspector.classList.add('hidden');
-    document.querySelectorAll('.finance-node').forEach(node => node.classList.remove('selected'));
-  });
-  investigateButton.addEventListener('click', investigateCurrentCase);
+  async function uploadSelected() {
+    if (!state.selectedFiles.length || state.busy) return;
+    const form = new FormData();
+    state.selectedFiles.forEach((file) => form.append('files', file, file.name));
+    let endpoint = '/api/fund-manager/cases';
+    if (state.case?.case_id) {
+      endpoint = `/api/fund-manager/cases/${encodeURIComponent(state.case.case_id)}/evidence`;
+    } else {
+      if (dom.fundName.value.trim()) form.append('fund_name', dom.fundName.value.trim());
+      if (dom.reportingPeriod.value.trim()) form.append('reporting_period', dom.reportingPeriod.value.trim());
+      if (dom.asOfDate.value) form.append('as_of_date', dom.asOfDate.value);
+    }
 
-  composer.addEventListener('submit', (event) => {
+    try {
+      setBusy(true, `Uploading ${state.selectedFiles.length} evidence file${state.selectedFiles.length === 1 ? '' : 's'}…`);
+      const response = await api(endpoint, { method: 'POST', body: form });
+      dom.uploadDialog.close();
+      updateCase(response);
+      notify(`${response.classification?.accepted_count ?? 0} evidence source${response.classification?.accepted_count === 1 ? '' : 's'} accepted. Building NAV readiness…`);
+      setBusy(false);
+      await assessReadiness(true);
+    } catch (error) {
+      notify(error.message, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function renderReport() {
+    dom.reportDate.textContent = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    if (!state.case) {
+      dom.reportFund.textContent = 'Not supplied';
+      dom.reportPeriod.textContent = 'Not supplied';
+      dom.reportStatus.textContent = 'Waiting for evidence';
+      dom.reportSummary.textContent = 'Upload evidence to generate a review summary.';
+      dom.reportEvidence.innerHTML = '<div class="report-card"><strong>No evidence yet</strong><small>The document view updates as the NAV controller progresses.</small></div>';
+      dom.reportControls.innerHTML = '';
+      dom.reportFindings.innerHTML = '<div class="report-card"><strong>No open items</strong><small>Controls have not run.</small></div>';
+      dom.reportDecision.textContent = 'No decision recorded.';
+      return;
+    }
+    const nav = workflow();
+    const ready = nav.readiness;
+    const rec = nav.reconciliation;
+    const review = nav.review;
+    const decision = nav.decision;
+    const src = sources();
+    const recReview = rec?.review || {};
+    const open = recReview.exceptions_open ?? (recReview.findings || []).filter((f) => f.severity !== 'pass').length;
+
+    dom.reportFund.textContent = state.case.fund_name || rec?.legal_entity || 'NAV review';
+    dom.reportPeriod.textContent = state.case.reporting_period || state.case.as_of_date || rec?.period_end || 'Not supplied';
+    dom.reportStatus.textContent = decision ? pretty(decision.action) : review ? 'Awaiting human decision' : rec ? `${open} open items` : ready?.status === 'ready' ? 'Ready for controls' : 'Evidence review';
+    dom.reportSummary.textContent = decision
+      ? `The NAV controller completed its evidence-led review and a human recorded the decision "${pretty(decision.action)}". The system did not amend the official NAV.`
+      : review
+        ? `Deterministic NAV controls have completed and the agent consolidated ${review.remediation_package?.finding_count ?? open} findings into a remediation package. Human sign-off remains outstanding.`
+        : rec
+          ? `NAV controls completed with ${recReview.controls_passed ?? '—'} controls passed and ${open} open exception${open === 1 ? '' : 's'}.`
+          : ready?.status === 'ready'
+            ? `The evidence pack has been classified. ${ready.controls?.filter((c) => c.status === 'ready').length ?? 0} supported NAV controls are ready to run.`
+            : 'The evidence pack has been classified and the NAV controller is waiting for a supported NAV summary or investor-level GL.';
+
+    dom.reportEvidence.innerHTML = src.map((source) =>
+      `<div class="report-row"><span>${esc(source.filename)}</span><b>${esc(fileLabel(source))}</b><b>${esc(pretty(source.validation_status))}</b></div>`
+    ).join('') || '<div class="report-card">No evidence.</div>';
+
+    const controls = ready?.controls || [];
+    dom.reportControls.innerHTML = controls.map((control) =>
+      `<div class="report-row"><span>${esc(control.control)}</span><b>${esc(pretty(control.status))}</b><b>${esc((control.requires || []).join(' + '))}</b></div>`
+    ).join('') || '<div class="report-card"><strong>Not assessed</strong><small>Run evidence readiness first.</small></div>';
+
+    const findings = (recReview.findings || []).filter((finding) => finding.severity !== 'pass');
+    dom.reportFindings.innerHTML = findings.length
+      ? findings.map((finding) => `<div class="report-card"><strong>${esc(finding.title || finding.code)}</strong><small>${esc(finding.detail || '')}</small></div>`).join('')
+      : '<div class="report-card"><strong>No open deterministic findings</strong><small>Either controls have not run or the supplied checks passed.</small></div>';
+
+    dom.reportDecision.innerHTML = decision
+      ? `<div class="report-card"><strong>${esc(pretty(decision.action))}</strong><small>${esc(decision.note || 'No note supplied.')} · ${esc(decision.financial_boundary || '')}</small></div>`
+      : '<div class="report-card"><strong>No decision recorded</strong><small>A human owns the final NAV sign-off decision.</small></div>';
+  }
+
+  function switchView(view) {
+    state.view = view;
+    document.querySelectorAll('[data-view]').forEach((button) => button.classList.toggle('active', button.dataset.view === view));
+    $('canvas-view').classList.toggle('hidden', view !== 'canvas');
+    $('document-view').classList.toggle('hidden', view !== 'document');
+    if (view === 'document') renderReport();
+  }
+
+  function resetWorkspace() {
+    state.case = null;
+    state.nodes.clear();
+    state.edges = [];
+    sessionStorage.removeItem('cherryCfoNavCaseId');
+    dom.caseCrumb.textContent = 'New review';
+    dom.nodes.innerHTML = '';
+    dom.connections.innerHTML = '';
+    dom.empty.classList.remove('hidden');
+    dom.inspector.classList.add('hidden');
+    dom.documentList.innerHTML = '<div class="empty-docs">Upload NAV evidence to start the workbench.</div>';
+    dom.fundName.value = '';
+    dom.reportingPeriod.value = '';
+    dom.asOfDate.value = '';
+    refreshControls();
+    renderDock();
+    renderReport();
+    switchView('canvas');
+    notify('New NAV review ready.');
+  }
+
+  function handleQuestion(text) {
+    const q = String(text || '').trim().toLowerCase();
+    if (!q) return;
+    if (!state.case) {
+      openUpload();
+      notify('Upload the close pack first; Cherry will build the NAV control map from the evidence.');
+      return;
+    }
+    if (q.includes('upload') || q.includes('add evidence') || q.includes('document')) {
+      openUpload(); return;
+    }
+    if (q.includes('ready') || q.includes('readiness') || q.includes('what can')) {
+      if (workflow().readiness) selectNode('nav-readiness'); else assessReadiness();
+      return;
+    }
+    if (q.includes('reconcile') || q.includes('control') || q.includes('check') || q.includes('foot')) {
+      if (workflow().reconciliation) selectNode('nav-reconciliation'); else runReconciliation();
+      return;
+    }
+    if (q.includes('review') || q.includes('exception') || q.includes('root cause') || q.includes('investigate')) {
+      if (workflow().review) selectNode('nav-agent-review');
+      else if (workflow().reconciliation) runReview();
+      else notify('Run NAV controls first so the agent has deterministic findings to investigate.');
+      return;
+    }
+    if (q.includes('approve') || q.includes('sign off') || q.includes('decision')) {
+      if (workflow().review) dom.decisionDialog.showModal();
+      else notify('The agentic review must complete before a human decision is recorded.');
+      return;
+    }
+    if (q.includes('report') || q.includes('summary')) {
+      switchView('document'); return;
+    }
+    notify('Try: “what is ready?”, “run NAV controls”, “investigate exceptions”, or “show the report”.');
+  }
+
+  function applyZoom(next) {
+    state.zoom = Math.min(1.25, Math.max(.65, Number(next.toFixed(2))));
+    dom.board.style.transform = `scale(${state.zoom})`;
+    dom.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
+    setTimeout(updateConnections, 50);
+  }
+
+  async function restoreCase() {
+    const caseId = sessionStorage.getItem('cherryCfoNavCaseId');
+    if (!caseId) return;
+    try {
+      const response = await api(`/api/fund-manager/cases/${encodeURIComponent(caseId)}`);
+      updateCase(response);
+      notify('Restored your NAV review.');
+    } catch (_) {
+      sessionStorage.removeItem('cherryCfoNavCaseId');
+    }
+  }
+
+  async function checkRuntime() {
+    try {
+      const config = await api('/api/config');
+      dom.runtime.classList.add('ready');
+      dom.runtime.querySelector('span').textContent = config?.persistence_backend ? `Ready · ${config.persistence_backend}` : 'Runtime ready';
+    } catch (_) {
+      dom.runtime.querySelector('span').textContent = 'Demo runtime';
+    }
+  }
+
+  document.querySelectorAll('[data-open-upload]').forEach((button) => button.addEventListener('click', openUpload));
+  $('top-upload').addEventListener('click', openUpload);
+  $('new-analysis').addEventListener('click', resetWorkspace);
+  dom.chooseFiles.addEventListener('click', () => dom.fileInput.click());
+  dom.fileInput.addEventListener('change', () => setSelectedFiles(dom.fileInput.files));
+  dom.uploadSubmit.addEventListener('click', uploadSelected);
+  dom.closeInspector.addEventListener('click', () => dom.inspector.classList.add('hidden'));
+  dom.readiness.addEventListener('click', () => assessReadiness());
+  dom.reconcile.addEventListener('click', runReconciliation);
+  dom.review.addEventListener('click', runReview);
+  dom.decision.addEventListener('click', () => dom.decisionDialog.showModal());
+  document.querySelectorAll('[data-decision]').forEach((button) => button.addEventListener('click', () => recordDecision(button.dataset.decision)));
+  document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => switchView(button.dataset.view)));
+  $('zoom-in').addEventListener('click', () => applyZoom(state.zoom + .1));
+  $('zoom-out').addEventListener('click', () => applyZoom(state.zoom - .1));
+  $('zoom-reset').addEventListener('click', () => { applyZoom(1); dom.boardStage.scrollTo({ left: 0, top: 0, behavior: 'smooth' }); });
+
+  document.querySelectorAll('.workflow-row').forEach((button) => button.addEventListener('click', () => {
+    const kind = button.dataset.workflow;
+    if (kind === 'readiness') workflow().readiness ? selectNode('nav-readiness') : assessReadiness();
+    if (kind === 'reconciliation') workflow().reconciliation ? selectNode('nav-reconciliation') : runReconciliation();
+    if (kind === 'review') workflow().review ? selectNode('nav-agent-review') : runReview();
+    if (kind === 'decision') workflow().decision ? selectNode('nav-decision') : dom.decisionDialog.showModal();
+  }));
+
+  dom.composer.addEventListener('submit', (event) => {
     event.preventDefault();
-    const query = composerInput.value.trim();
-    if (!query) return;
-    showPlan(inferScenario(query));
-    composerInput.value = '';
+    const value = dom.composerInput.value;
+    dom.composerInput.value = '';
+    handleQuestion(value);
   });
 
-  document.getElementById('zoom-in').addEventListener('click', () => setZoom(zoom + .1));
-  document.getElementById('zoom-out').addEventListener('click', () => setZoom(zoom - .1));
-  document.getElementById('zoom-reset').addEventListener('click', () => {
-    setZoom(1);
-    stage.scrollTo({ left: 0, top: 0, behavior: 'smooth' });
+  let dragDepth = 0;
+  dom.boardStage.addEventListener('dragenter', (event) => {
+    if (!event.dataTransfer?.types?.includes('Files')) return;
+    event.preventDefault();
+    dragDepth += 1;
+    dom.dropOverlay.classList.remove('hidden');
+  });
+  dom.boardStage.addEventListener('dragover', (event) => {
+    if (!event.dataTransfer?.types?.includes('Files')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  });
+  dom.boardStage.addEventListener('dragleave', () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) dom.dropOverlay.classList.add('hidden');
+  });
+  dom.boardStage.addEventListener('drop', (event) => {
+    event.preventDefault();
+    dragDepth = 0;
+    dom.dropOverlay.classList.add('hidden');
+    const files = event.dataTransfer?.files;
+    if (!files?.length) return;
+    openUpload();
+    setSelectedFiles(files);
   });
 
-  window.addEventListener('resize', updateConnections);
+  dom.uploadDialog.addEventListener('close', () => {
+    dom.fileInput.value = '';
+    state.selectedFiles = [];
+    dom.selectedFiles.innerHTML = '';
+  });
+
+  window.addEventListener('resize', () => setTimeout(updateConnections, 40));
+
+  refreshControls();
+  renderDock();
+  renderReport();
   checkRuntime();
-  resetBoard();
+  restoreCase();
 })();
