@@ -12,7 +12,6 @@
   ]);
   const STEPS = ["NAV Evidence", "Readiness", "Reconcile", "Exception Review", "Decision"];
   const state = { caseData: null, history: null, busy: false, viewStep: null };
-  let launcherObserver = null;
 
   const esc = (value) => String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -47,52 +46,22 @@
     ));
   }
 
-  function removeLegacyWorkflowTabs() {
-    document.querySelector("#fm-workflow-tabs")?.remove();
-  }
+  function syncNavTabAvailability() {
+    const navButton = document.querySelector('[data-fm-tab="nav"]');
+    if (!navButton) return;
 
-  function syncContextualLauncher() {
-    removeLegacyWorkflowTabs();
-    const stage = document.querySelector("#fm-stage");
-    if (!stage || !state.caseData) return;
+    const available = Boolean(state.caseData && navApplicable());
+    navButton.disabled = !available;
+    navButton.setAttribute("aria-disabled", String(!available));
+    navButton.title = available
+      ? "Open NAV Quality Controller"
+      : state.caseData
+        ? "NAV Quality Controller is available when recognised NAV evidence exists in this case."
+        : "Upload evidence and create a case before starting NAV Quality Control.";
 
-    const planButton = stage.querySelector("#fm-plan");
-    const existingLauncher = stage.querySelector("#fm-start-nav");
-    const existingHint = stage.querySelector("#fm-nav-applicable-hint");
-
-    if (!planButton || !navApplicable()) {
-      existingLauncher?.remove();
-      existingHint?.remove();
-      return;
+    if (!available && navButton.classList.contains("active")) {
+      window.setFundManagerTab?.("general");
     }
-
-    planButton.textContent = "Continue General Document Review →";
-    const actions = planButton.closest(".fm-actions");
-    if (!actions || existingLauncher) return;
-
-    const hint = document.createElement("div");
-    hint.id = "fm-nav-applicable-hint";
-    hint.className = "fm-boundary";
-    hint.innerHTML = "<strong>NAV review available.</strong> NAV-related evidence was recognised in this case. Choose which review you want to run next.";
-    actions.parentElement?.insertBefore(hint, actions);
-
-    const navButton = document.createElement("button");
-    navButton.type = "button";
-    navButton.id = "fm-start-nav";
-    navButton.className = "fm-button secondary";
-    navButton.textContent = "Start NAV Quality Control →";
-    navButton.addEventListener("click", () => {
-      window.setFundManagerTab?.("nav");
-    });
-    actions.appendChild(navButton);
-  }
-
-  function observeGeneralReview() {
-    const stage = document.querySelector("#fm-stage");
-    if (!stage || launcherObserver) return;
-    launcherObserver = new MutationObserver(() => syncContextualLauncher());
-    launcherObserver.observe(stage, { childList: true, subtree: true });
-    syncContextualLauncher();
   }
 
   function rememberCase(payload, { broadcast = true } = {}) {
@@ -101,7 +70,7 @@
     state.viewStep = null;
     localStorage.setItem(CASE_KEY, payload.case_id);
     render();
-    queueMicrotask(syncContextualLauncher);
+    queueMicrotask(syncNavTabAvailability);
     if (broadcast) {
       window.dispatchEvent(new CustomEvent("fund-manager-case-updated", { detail: payload }));
     }
@@ -126,7 +95,6 @@
   }
 
   function mount() {
-    removeLegacyWorkflowTabs();
     if (document.querySelector("#nav-quality-controller")) return;
     const anchor = document.querySelector("#fund-manager") || document.querySelector(".source-strip");
     if (!anchor) return;
@@ -135,6 +103,7 @@
       '<section class="navqc-shell" id="nav-quality-controller" hidden><div class="navqc-card"><div id="navqc-content"></div></div></section>',
     );
     render();
+    syncNavTabAvailability();
   }
 
   function pill(status) {
@@ -346,7 +315,6 @@
     const id = state.caseData?.case_id;
     document.querySelector("#navqc-exit")?.addEventListener("click", () => {
       window.setFundManagerTab?.("general");
-      queueMicrotask(syncContextualLauncher);
     });
     document.querySelector("#navqc-back")?.addEventListener("click", goBack);
     document.querySelector("#navqc-current-step")?.addEventListener("click", () => {
@@ -421,17 +389,21 @@
     state.viewStep = null;
     window.setFundManagerTab?.("general");
     render();
-    queueMicrotask(syncContextualLauncher);
+    queueMicrotask(syncNavTabAvailability);
   });
-  window.addEventListener("fund-manager-nav-tab-opened", () => render());
+  window.addEventListener("fund-manager-nav-tab-opened", () => {
+    if (!navApplicable()) {
+      window.setFundManagerTab?.("general");
+      return;
+    }
+    render();
+  });
 
   injectStyles();
   document.addEventListener("DOMContentLoaded", async () => {
     mount();
-    observeGeneralReview();
     await restore();
-    removeLegacyWorkflowTabs();
+    syncNavTabAvailability();
     window.setFundManagerTab?.("general");
-    syncContextualLauncher();
   });
 })();
