@@ -15,10 +15,20 @@
 
   if (!fileInput || !uploadDialog || !selectedFiles || !boardStage || !emptyState || !uploadSubmit) return;
 
-  const SAFE_REQUEST_BYTES = 3_250_000;
-  const XLSX_REPACK_TRIGGER = 900_000;
+  const SAFE_REQUEST_BYTES = 3_150_000;
+  const XLSX_REPACK_TRIGGER = 850_000;
   const INVESTOR_GL_SHEET = 'Investor-Level GL';
-  const GL_KEEP_COLUMNS = [1, 2, 3, 21, 22, 23, 30, 31, 35];
+  const GL = {
+    periodStart: 1,
+    periodEnd: 2,
+    legalEntity: 3,
+    accountType: 21,
+    transType: 22,
+    glDate: 23,
+    entityCurrency: 30,
+    amount: 31,
+    investor: 35,
+  };
 
   let staged = [];
   let internalDispatch = false;
@@ -87,7 +97,7 @@
         <span class="selected-file-count">0 files selected</span>
         <button type="button" data-add-more-files>＋ Add more files</button>
         <button type="button" data-add-folder>＋ Add a folder</button>
-        <small>Combine administrator NAV, investor GL, side-letter rules, financial statements, bank/custodian evidence and supporting files. Large Excel sources are compacted in your browser before transport; financial data used by the NAV controller is preserved.</small>`;
+        <small>Combine administrator NAV, investor GL, side-letter rules, financial statements, bank/custodian evidence and supporting files. Large Excel sources are transport-optimised in your browser. For investor GLs, Cherry preserves period-end balances by entity, account type, currency and investor.</small>`;
       selectedFiles.insertAdjacentElement('afterend', tools);
       tools.querySelector('[data-add-more-files]').addEventListener('click', () => fileInput.click());
       tools.querySelector('[data-add-folder]').addEventListener('click', () => folderInput.click());
@@ -163,6 +173,18 @@
     return cell ? cell.v : null;
   }
 
+  function numberValue(value) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (value === null || value === undefined || value === '') return null;
+    const parsed = Number(String(value).replaceAll(',', '').trim());
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  function dateKey(value) {
+    if (value instanceof Date) return value.toISOString().slice(0, 10);
+    return String(value ?? '').slice(0, 10);
+  }
+
   function compactGenericSheet(sheet) {
     const ref = sheet['!ref'];
     if (!ref) return window.XLSX.utils.aoa_to_sheet([]);
@@ -178,34 +200,90 @@
     return window.XLSX.utils.aoa_to_sheet(rows);
   }
 
-  function compactInvestorGlSheet(sheet) {
+  function compactInvestorGlSheet(sheet, aggressive = false) {
     const ref = sheet['!ref'];
     if (!ref) return window.XLSX.utils.aoa_to_sheet([]);
     const range = window.XLSX.utils.decode_range(ref);
-    const rows = [];
-    for (let r = range.s.r; r <= range.e.r; r += 1) {
-      const row = Array(36).fill(null);
-      GL_KEEP_COLUMNS.forEach((col) => { row[col] = cellValue(sheet, r, col); });
-      rows.push(row);
+    const width = Math.max(range.e.c + 1, 36);
+    const header = Array(width).fill(null);
+    for (let c = 0; c < width; c += 1) header[c] = cellValue(sheet, range.s.r, c);
+
+    const groups = new Map();
+    for (let r = range.s.r + 1; r <= range.e.r; r += 1) {
+      const legalEntity = cellValue(sheet, r, GL.legalEntity);
+      const accountType = cellValue(sheet, r, GL.accountType);
+      const amount = numberValue(cellValue(sheet, r, GL.amount));
+      if (!legalEntity || !accountType || amount === null) continue;
+
+      const periodStart = cellValue(sheet, r, GL.periodStart);
+      const periodEnd = cellValue(sheet, r, GL.periodEnd);
+      const rawDate = cellValue(sheet, r, GL.glDate);
+      const glDate = aggressive ? (periodEnd || rawDate) : rawDate;
+      const currency = cellValue(sheet, r, GL.entityCurrency) || 'USD';
+      const investor = cellValue(sheet, r, GL.investor) || '';
+      const key = [
+        dateKey(periodStart),
+        dateKey(periodEnd),
+        String(legalEntity),
+        String(accountType),
+        aggressive ? 'period-end' : dateKey(glDate),
+        String(currency),
+        String(investor),
+      ].join('\u001f');
+
+      const existing = groups.get(key);
+      if (existing) {
+        existing.amount += amount;
+      } else {
+        groups.set(key, { periodStart, periodEnd, legalEntity, accountType, glDate, currency, investor, amount });
+      }
     }
+
+    const rows = [header];
+    groups.forEach((group) => {
+      const row = Array(width).fill(null);
+      row[GL.periodStart] = group.periodStart;
+      row[GL.periodEnd] = group.periodEnd;
+      row[GL.legalEntity] = group.legalEntity;
+      row[GL.accountType] = group.accountType;
+      row[GL.transType] = aggressive ? 'Aggregated period-end transport' : 'Aggregated daily transport';
+      row[GL.glDate] = group.glDate || group.periodEnd;
+      row[GL.entityCurrency] = group.currency;
+      row[GL.amount] = Math.round(group.amount * 100) / 100;
+      row[GL.investor] = group.investor || null;
+      rows.push(row);
+    });
+
     return window.XLSX.utils.aoa_to_sheet(rows);
+  }
+
+  function buildCompactedWorkbook(workbook, aggressiveInvestorGl = false) {
+    const out = window.XLSX.utils.book_new();
+    workbook.SheetNames.forEach((sheetName) => {
+      const source = workbook.Sheets[sheetName];
+      const compact = sheetName.trim().toLowerCase() === INVESTOR_GL_SHEET.toLowerCase()
+        ? compactInvestorGlSheet(source, aggressiveInvestorGl)
+        : compactGenericSheet(source);
+      window.XLSX.utils.book_append_sheet(out, compact, sheetName.slice(0, 31));
+    });
+    return out;
   }
 
   async function compactWorkbook(file) {
     if (!window.XLSX) throw new Error('Excel optimiser did not load. Refresh the page and try again.');
     const raw = await file.arrayBuffer();
     const workbook = window.XLSX.read(raw, { type: 'array', cellDates: true, cellStyles: false, cellFormula: false });
-    const out = window.XLSX.utils.book_new();
+    const hasInvestorGl = workbook.SheetNames.some((name) => name.trim().toLowerCase() === INVESTOR_GL_SHEET.toLowerCase());
 
-    workbook.SheetNames.forEach((sheetName) => {
-      const source = workbook.Sheets[sheetName];
-      const compact = sheetName.trim().toLowerCase() === INVESTOR_GL_SHEET.toLowerCase()
-        ? compactInvestorGlSheet(source)
-        : compactGenericSheet(source);
-      window.XLSX.utils.book_append_sheet(out, compact, sheetName.slice(0, 31));
-    });
+    let out = buildCompactedWorkbook(workbook, false);
+    let bytes = window.XLSX.write(out, { type: 'array', bookType: 'xlsx', compression: true });
 
-    const bytes = window.XLSX.write(out, { type: 'array', bookType: 'xlsx', compression: true });
+    if (hasInvestorGl && bytes.byteLength > SAFE_REQUEST_BYTES) {
+      setProgress(30, `Summarising ${file.name}`, 'Daily GL rows are still too large for the Vercel demo. Building a period-end balance-preserving transport view…');
+      out = buildCompactedWorkbook(workbook, true);
+      bytes = window.XLSX.write(out, { type: 'array', bookType: 'xlsx', compression: true });
+    }
+
     const name = file.name.replace(/\.xls$/i, '.xlsx');
     return new File([bytes], name, {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -217,12 +295,12 @@
     if (isExcel(file) && (forceCompact || file.size > XLSX_REPACK_TRIGGER)) {
       const compact = await compactWorkbook(file);
       if (compact.size > SAFE_REQUEST_BYTES) {
-        throw new Error(`${file.name} is still ${formatMb(compact.size)} after browser compaction. Split this workbook or upload a smaller export for the hackathon demo.`);
+        throw new Error(`${file.name} is still ${formatMb(compact.size)} after NAV-safe browser compaction. Please upload a smaller extract for this Vercel-hosted demo.`);
       }
       return compact;
     }
     if (file.size > SAFE_REQUEST_BYTES) {
-      throw new Error(`${file.name} is ${formatMb(file.size)}. This Vercel demo accepts large Excel files by compacting them in-browser, but this ${extOf(file).toUpperCase() || 'file'} source is still above the safe request size.`);
+      throw new Error(`${file.name} is ${formatMb(file.size)}. This Vercel demo can optimise Excel evidence automatically, but this ${extOf(file).toUpperCase() || 'file'} source is above the transport-safe request size.`);
     }
     return file;
   }
@@ -230,9 +308,9 @@
   async function requestJson(url, options, signal) {
     const response = await fetch(url, { ...options, signal, headers: { Accept: 'application/json', ...(options.headers || {}) } });
     let payload = null;
-    try { payload = await response.json(); } catch (_) { /* Vercel may return an empty 413 body */ }
+    try { payload = await response.json(); } catch (_) { /* non-json error */ }
     if (!response.ok) {
-      if (response.status === 413) throw new Error('Upload exceeded the Vercel request limit. Cherry now sends evidence in smaller transport-safe requests; refresh and retry if this was an older tab.');
+      if (response.status === 413) throw new Error('Upload exceeded the Vercel request limit. Refresh once to ensure the latest transport-safe uploader is loaded, then retry.');
       const detail = payload?.detail?.message || payload?.detail || payload?.message || `${response.status} ${response.statusText}`;
       throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
     }
@@ -294,7 +372,7 @@
           setProgress(
             45 + Math.round((index / prepared.length) * 35),
             `Uploading ${index + 1} of ${prepared.length}`,
-            `${file.name} · ${formatMb(file.size)} · sent separately to avoid request-size failures`,
+            `${file.name} · ${formatMb(file.size)} · sent separately to stay below the request limit`,
           );
           response = await sendBatch([file], caseId, !caseId, activeUpload.signal);
           caseId = response.case_id || caseId;
@@ -334,7 +412,6 @@
     }
   }
 
-  /* Merge multiple native-picker batches instead of replacing the earlier selection. */
   fileInput.addEventListener('change', () => {
     const current = Array.from(fileInput.files || []);
     if (internalDispatch) {
@@ -358,8 +435,6 @@
     if (trigger && !uploadDialog.open) staged = [];
   }, true);
 
-  /* Replace the core one-shot multipart uploader. This avoids Vercel 413 responses and lets us
-     cancel an in-flight analysis cleanly rather than showing a late 413 after the dialog closes. */
   uploadSubmit.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopImmediatePropagation();
