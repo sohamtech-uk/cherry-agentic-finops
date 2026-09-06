@@ -97,7 +97,21 @@ def _extract_zip_entries(
                 ),
             )
         member_name = _safe_file_name(Path(info.filename).name, "evidence")
-        member_content = archive.read(info)
+        try:
+            member_content = archive.read(info)
+        except RuntimeError as exc:
+            # zipfile raises RuntimeError for password-protected/encrypted members.
+            raise HTTPException(
+                status_code=422,
+                detail=f"{zip_name}:{member_name} is password-protected and cannot be read.",
+            ) from exc
+        except (zipfile.BadZipFile, NotImplementedError) as exc:
+            # BadZipFile: CRC/size mismatch on a corrupt member. NotImplementedError: an
+            # unsupported compression method (e.g. AES, or an unsupported LZMA build).
+            raise HTTPException(
+                status_code=422,
+                detail=f"{zip_name}:{member_name} could not be decompressed ({exc}).",
+            ) from exc
         content_type, _ = mimetypes.guess_type(member_name)
         entries.append((member_name, member_content, content_type))
     return entries

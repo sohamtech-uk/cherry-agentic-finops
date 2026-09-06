@@ -106,8 +106,11 @@ def _sha256(content: bytes) -> str:
 def _classify_workbook(content: bytes, file_name: str) -> tuple[str, list[str]]:
     try:
         profile = inspect_workbook(content, file_name)
-    except ValueError as exc:
-        return "unknown_workbook", [str(exc)]
+    except Exception as exc:
+        # Corrupt/truncated xlsx members surface as zipfile/XML/KeyError variants from openpyxl,
+        # not just ValueError -- this is a classification boundary for untrusted uploads, so any
+        # failure here becomes "unknown" rather than a crash.
+        return "unknown_workbook", [f"{file_name}: could not read workbook ({exc})."]
 
     kind = profile["kind"]
     if kind in _WORKBOOK_KIND_MAP:
@@ -128,8 +131,10 @@ def _classify_document(content: bytes, file_name: str, unknown_type: str) -> tup
     mime_type = "application/pdf" if file_name.casefold().endswith(".pdf") else "text/plain"
     try:
         pages = read_document_pages(content, mime_type, file_name)
-    except ValueError as exc:
-        return unknown_type, [str(exc)]
+    except Exception as exc:
+        # A malformed PDF can raise pypdf-internal exceptions beyond ValueError; treat any
+        # extraction failure as "unreadable" rather than letting it crash the batch.
+        return unknown_type, [f"{file_name}: could not read document ({exc})."]
 
     haystack = " ".join(text for _, text in pages).casefold()
     for detected_type, keywords in _PDF_KEYWORD_RULES:
@@ -166,11 +171,13 @@ def _classify_json(content: bytes, file_name: str) -> tuple[str, list[str]]:
 def _classify_csv(content: bytes, file_name: str) -> tuple[str, list[str]]:
     try:
         text = content.decode("utf-8-sig")
+        reader = csv.DictReader(io.StringIO(text))
+        keys = {str(key) for key in (reader.fieldnames or [])}
     except UnicodeDecodeError as exc:
         return "unknown_csv", [f"{file_name}: not valid UTF-8 ({exc})."]
+    except csv.Error as exc:
+        return "unknown_csv", [f"{file_name}: could not parse CSV ({exc})."]
 
-    reader = csv.DictReader(io.StringIO(text))
-    keys = {str(key) for key in (reader.fieldnames or [])}
     for detected_type, required_keys in _JSON_KEY_RULES:
         if required_keys.issubset(keys):
             return detected_type, []

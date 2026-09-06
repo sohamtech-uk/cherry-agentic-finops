@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app import fund_manager_router
 from app.api import app
 
 client = TestClient(app)
@@ -63,6 +64,33 @@ def test_awaiting_cash_demo_assigns_investor_operations() -> None:
 
     assert body["analysis"]["action"] == "request_evidence"
     assert body["analysis"]["work_items"][0]["owner"] == "Investor operations"
+
+
+def test_unhandled_exception_returns_a_clean_json_500(monkeypatch) -> None:
+    """A route that lets a truly unexpected exception through must still get a well-formed JSON
+    error response, not Starlette's bare-text 500, so the frontend can render it.
+
+    Uses a dedicated client with raise_server_exceptions=False: Starlette's ServerErrorMiddleware
+    always sends the handler's response *and* re-raises the original exception afterward (so
+    servers can log it) -- TestClient surfaces that re-raise by default for debugging, which would
+    otherwise hide the very response this test needs to inspect.
+    """
+
+    def boom(files):
+        raise Exception("simulated unexpected internal failure")
+
+    monkeypatch.setattr(fund_manager_router, "classify_and_validate_sources", boom)
+
+    permissive_client = TestClient(app, raise_server_exceptions=False)
+    response = permissive_client.post(
+        "/api/fund-manager/classify",
+        files=[("files", ("positions.json", b"[]", "application/json"))],
+    )
+
+    assert response.status_code == 500
+    body = response.json()
+    assert body["detail"] == "An unexpected error occurred. Please try again."
+    assert "simulated unexpected internal failure" not in response.text
 
 
 def test_clear_memory_endpoint_removes_ephemeral_workflows() -> None:
