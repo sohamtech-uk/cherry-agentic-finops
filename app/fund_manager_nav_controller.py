@@ -18,6 +18,17 @@ from app.nav_quality import (
 from app.nav_review_history import get_nav_review_history_store
 
 
+ROUND_REDUCTION_TARGET = {
+    "transcript_baseline": "3-7 review iterations",
+    "target": "1-2 review iterations",
+    "measurement": "actual rounds_to_close from NAV review history",
+    "claim_boundary": (
+        "This is a product target, not a guaranteed outcome. Actual reduction is measured from "
+        "recorded NAV submissions."
+    ),
+}
+
+
 def _accepted_sources(case: FundManagerCase) -> list[dict[str, Any]]:
     return [
         source
@@ -26,7 +37,9 @@ def _accepted_sources(case: FundManagerCase) -> list[dict[str, Any]]:
     ]
 
 
-def _file_by_source_id(case: FundManagerCase, source_id: str) -> tuple[str, bytes, str | None] | None:
+def _file_by_source_id(
+    case: FundManagerCase, source_id: str
+) -> tuple[str, bytes, str | None] | None:
     for index, item in enumerate(case.files, start=1):
         if source_id == f"SRC-{index:02d}":
             return item
@@ -137,10 +150,14 @@ def build_nav_readiness(case: FundManagerCase) -> dict[str, Any]:
 
     blockers: list[str] = []
     if summary is None:
-        blockers.append("A structured administrator NAV summary JSON is required to run the existing NAV quality engine.")
+        blockers.append(
+            "A structured administrator NAV summary JSON is required to run the existing "
+            "NAV quality engine."
+        )
         if raw_workbooks:
             blockers.append(
-                "A raw NAV workbook was recognised, but the workbook-to-NAV-summary normalisation adapter is not implemented yet."
+                "A raw NAV workbook was recognised, but the workbook-to-NAV-summary "
+                "normalisation adapter is not implemented yet."
             )
 
     return {
@@ -157,13 +174,19 @@ def build_nav_readiness(case: FundManagerCase) -> dict[str, Any]:
             )
             if not present
         ],
+        "round_reduction_target": ROUND_REDUCTION_TARGET,
         "control_boundary": (
-            "Readiness only determines which existing NAV checks can run. No NAV calculation or pass/fail decision is made at this stage."
+            "Readiness only determines which existing NAV checks can run. No NAV calculation "
+            "or pass/fail decision is made at this stage."
         ),
     }
 
 
-def _materialise_nav_inputs(case: FundManagerCase, readiness: dict[str, Any], directory: str) -> tuple[str, str | None, str | None]:
+def _materialise_nav_inputs(
+    case: FundManagerCase,
+    readiness: dict[str, Any],
+    directory: str,
+) -> tuple[str, str | None, str | None]:
     paths: dict[str, str | None] = {
         "nav_summary": None,
         "source_ledger": None,
@@ -182,17 +205,23 @@ def _materialise_nav_inputs(case: FundManagerCase, readiness: dict[str, Any], di
         paths[key] = str(path)
 
     if paths["nav_summary"] is None:
-        raise ValueError("NAV Quality Controller requires a structured administrator NAV summary JSON.")
+        raise ValueError(
+            "NAV Quality Controller requires a structured administrator NAV summary JSON."
+        )
     return paths["nav_summary"], paths["source_ledger"], paths["side_letter_rules"]
 
 
 def run_case_nav_reconciliation(case: FundManagerCase) -> dict[str, Any]:
     readiness = case.nav_readiness or build_nav_readiness(case)
     if readiness.get("status") != "ready":
-        raise ValueError("NAV Quality Controller is not ready. Review the readiness blockers first.")
+        raise ValueError(
+            "NAV Quality Controller is not ready. Review the readiness blockers first."
+        )
 
     with TemporaryDirectory(prefix="cherry-nav-quality-") as directory:
-        nav_summary, source_ledger, rules = _materialise_nav_inputs(case, readiness, directory)
+        nav_summary, source_ledger, rules = _materialise_nav_inputs(
+            case, readiness, directory
+        )
         result = run_nav_quality_review(nav_summary, source_ledger, rules)
 
     summary_meta = readiness["inputs"]["nav_summary"]
@@ -200,6 +229,7 @@ def run_case_nav_reconciliation(case: FundManagerCase) -> dict[str, Any]:
     result["fund_manager_case_id"] = case.case_id
     result["period_end"] = summary_meta["period_end"]
     result["stage"] = "reconciled"
+    result["round_reduction_target"] = ROUND_REDUCTION_TARGET
     return result
 
 
@@ -224,19 +254,61 @@ def _nav_execution_for_agent(result: dict[str, Any]) -> dict[str, Any]:
         "status": review.get("action", "needs_review"),
         "issues": issues,
         "nav_quality_result": result,
+        "review_objective": (
+            "Investigate every open NAV issue and every deterministic root-cause group in this "
+            "single review. Produce a complete remediation view so the administrator can correct "
+            "all detectable breaks together instead of discovering one new issue per round."
+        ),
+    }
+
+
+def _build_remediation_package(
+    reconciliation: dict[str, Any], investigation: dict[str, Any]
+) -> dict[str, Any]:
+    review = reconciliation.get("review", {})
+    findings = review.get("findings", [])
+    work_items = review.get("work_items", [])
+    root_causes = reconciliation.get("root_causes", [])
+    investigations = investigation.get("investigations", [])
+
+    return {
+        "mode": "consolidated_first_pass",
+        "purpose": (
+            "Return every detectable NAV break, grouped root cause, evidence gap and required "
+            "administrator action together in one package."
+        ),
+        "finding_count": len(findings),
+        "root_cause_count": len(root_causes),
+        "work_item_count": len(work_items),
+        "findings": findings,
+        "root_causes": root_causes,
+        "work_items": work_items,
+        "agent_investigations": investigations,
+        "recommended_action": review.get("action"),
+        "round_reduction_target": ROUND_REDUCTION_TARGET,
     }
 
 
 async def run_case_nav_review(case: FundManagerCase) -> dict[str, Any]:
     if case.nav_reconciliation is None:
         raise ValueError("NAV reconciliation must complete before agentic NAV review.")
-    investigation = await investigate_case_execution(_nav_execution_for_agent(case.nav_reconciliation))
+
+    investigation = await investigate_case_execution(
+        _nav_execution_for_agent(case.nav_reconciliation)
+    )
     investigation["workflow"] = "nav_quality_controller"
     investigation["stage"] = "reviewed"
-    investigation["deterministic_action"] = case.nav_reconciliation.get("review", {}).get("action")
+    investigation["deterministic_action"] = case.nav_reconciliation.get("review", {}).get(
+        "action"
+    )
     investigation["root_causes"] = case.nav_reconciliation.get("root_causes", [])
+    investigation["remediation_package"] = _build_remediation_package(
+        case.nav_reconciliation, investigation
+    )
+    investigation["round_reduction_target"] = ROUND_REDUCTION_TARGET
     investigation["control_boundary"] = (
-        "The agent explains and prioritises deterministic NAV findings. It cannot change the NAV calculation, control result or official NAV."
+        "The agent explains and consolidates deterministic NAV findings. It cannot change the "
+        "NAV calculation, control result or official NAV."
     )
     return investigation
 
@@ -244,12 +316,32 @@ async def run_case_nav_review(case: FundManagerCase) -> dict[str, Any]:
 def get_case_nav_history(case: FundManagerCase) -> dict[str, Any]:
     reconciliation = case.nav_reconciliation
     if reconciliation is None:
-        return {"available": False, "reason": "Run NAV reconciliation before requesting history."}
+        return {
+            "available": False,
+            "reason": "Run NAV reconciliation before requesting history.",
+            "round_reduction_target": ROUND_REDUCTION_TARGET,
+        }
     legal_entity = str(reconciliation.get("legal_entity") or "")
     period_end = str(reconciliation.get("period_end") or "")
     if not legal_entity or not period_end:
-        return {"available": False, "reason": "NAV reconciliation did not return legal entity and period end."}
+        return {
+            "available": False,
+            "reason": (
+                "NAV reconciliation did not return legal entity and period end."
+            ),
+            "round_reduction_target": ROUND_REDUCTION_TARGET,
+        }
     summary = get_nav_review_history_store().case_history(legal_entity, period_end)
     if summary is None:
-        return {"available": False, "reason": "No NAV review history has been recorded for this fund and period."}
-    return {"available": True, "history": summary.model_dump(mode="json")}
+        return {
+            "available": False,
+            "reason": (
+                "No NAV review history has been recorded for this fund and period."
+            ),
+            "round_reduction_target": ROUND_REDUCTION_TARGET,
+        }
+    return {
+        "available": True,
+        "history": summary.model_dump(mode="json"),
+        "round_reduction_target": ROUND_REDUCTION_TARGET,
+    }
