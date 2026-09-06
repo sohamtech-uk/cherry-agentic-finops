@@ -43,11 +43,11 @@ def test_approval_endpoint() -> None:
 def test_homepage_is_served() -> None:
     response = client.get("/")
     assert response.status_code == 200
-    assert "Close capital calls" in response.text
-    assert "Clear uploaded data &amp; memory" in response.text
-    assert "Contract Agent" in response.text
-    assert "SYNTHETIC HACKATHON DEMO — NOT A REAL CONTRACT" in response.text
-    assert "Run side-letter demo" in response.text
+    assert "NAV close workbench" in response.text
+    assert "NAV Quality Controller" in response.text
+    assert "Upload NAV documents" in response.text
+    assert "Canvas" in response.text
+    assert "Document" in response.text
 
 
 def test_private_markets_demo_surfaces_work_queue() -> None:
