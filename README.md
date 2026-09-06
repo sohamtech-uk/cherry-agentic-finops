@@ -11,6 +11,11 @@ The judge-facing experience is prepared for **Rebuild Private Markets: Ylookup �
 Hackathon**. Gemini interprets the PDF; deterministic Cherry controls decide whether evidence is
 strong enough to close, needs more evidence or requires independent human verification.
 
+## Documentation
+
+- [Local setup guide](docs/LOCAL_SETUP.md) — clone, configure, run, test and troubleshoot Cherry FundOps locally.
+- [Website, system architecture & workflow guide](docs/WEBSITE_SYSTEM_AND_WORKFLOW.md) — website map, system diagram, Fund Manager workflow and demo flow.
+
 ## Judge-facing input contract
 
 The integrated workflow accepts the three requested source types:
@@ -357,7 +362,10 @@ as `/api/contracts`.
 
 ## Run locally
 
-Python 3.11+:
+For the complete setup, configuration, Docker, Gemini and troubleshooting instructions, see
+[docs/LOCAL_SETUP.md](docs/LOCAL_SETUP.md).
+
+Quick start (Python 3.11+):
 
 ```bash
 git clone git@github.com:sohamtech-uk/cherry-agentic-finops.git
@@ -373,6 +381,7 @@ Useful URLs:
 
 ```text
 http://localhost:8080
+http://localhost:8080/#fund-manager
 http://localhost:8080/api/docs
 http://localhost:8080/api/private-markets/health
 http://localhost:8080/api/private-markets/integration/health
