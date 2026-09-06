@@ -3,23 +3,28 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any, cast
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import TypeAdapter, ValidationError
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from app.cash_application.router import router as controller_review_router
 from app.config import get_settings
 from app.container import get_engine
 from app.contract_router import router as contract_router
 from app.document_ai import GeminiDocumentExtractor, GeminiUnavailable
+from app.fund_manager_nav_router import router as fund_manager_nav_router
+from app.fund_manager_router import router as fund_manager_router
 from app.models import ApprovalRequest, BankTransaction, RejectionRequest
 from app.nav_quality_router import router as nav_quality_router
 from app.private_markets_integration_router import router as private_markets_integration_router
 from app.private_markets_router import router as private_markets_router
+from app.rate_limit import limiter
 from app.session_router import router as session_router
 from app.statement_review_router import router as statement_review_router
 from app.workflow import InvalidWorkflowAction, WorkflowNotFound
@@ -48,6 +53,8 @@ app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc",
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, cast(Any, _rate_limit_exceeded_handler))
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if settings.environment != "production" else [settings.public_base_url],
@@ -63,6 +70,8 @@ app.include_router(nav_quality_router)
 app.include_router(contract_router)
 app.include_router(statement_review_router)
 app.include_router(controller_review_router)
+app.include_router(fund_manager_router)
+app.include_router(fund_manager_nav_router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 

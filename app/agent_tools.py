@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
@@ -7,8 +10,54 @@ from pydantic import ValidationError
 
 from app.config import get_settings
 from app.container import get_engine
+from app.exception_investigation import investigate_exception as _investigate_exception
+from app.fund_reconciliation import (
+    CashBalance,
+    EvidenceSource,
+    ExceptionItem,
+    parse_administrator_expenses,
+    parse_administrator_fees,
+    parse_cash_balances,
+    parse_expected_expense_allocations,
+    parse_exposure_limits,
+    parse_fee_rules,
+    parse_positions,
+    parse_prices,
+    parse_trades,
+)
+from app.fund_reconciliation import (
+    attach_evidence as _attach_evidence,
+)
+from app.fund_reconciliation import (
+    detect_exposure_breaches as _detect_exposure_breaches,
+)
+from app.fund_reconciliation import (
+    detect_stale_prices as _detect_stale_prices,
+)
+from app.fund_reconciliation import (
+    detect_unsettled_trades as _detect_unsettled_trades,
+)
+from app.fund_reconciliation import (
+    prioritise_exceptions as _prioritise_exceptions,
+)
+from app.fund_reconciliation import (
+    reconcile_cash as _reconcile_cash,
+)
+from app.fund_reconciliation import (
+    reconcile_expense_allocations as _reconcile_expense_allocations,
+)
+from app.fund_reconciliation import (
+    reconcile_positions as _reconcile_positions,
+)
+from app.fund_reconciliation import (
+    reconcile_trades as _reconcile_trades,
+)
+from app.fund_reconciliation import (
+    validate_management_fees as _validate_management_fees,
+)
 from app.models import ApprovalRequest, RejectionRequest
 from app.nav_exceptions import group_exceptions_by_root_cause
+from app.nav_health_check import build_daily_health_check
 from app.nav_quality import (
     SideLetterRule,
     build_case_id,
@@ -115,9 +164,9 @@ def _read_file_bytes(file_path: str) -> bytes:
 
 
 def _read_input_file(file_path: str, *, kind: str, extension: str) -> bytes:
-    """Read a required or optional NAV-review input, applying the same size and extension checks
-    as the POST /api/nav-quality/review endpoint, so a bad path fails with a clear ValueError
-    instead of an unbounded read or a raw parser exception."""
+    """Read a JSON reconciliation input, applying the same size and extension checks as the
+    POST /api/nav-quality/review endpoint, so a bad path fails with a clear ValueError instead of
+    an unbounded read or a raw parser exception."""
 
     content = _read_file_bytes(file_path)
     max_bytes = get_settings().max_upload_mb * 1024 * 1024
@@ -128,6 +177,37 @@ def _read_input_file(file_path: str, *, kind: str, extension: str) -> bytes:
     if not file_path.lower().endswith(extension):
         raise ValueError(f"{kind} {file_path!r} must be a {extension} file.")
     return content
+
+
+def _parse_input_file(
+    file_path: str, *, kind: str, extension: str, parser: Callable[[bytes], Any]
+) -> Any:
+    """Read and parse a reconciliation input, wrapping any parse failure with the file path and
+    kind so the caller knows which of several inputs was invalid."""
+
+    content = _read_input_file(file_path, kind=kind, extension=extension)
+    try:
+        return parser(content)
+    except (ValueError, ValidationError) as exc:
+        raise ValueError(f"Invalid {kind.lower()} {file_path!r}: {exc}") from exc
+
+
+def _parse_input_file_with_evidence(
+    file_path: str, *, source_id: str, kind: str, extension: str, parser: Callable[[bytes], Any]
+) -> tuple[Any, EvidenceSource]:
+    """Like _parse_input_file, but also returns the EvidenceSource (filename and SHA-256 hash) for
+    the file just read, so the caller can stamp document lineage onto the exceptions this input
+    produces via app.fund_reconciliation.attach_evidence. Reads the file exactly once."""
+
+    content = _read_input_file(file_path, kind=kind, extension=extension)
+    try:
+        parsed = parser(content)
+    except (ValueError, ValidationError) as exc:
+        raise ValueError(f"Invalid {kind.lower()} {file_path!r}: {exc}") from exc
+    source = EvidenceSource(
+        source_id=source_id, filename=Path(file_path).name, sha256=sha256_hex(content)
+    )
+    return parsed, source
 
 
 def identify_ylookup_workbook(workbook_path: str) -> dict[str, Any]:
@@ -391,6 +471,7 @@ def run_nav_quality_review(
         controls_passed=report.controls_passed,
         exceptions_open=report.exceptions_open,
         case_id=case_id,
+        root_causes=root_causes,
     )
 
     return {
@@ -526,3 +607,415 @@ def get_nav_iteration_metrics() -> dict[str, Any]:
     """
 
     return get_nav_review_history_store().metrics().model_dump(mode="json")
+
+
+def run_daily_fund_health_check() -> dict[str, Any]:
+    """Return a portfolio-level health check across every fund/period reviewed so far: which are
+    ready_to_submit, which need attention, and — for those — the root causes still open as of
+    their latest round. Built entirely from recorded review rounds (via run_nav_quality_review);
+    report its entries directly rather than re-deriving fund status yourself. Running this daily
+    is a scheduling choice outside this tool, not something it does itself.
+    """
+
+    return build_daily_health_check(get_nav_review_history_store()).model_dump(mode="json")
+
+
+def reconcile_positions(
+    internal_positions_path: str, external_positions_path: str
+) -> dict[str, Any]:
+    """Compare an internal fund position record against an external one (administrator or
+    custodian), matched by security_id. Flags missing positions on either side, quantity breaks
+    and market value breaks. Report the returned breaks and counts; the exceptions list is the
+    same breaks in the common shape prioritise_exceptions expects.
+
+    Args:
+        internal_positions_path: Local path to the internal position export (.json): an array,
+            or an object with a positions array, of {fund, security_id, quantity, price, ...}.
+        external_positions_path: Local path to the external (administrator/custodian) position
+            export in the same shape.
+    """
+
+    internal, internal_source = _parse_input_file_with_evidence(
+        internal_positions_path,
+        source_id="internal_positions",
+        kind="Internal positions",
+        extension=".json",
+        parser=parse_positions,
+    )
+    external, external_source = _parse_input_file_with_evidence(
+        external_positions_path,
+        source_id="external_positions",
+        kind="External positions",
+        extension=".json",
+        parser=parse_positions,
+    )
+    result = _reconcile_positions(internal, external)
+    exceptions = _attach_evidence(
+        result.to_exceptions(), sources=[internal_source, external_source]
+    )
+    return {
+        **result.model_dump(mode="json"),
+        "exceptions": [item.model_dump(mode="json") for item in exceptions],
+    }
+
+
+def reconcile_cash(internal_cash_path: str, external_cash_path: str) -> dict[str, Any]:
+    """Compare internal fund cash balances against an external source (bank/custodian statement),
+    matched by (account, currency). Flags missing balances on either side and balance mismatches.
+
+    Args:
+        internal_cash_path: Local path to the internal cash-balance export (.json): an array, or
+            an object with a cash_balances array, of {fund, account, currency, balance, ...}.
+        external_cash_path: Local path to the external cash-balance export in the same shape.
+    """
+
+    internal, internal_source = _parse_input_file_with_evidence(
+        internal_cash_path,
+        source_id="internal_cash",
+        kind="Internal cash balances",
+        extension=".json",
+        parser=parse_cash_balances,
+    )
+    external, external_source = _parse_input_file_with_evidence(
+        external_cash_path,
+        source_id="external_cash",
+        kind="External cash balances",
+        extension=".json",
+        parser=parse_cash_balances,
+    )
+    result = _reconcile_cash(internal, external)
+    exceptions = _attach_evidence(
+        result.to_exceptions(), sources=[internal_source, external_source]
+    )
+    return {
+        **result.model_dump(mode="json"),
+        "exceptions": [item.model_dump(mode="json") for item in exceptions],
+    }
+
+
+def compare_bank_statement_cash(
+    bank_statement_path: str,
+    internal_cash_path: str,
+    account: str,
+    currency: str,
+    balance: str,
+) -> dict[str, Any]:
+    """Compare an internal cash balance against a bank statement's closing balance, matched by
+    (account, currency). This tool performs the arithmetic deterministically -- it never reads or
+    interprets the statement's raw text itself, so report only what it returns, never a figure you
+    computed yourself.
+
+    A bank statement's layout is too varied for a fixed rule to read reliably (label wording,
+    IBAN vs. routing/account number, an implied vs. explicit currency), so extracting the account,
+    currency and closing/available balance is your job: call read_document on
+    bank_statement_path first, find the closing/available balance and the account identifier in
+    its text, and pass exactly what you found here. This tool re-reads the statement file only to
+    stamp tamper-evident lineage (filename, SHA-256 hash) on any resulting exception -- it never
+    re-derives or double-checks the figures you extracted.
+
+    Args:
+        bank_statement_path: Local path to the bank statement PDF (used only for lineage; its
+            content is not re-parsed here).
+        internal_cash_path: Local path to the internal cash-balance export (.json): an array, or
+            an object with a cash_balances array, of {fund, account, currency, balance, ...}.
+        account: The account identifier or IBAN you found in the bank statement's text.
+        currency: The ISO currency code you found, or reasonably inferred, from the statement.
+        balance: The closing/available balance you found, as a decimal string (e.g. "12345.67").
+    """
+
+    internal, internal_source = _parse_input_file_with_evidence(
+        internal_cash_path,
+        source_id="internal_cash",
+        kind="Internal cash balances",
+        extension=".json",
+        parser=parse_cash_balances,
+    )
+    bank_statement_content = _read_file_bytes(bank_statement_path)
+    try:
+        external = [
+            CashBalance(
+                fund=Path(bank_statement_path).stem,
+                account=account,
+                currency=currency,
+                balance=balance,
+            )
+        ]
+    except (ValueError, TypeError, ArithmeticError, ValidationError) as exc:
+        raise ValueError(
+            f"Invalid extracted bank statement balance for {bank_statement_path!r}: {exc}"
+        ) from exc
+    external_source = EvidenceSource(
+        source_id="external_bank_statement",
+        filename=Path(bank_statement_path).name,
+        sha256=sha256_hex(bank_statement_content),
+    )
+    result = _reconcile_cash(internal, external)
+    exceptions = _attach_evidence(
+        result.to_exceptions(), sources=[internal_source, external_source]
+    )
+    return {
+        **result.model_dump(mode="json"),
+        "exceptions": [item.model_dump(mode="json") for item in exceptions],
+    }
+
+
+def reconcile_trades(internal_trades_path: str, external_trades_path: str) -> dict[str, Any]:
+    """Compare an internal trade blotter against an external one (broker/custodian
+    confirmations), matched by trade_id. Flags missing trades on either side, and side, quantity
+    or price mismatches on trades present in both.
+
+    Args:
+        internal_trades_path: Local path to the internal trade export (.json): an array, or an
+            object with a trades array, of {trade_id, fund, security_id, side, quantity, price,
+            trade_date, settlement_date, status}.
+        external_trades_path: Local path to the external trade export in the same shape.
+    """
+
+    internal, internal_source = _parse_input_file_with_evidence(
+        internal_trades_path,
+        source_id="internal_trades",
+        kind="Internal trades",
+        extension=".json",
+        parser=parse_trades,
+    )
+    external, external_source = _parse_input_file_with_evidence(
+        external_trades_path,
+        source_id="external_trades",
+        kind="External trades",
+        extension=".json",
+        parser=parse_trades,
+    )
+    result = _reconcile_trades(internal, external)
+    exceptions = _attach_evidence(
+        result.to_exceptions(), sources=[internal_source, external_source]
+    )
+    return {
+        **result.model_dump(mode="json"),
+        "exceptions": [item.model_dump(mode="json") for item in exceptions],
+    }
+
+
+def detect_stale_prices(prices_path: str, as_of: str, max_age_days: int = 3) -> dict[str, Any]:
+    """Flag any security price older than max_age_days as of the given date. Severity escalates
+    to HIGH beyond twice the threshold. Report the findings; do not judge staleness yourself.
+
+    Args:
+        prices_path: Local path to the price export (.json): an array, or an object with a
+            prices array, of {security_id, price, price_date, ...}.
+        as_of: Control date to measure staleness against, as YYYY-MM-DD.
+        max_age_days: Maximum age in days still treated as fresh.
+    """
+
+    prices, prices_source = _parse_input_file_with_evidence(
+        prices_path, source_id="prices", kind="Prices", extension=".json", parser=parse_prices
+    )
+    findings = _detect_stale_prices(
+        prices, as_of=date.fromisoformat(as_of), max_age_days=max_age_days
+    )
+    exceptions = _attach_evidence(
+        [finding.to_exception() for finding in findings], sources=[prices_source]
+    )
+    return {
+        "findings": [finding.model_dump(mode="json") for finding in findings],
+        "exceptions": [item.model_dump(mode="json") for item in exceptions],
+    }
+
+
+def detect_unsettled_trades(trades_path: str, as_of: str, grace_days: int = 3) -> dict[str, Any]:
+    """Flag trades still marked unsettled whose settlement_date has passed as_of. Severity
+    escalates to HIGH once more than grace_days overdue. Report the findings; do not judge
+    settlement risk yourself.
+
+    Args:
+        trades_path: Local path to a trade blotter (.json), same shape as reconcile_trades'
+            inputs — only status and settlement_date are required for this check.
+        as_of: Control date to measure overdue settlement against, as YYYY-MM-DD.
+        grace_days: Days past settlement_date still treated as a WARNING rather than HIGH.
+    """
+
+    trades, trades_source = _parse_input_file_with_evidence(
+        trades_path, source_id="trades", kind="Trades", extension=".json", parser=parse_trades
+    )
+    findings = _detect_unsettled_trades(
+        trades, as_of=date.fromisoformat(as_of), grace_days=grace_days
+    )
+    exceptions = _attach_evidence(
+        [finding.to_exception() for finding in findings], sources=[trades_source]
+    )
+    return {
+        "findings": [finding.model_dump(mode="json") for finding in findings],
+        "exceptions": [item.model_dump(mode="json") for item in exceptions],
+    }
+
+
+def detect_exposure_breaches(positions_path: str, nav: str, limits_path: str) -> dict[str, Any]:
+    """Compute each position's, issuer's, sector's and the fund's total exposure as a percentage
+    of NAV and flag any that breaches the matching limit. Report the breaches; do not compute
+    exposure percentages yourself.
+
+    Args:
+        positions_path: Local path to the position export (.json), same shape as
+            reconcile_positions' inputs — issuer and sector are used for those limit scopes.
+        nav: The fund's net asset value as a decimal string, e.g. "92500000.00".
+        limits_path: Local path to the exposure-limit export (.json): an array, or an object with
+            a limits array, of {label, scope, key, max_percent_of_nav}. scope is one of
+            single_position, issuer, sector or gross_exposure; key names the specific
+            issuer/sector for a targeted limit, or is omitted for a "no single X" rule.
+    """
+
+    positions, positions_source = _parse_input_file_with_evidence(
+        positions_path,
+        source_id="positions",
+        kind="Positions",
+        extension=".json",
+        parser=parse_positions,
+    )
+    limits, limits_source = _parse_input_file_with_evidence(
+        limits_path,
+        source_id="exposure_limits",
+        kind="Exposure limits",
+        extension=".json",
+        parser=parse_exposure_limits,
+    )
+    try:
+        breaches = _detect_exposure_breaches(positions, nav=Decimal(nav), limits=limits)
+    except ValueError as exc:
+        raise ValueError(f"Could not compute exposure breaches: {exc}") from exc
+    exceptions = _attach_evidence(
+        [breach.to_exception() for breach in breaches], sources=[positions_source, limits_source]
+    )
+    return {
+        "breaches": [breach.model_dump(mode="json") for breach in breaches],
+        "exceptions": [item.model_dump(mode="json") for item in exceptions],
+    }
+
+
+def validate_management_fees(fee_rules_path: str, administrator_fees_path: str) -> dict[str, Any]:
+    """Compare each administrator-calculated management fee against the governing fee rule (LPA
+    default or side-letter override) for that investor, matched by investor name. Flags a fee
+    calculated on the wrong basis (e.g. committed capital instead of invested capital) even if the
+    amount looks close, a recomputed amount that disagrees with what the administrator reported,
+    and an administrator fee with no supplied rule to check it against. Report the breaks; do not
+    recompute a fee yourself.
+
+    Args:
+        fee_rules_path: Local path to the fee-rule export (.json): an array, or an object with a
+            fee_rules array, of {investor, fee_rate, fee_basis, source}. fee_basis is one of
+            committed_capital, invested_capital, called_capital, net_asset_value.
+        administrator_fees_path: Local path to the administrator's fee-calculation export (.json):
+            an array, or an object with an administrator_fees array, of {investor, fee_basis,
+            basis_amount, reported_fee}.
+    """
+
+    rules, rules_source = _parse_input_file_with_evidence(
+        fee_rules_path,
+        source_id="fee_rules",
+        kind="Fee rules",
+        extension=".json",
+        parser=parse_fee_rules,
+    )
+    administrator_fees, administrator_fees_source = _parse_input_file_with_evidence(
+        administrator_fees_path,
+        source_id="administrator_fees",
+        kind="Administrator fees",
+        extension=".json",
+        parser=parse_administrator_fees,
+    )
+    result = _validate_management_fees(rules, administrator_fees)
+    exceptions = _attach_evidence(
+        result.to_exceptions(), sources=[rules_source, administrator_fees_source]
+    )
+    return {
+        **result.model_dump(mode="json"),
+        "exceptions": [item.model_dump(mode="json") for item in exceptions],
+    }
+
+
+def reconcile_expense_allocations(
+    expected_allocations_path: str, administrator_expenses_path: str
+) -> dict[str, Any]:
+    """Compare the fund manager's expected expense allocation (which entity each expense belongs
+    to — the fund, the management company, or a named portfolio company) against how the
+    administrator actually allocated it, matched by expense_id. A category mismatch is flagged
+    regardless of amount, since a misallocated expense is a control break even when the figure is
+    immaterial; an amount-only difference on an otherwise correctly categorised expense is a
+    separate, lower-severity break. Report the breaks; do not decide the correct allocation
+    yourself.
+
+    Args:
+        expected_allocations_path: Local path to the fund manager's expected-allocation schedule
+            (.json): an array, or an object with an expected_allocations array, of {expense_id,
+            description, amount, expected_category, portfolio_company}. expected_category is one
+            of fund, management_company, portfolio_company.
+        administrator_expenses_path: Local path to the administrator's expense-allocation export
+            in the same shape, with allocated_category in place of expected_category.
+    """
+
+    expected, expected_source = _parse_input_file_with_evidence(
+        expected_allocations_path,
+        source_id="expected_expense_allocations",
+        kind="Expected expense allocations",
+        extension=".json",
+        parser=parse_expected_expense_allocations,
+    )
+    administrator, administrator_source = _parse_input_file_with_evidence(
+        administrator_expenses_path,
+        source_id="administrator_expenses",
+        kind="Administrator expenses",
+        extension=".json",
+        parser=parse_administrator_expenses,
+    )
+    result = _reconcile_expense_allocations(expected, administrator)
+    exceptions = _attach_evidence(
+        result.to_exceptions(), sources=[expected_source, administrator_source]
+    )
+    return {
+        **result.model_dump(mode="json"),
+        "exceptions": [item.model_dump(mode="json") for item in exceptions],
+    }
+
+
+def prioritise_exceptions(
+    exceptions: list[dict[str, Any]], top_n: int | None = None
+) -> dict[str, Any]:
+    """Rank exceptions from any of the reconciliation/detection tools above by severity (HIGH
+    first, then WARNING) and, within a severity, by impact_amount (materiality) descending. Pass
+    it the combined exceptions arrays already returned by those tools; do not re-rank, filter or
+    recompute impact_amount yourself.
+
+    Args:
+        exceptions: Exception records to rank, each in the common shape every check above returns
+            in its own "exceptions" list (category, code, key, title, detail, severity,
+            impact_amount).
+        top_n: Optional cap on how many ranked exceptions to return.
+    """
+
+    items = [ExceptionItem.model_validate(item) for item in exceptions]
+    ranked = _prioritise_exceptions(items, top_n=top_n)
+    return {"exceptions": [item.model_dump(mode="json") for item in ranked]}
+
+
+def investigate_exception(
+    exceptions: list[dict[str, Any]], code: str | None = None, key: str | None = None
+) -> dict[str, Any]:
+    """Investigate one exception from a combined exception queue — the highest-priority one by
+    default (by severity, then impact_amount), or a specific one selected by its code or key.
+    Finds every other exception in the queue sharing the target's key (a strong signal they are
+    one underlying incident rather than several independent ones) and returns a recommended
+    owner, action and escalation step (next_step). Report this directly; never correlate
+    exceptions, invent a root cause, or pick a different owner/action/escalation yourself.
+
+    Args:
+        exceptions: Exception records to investigate, each in the common shape every
+            reconciliation/detection/validation tool above returns in its own "exceptions" list
+            (category, code, key, title, detail, severity, impact_amount). Pass the combined list
+            across every check you have run, not just one tool's output, so a related exception in
+            a different category can be found.
+        code: Optional exact code of the exception to investigate. Defaults to the
+            highest-priority one when both code and key are omitted.
+        key: Optional exact key of the exception to investigate, used instead of code.
+    """
+
+    items = [ExceptionItem.model_validate(item) for item in exceptions]
+    result = _investigate_exception(items, code=code, key=key)
+    return result.model_dump(mode="json")

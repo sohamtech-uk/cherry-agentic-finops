@@ -8,25 +8,36 @@ from app.agent_tools import (
     compare_dates,
     compare_periods,
     compare_values,
+    detect_exposure_breaches,
+    detect_stale_prices,
+    detect_unsettled_trades,
     find_entity,
     find_section,
     get_nav_case_iterations,
     get_nav_iteration_metrics,
     identify_ylookup_workbook,
     inspect_workflow,
+    investigate_exception,
     list_open_finance_exceptions,
+    prioritise_exceptions,
     query_database,
     read_cell,
     read_document,
     read_excel,
     reconcile_bank_statement_workbook,
+    reconcile_cash,
+    reconcile_expense_allocations,
     reconcile_investor_gl_workbook,
     reconcile_loader_sample_workbook,
+    reconcile_positions,
+    reconcile_trades,
     record_human_approval,
     reject_workflow,
+    run_daily_fund_health_check,
     run_finance_scenario,
     run_nav_quality_review,
     validate_balance_sheet_equity,
+    validate_management_fees,
     validate_nav_bridge,
 )
 from app.config import get_settings
@@ -72,6 +83,13 @@ history, and get_nav_iteration_metrics to answer aggregate questions like "how m
 NAV review typically take" — always from recorded submissions, never as an estimate or a claim
 about what the reduction "should" be.
 
+Daily fund health check: when asked for a portfolio-level view — "which funds need attention
+today," a daily/morning check-in — call run_daily_fund_health_check rather than looping over
+individual cases yourself. It classifies every reviewed fund/period as ready or attention_needed
+and lists the root causes still open as of each one's latest round, ranked by severity and round
+count. Report its entries directly; this tool only reads what NAV Quality Controller and the
+exception grouper already produced, so never re-run a review or re-rank its output yourself.
+
 Quick NAV checks: reserve validate_balance_sheet_equity (Check #1 — assets minus liabilities must
 foot to reported equity) and validate_nav_bridge (Check #2 — independently recomputes closing NAV
 from the opening NAV, contributions, investment movement, FX, income, expenses and distributions,
@@ -108,6 +126,7 @@ human review rather than assuming the gap is immaterial.
         run_nav_quality_review,
         get_nav_case_iterations,
         get_nav_iteration_metrics,
+        run_daily_fund_health_check,
         validate_balance_sheet_equity,
         validate_nav_bridge,
         read_excel,
@@ -120,6 +139,91 @@ human review rather than assuming the gap is immaterial.
         reconcile_bank_statement_workbook,
         reconcile_investor_gl_workbook,
         reconcile_loader_sample_workbook,
+    ],
+)
+
+fund_operations_specialist = Agent(
+    name="fund_operations_specialist",
+    model=settings.gemini_model,
+    description=(
+        "Reconciles fund positions, cash and trades against an administrator/custodian source, "
+        "validates management fees against the governing fee rule and expense allocations against "
+        "the fund manager's own schedule, flags stale prices, unsettled trades and exposure-limit "
+        "breaches, prioritises the combined exceptions by materiality, and investigates the "
+        "highest-priority one for a correlated root cause, owner, action and escalation step — "
+        "all below the top-line NAV summary that reconciliation_specialist reviews."
+    ),
+    instruction="""
+You are Cherry Agent's fund operations specialist, reconciling the position, cash, trade, fee and
+expense records a NAV is built from. You never match, compare or rank figures yourself — every
+break, finding and ranking must come from a tool call.
+
+Reconciliation (internal vs external, e.g. administrator or custodian):
+- reconcile_positions matches by security_id and flags missing positions on either side, quantity
+  breaks and market value breaks. A quantity match with a market value break usually means a price
+  break — say so.
+- reconcile_cash matches by (account, currency) and flags missing balances and balance mismatches.
+- reconcile_trades matches by trade_id and flags missing trades, and side, quantity or price
+  mismatches on trades present in both sides.
+Each of these returns "exceptions" already in the common shape prioritise_exceptions expects —
+prefer reading that list over the raw "breaks" array when you need to rank or combine findings.
+Every exception's "evidence" list already names the exact source file(s) (filename, SHA-256 hash)
+and the record locator (account, security_id, trade_id, investor or expense_id) it was found in —
+when asked "why did Cherry flag this," cite that evidence directly rather than re-describing the
+break from memory or guessing which upload it came from.
+
+Rule-based validation (administrator figure vs. a rule, not another record):
+- validate_management_fees matches by investor name and compares the administrator's calculated
+  fee against the governing fee rule (LPA default or side-letter override). A basis mismatch (fee
+  applied to the wrong capital basis) is flagged even when the amount looks close; an amount
+  mismatch means the rate/basis were right but the arithmetic wasn't; a rule_unavailable break
+  means there was no rule supplied to check against at all, not that the fee is wrong.
+- reconcile_expense_allocations matches by expense_id and compares the fund manager's expected
+  allocation (which entity — the fund, the management company, or a named portfolio company —
+  each expense belongs to) against how the administrator actually allocated it. A category
+  mismatch is a control break regardless of amount; an amount-only difference on an otherwise
+  correctly categorised expense is a separate, lower-severity break.
+
+Risk detection (single source, no external comparison):
+- detect_stale_prices flags any price older than its max_age_days threshold as of a control date;
+  severity escalates to HIGH beyond twice that threshold.
+- detect_unsettled_trades flags trades still marked unsettled whose settlement_date has passed the
+  control date; severity escalates to HIGH beyond the grace_days window (the standard T+ grace
+  period).
+- detect_exposure_breaches computes each position's, issuer's, sector's and the fund's total
+  exposure as a percentage of NAV and flags any that exceeds the matching limit.
+
+Triage: when you have exceptions from more than one of the tools above (or from a NAV Quality
+Controller review), call prioritise_exceptions with the combined "exceptions" arrays rather than
+deciding an order yourself. It ranks by severity first, then by impact_amount (materiality) within
+a severity — report that order, do not re-rank it.
+
+Investigation: after triage, call investigate_exception with that same combined "exceptions" list
+to actually work the queue — it defaults to the highest-priority exception, or pass code/key to
+investigate a specific one. It finds every other exception in the queue sharing the target's key (a
+strong signal they are one underlying incident rather than several independent ones — e.g. a cash
+break and a trade break on the same account) and returns recommended_owner, recommended_action and
+next_step (escalate_immediately / assign_and_monitor / request_evidence / accept_and_close). Report
+these fields directly and explain the rationale it returns; never decide the owner, action, next
+step or which exceptions are related yourself — that correlation and the escalation table are fixed
+in the tool, not your judgement call. When related_exceptions is non-empty, tell the user this looks
+like one incident spanning those records, not several unrelated breaks.
+
+Never recommend releasing a NAV, settling a trade, waiving an exposure breach, or accepting a fee
+or expense discrepancy yourself; escalate per investigate_exception's next_step and hand the case
+to its recommended_owner before the case proceeds.
+""".strip(),
+    tools=[
+        reconcile_positions,
+        reconcile_cash,
+        reconcile_trades,
+        validate_management_fees,
+        reconcile_expense_allocations,
+        detect_stale_prices,
+        detect_unsettled_trades,
+        detect_exposure_breaches,
+        prioritise_exceptions,
+        investigate_exception,
     ],
 )
 
@@ -272,6 +376,7 @@ disclosures) when the evidence for it was never supplied.
     tools=[run_finance_scenario, inspect_workflow, list_open_finance_exceptions],
     sub_agents=[
         reconciliation_specialist,
+        fund_operations_specialist,
         control_specialist,
         evidence_specialist,
         contract_specialist,

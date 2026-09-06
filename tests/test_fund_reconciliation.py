@@ -1,0 +1,806 @@
+from __future__ import annotations
+
+import json
+from datetime import date
+from decimal import Decimal
+
+import pytest
+
+from app.fund_reconciliation import (
+    AdministratorExpenseLine,
+    AdministratorFeeLine,
+    CashBalance,
+    EvidenceSource,
+    ExceptionItem,
+    ExpectedExpenseAllocation,
+    ExposureLimit,
+    FeeRule,
+    Position,
+    PriceRecord,
+    Trade,
+    attach_evidence,
+    detect_exposure_breaches,
+    detect_stale_prices,
+    detect_unsettled_trades,
+    parse_administrator_expenses,
+    parse_administrator_fees,
+    parse_cash_balances,
+    parse_expected_expense_allocations,
+    parse_exposure_limits,
+    parse_fee_rules,
+    parse_positions,
+    parse_prices,
+    parse_trades,
+    prioritise_exceptions,
+    reconcile_cash,
+    reconcile_expense_allocations,
+    reconcile_positions,
+    reconcile_trades,
+    validate_management_fees,
+)
+
+# --- parsing --------------------------------------------------------------------------------
+
+
+def test_parse_positions_accepts_bare_array() -> None:
+    payload = [{"fund": "Fund X", "security_id": "SEC1", "quantity": 100, "price": 10}]
+    positions = parse_positions(json.dumps(payload).encode())
+    assert positions == [Position(fund="Fund X", security_id="SEC1", quantity=100, price=10)]
+
+
+def test_parse_positions_accepts_object_shape() -> None:
+    payload = {
+        "positions": [{"fund": "Fund X", "security_id": "SEC1", "quantity": 100, "price": 10}]
+    }
+    positions = parse_positions(json.dumps(payload).encode())
+    assert len(positions) == 1
+
+
+def test_parse_positions_rejects_empty_content() -> None:
+    with pytest.raises(ValueError, match="empty"):
+        parse_positions(b"")
+
+
+def test_parse_positions_rejects_wrong_shape() -> None:
+    with pytest.raises(ValueError, match="Expected a JSON array"):
+        parse_positions(json.dumps({"not_positions": []}).encode())
+
+
+def test_parse_cash_balances_round_trips() -> None:
+    payload = {
+        "cash_balances": [{"fund": "Fund X", "account": "ACC1", "currency": "usd", "balance": 100}]
+    }
+    balances = parse_cash_balances(json.dumps(payload).encode())
+    assert balances[0].currency == "USD"
+
+
+def test_parse_trades_round_trips() -> None:
+    payload = [
+        {
+            "trade_id": "T1",
+            "fund": "Fund X",
+            "security_id": "SEC1",
+            "side": "BUY",
+            "quantity": 100,
+            "price": 10,
+            "trade_date": "2026-06-01",
+        }
+    ]
+    trades = parse_trades(json.dumps(payload).encode())
+    assert trades[0].side == "buy"
+    assert trades[0].status == "unsettled"
+
+
+def test_parse_prices_and_exposure_limits_round_trip() -> None:
+    prices = parse_prices(
+        json.dumps([{"security_id": "SEC1", "price": 10, "price_date": "2026-06-01"}]).encode()
+    )
+    assert prices[0].price == Decimal("10.00")
+    limits = parse_exposure_limits(
+        json.dumps(
+            {"limits": [{"label": "L1", "scope": "gross_exposure", "max_percent_of_nav": 100}]}
+        ).encode()
+    )
+    assert limits[0].max_percent_of_nav == Decimal("100")
+
+
+# --- reconcile_positions ---------------------------------------------------------------------
+
+
+def test_reconcile_positions_matches_clean_positions() -> None:
+    internal = [Position(fund="Fund X", security_id="SEC1", quantity=100, price=10)]
+    external = [Position(fund="Fund X", security_id="SEC1", quantity=100, price=10)]
+
+    result = reconcile_positions(internal, external)
+
+    assert result.matched_count == 1
+    assert result.breaks == []
+
+
+def test_reconcile_positions_flags_missing_internal() -> None:
+    internal: list[Position] = []
+    external = [Position(fund="Fund X", security_id="SEC1", quantity=100, price=10)]
+
+    result = reconcile_positions(internal, external)
+
+    assert len(result.breaks) == 1
+    assert result.breaks[0].break_type == "missing_internal"
+    assert result.breaks[0].difference == Decimal("1000.00")
+
+
+def test_reconcile_positions_flags_missing_external() -> None:
+    internal = [Position(fund="Fund X", security_id="SEC1", quantity=100, price=10)]
+    external: list[Position] = []
+
+    result = reconcile_positions(internal, external)
+
+    assert result.breaks[0].break_type == "missing_external"
+
+
+def test_reconcile_positions_flags_quantity_mismatch() -> None:
+    internal = [Position(fund="Fund X", security_id="SEC1", quantity=100, price=10)]
+    external = [Position(fund="Fund X", security_id="SEC1", quantity=90, price=10)]
+
+    result = reconcile_positions(internal, external)
+
+    assert result.breaks[0].break_type == "quantity_mismatch"
+    assert result.breaks[0].difference == Decimal("10.00")
+
+
+def test_reconcile_positions_flags_market_value_mismatch_when_quantity_matches() -> None:
+    internal = [Position(fund="Fund X", security_id="SEC1", quantity=100, price=10)]
+    external = [Position(fund="Fund X", security_id="SEC1", quantity=100, price=11)]
+
+    result = reconcile_positions(internal, external)
+
+    assert result.breaks[0].break_type == "market_value_mismatch"
+    assert result.breaks[0].difference == Decimal("-100.00")
+
+
+def test_reconcile_positions_uses_explicit_market_value_when_supplied() -> None:
+    internal = [
+        Position(fund="Fund X", security_id="SEC1", quantity=100, price=10, market_value=999)
+    ]
+    external = [
+        Position(fund="Fund X", security_id="SEC1", quantity=100, price=10, market_value=999)
+    ]
+
+    result = reconcile_positions(internal, external)
+
+    assert result.matched_count == 1
+
+
+def test_reconcile_positions_to_exceptions_carries_impact_amount() -> None:
+    internal = [Position(fund="Fund X", security_id="SEC1", quantity=100, price=10)]
+    external = [Position(fund="Fund X", security_id="SEC1", quantity=90, price=10)]
+    result = reconcile_positions(internal, external)
+
+    exceptions = result.to_exceptions()
+
+    assert len(exceptions) == 1
+    assert exceptions[0].category == "position"
+    assert exceptions[0].key == "SEC1"
+    assert exceptions[0].impact_amount == Decimal("10.00")
+
+
+# --- reconcile_cash ---------------------------------------------------------------------------
+
+
+def test_reconcile_cash_matches_and_flags_mismatch() -> None:
+    internal = [
+        CashBalance(fund="Fund X", account="ACC1", currency="USD", balance=1000),
+        CashBalance(fund="Fund X", account="ACC2", currency="USD", balance=500),
+    ]
+    external = [
+        CashBalance(fund="Fund X", account="ACC1", currency="USD", balance=1000),
+        CashBalance(fund="Fund X", account="ACC2", currency="USD", balance=450),
+    ]
+
+    result = reconcile_cash(internal, external)
+
+    assert result.matched_count == 1
+    assert len(result.breaks) == 1
+    assert result.breaks[0].break_type == "balance_mismatch"
+    assert result.breaks[0].account == "ACC2"
+    assert result.breaks[0].difference == Decimal("50.00")
+
+
+def test_reconcile_cash_treats_different_currencies_as_different_accounts() -> None:
+    internal = [CashBalance(fund="Fund X", account="ACC1", currency="USD", balance=1000)]
+    external = [CashBalance(fund="Fund X", account="ACC1", currency="EUR", balance=1000)]
+
+    result = reconcile_cash(internal, external)
+
+    assert len(result.breaks) == 2
+    assert {b.break_type for b in result.breaks} == {"missing_internal", "missing_external"}
+
+
+# --- reconcile_trades -------------------------------------------------------------------------
+
+
+def _trade(**overrides: object) -> Trade:
+    payload: dict[str, object] = {
+        "trade_id": "T1",
+        "fund": "Fund X",
+        "security_id": "SEC1",
+        "side": "buy",
+        "quantity": 100,
+        "price": 10,
+        "trade_date": date(2026, 6, 1),
+    }
+    payload.update(overrides)
+    return Trade.model_validate(payload)
+
+
+def test_reconcile_trades_matches_clean_trade() -> None:
+    result = reconcile_trades([_trade()], [_trade()])
+    assert result.matched_count == 1
+    assert result.breaks == []
+
+
+def test_reconcile_trades_flags_side_mismatch() -> None:
+    result = reconcile_trades([_trade(side="buy")], [_trade(side="sell")])
+    assert result.breaks[0].break_type == "side_mismatch"
+
+
+def test_reconcile_trades_flags_quantity_mismatch() -> None:
+    result = reconcile_trades([_trade(quantity=100)], [_trade(quantity=90)])
+    assert result.breaks[0].break_type == "quantity_mismatch"
+
+
+def test_reconcile_trades_flags_price_mismatch() -> None:
+    result = reconcile_trades([_trade(price=10)], [_trade(price=11)])
+    assert result.breaks[0].break_type == "price_mismatch"
+
+
+def test_reconcile_trades_flags_missing_trade() -> None:
+    result = reconcile_trades([], [_trade()])
+    assert result.breaks[0].break_type == "missing_internal"
+
+
+def test_reconcile_trades_to_exceptions_computes_impact_from_quantity_times_price() -> None:
+    result = reconcile_trades([_trade(quantity=100, price=10)], [])
+    exceptions = result.to_exceptions()
+    assert exceptions[0].impact_amount == Decimal("1000.00")
+
+
+# --- detect_stale_prices ----------------------------------------------------------------------
+
+
+def test_detect_stale_prices_ignores_fresh_prices() -> None:
+    prices = [PriceRecord(security_id="SEC1", price=10, price_date=date(2026, 6, 28))]
+    findings = detect_stale_prices(prices, as_of=date(2026, 6, 30), max_age_days=3)
+    assert findings == []
+
+
+def test_detect_stale_prices_flags_warning_then_high() -> None:
+    prices = [
+        PriceRecord(security_id="WARN", price=10, price_date=date(2026, 6, 25)),  # 5 days old
+        PriceRecord(security_id="HIGH", price=10, price_date=date(2026, 5, 1)),  # 60 days old
+    ]
+    findings = detect_stale_prices(prices, as_of=date(2026, 6, 30), max_age_days=3)
+
+    by_id = {f.security_id: f for f in findings}
+    assert by_id["WARN"].severity == "warning"
+    assert by_id["HIGH"].severity == "high"
+    # sorted oldest-first
+    assert findings[0].security_id == "HIGH"
+
+
+# --- detect_unsettled_trades ------------------------------------------------------------------
+
+
+def test_detect_unsettled_trades_ignores_settled_and_not_yet_due() -> None:
+    trades = [
+        _trade(trade_id="T1", status="settled", settlement_date=date(2026, 6, 1)),
+        _trade(trade_id="T2", status="unsettled", settlement_date=date(2026, 7, 5)),
+        _trade(trade_id="T3", status="unsettled", settlement_date=None),
+    ]
+    findings = detect_unsettled_trades(trades, as_of=date(2026, 6, 30))
+    assert findings == []
+
+
+def test_detect_unsettled_trades_escalates_past_grace_period() -> None:
+    trades = [
+        _trade(trade_id="WARN", status="unsettled", settlement_date=date(2026, 6, 28)),  # 2 days
+        _trade(trade_id="HIGH", status="unsettled", settlement_date=date(2026, 6, 1)),  # 29 days
+    ]
+    findings = detect_unsettled_trades(trades, as_of=date(2026, 6, 30), grace_days=3)
+
+    by_id = {f.trade_id: f for f in findings}
+    assert by_id["WARN"].severity == "warning"
+    assert by_id["HIGH"].severity == "high"
+    assert findings[0].trade_id == "HIGH"
+
+
+# --- detect_exposure_breaches -----------------------------------------------------------------
+
+
+def test_detect_exposure_breaches_requires_nonzero_nav() -> None:
+    with pytest.raises(ValueError, match="non-zero"):
+        detect_exposure_breaches([], nav=Decimal("0"), limits=[])
+
+
+def test_detect_exposure_breaches_single_position() -> None:
+    positions = [Position(fund="Fund X", security_id="SEC1", quantity=1, price=15)]
+    limits = [
+        ExposureLimit(label="Single position cap", scope="single_position", max_percent_of_nav=10)
+    ]
+
+    breaches = detect_exposure_breaches(positions, nav=Decimal("100"), limits=limits)
+
+    assert len(breaches) == 1
+    assert breaches[0].key == "SEC1"
+    assert breaches[0].exposure_percent == Decimal("15.00")
+
+
+def test_detect_exposure_breaches_gross_exposure() -> None:
+    positions = [
+        Position(fund="Fund X", security_id="SEC1", quantity=1, price=60),
+        Position(fund="Fund X", security_id="SEC2", quantity=1, price=50),
+    ]
+    limits = [ExposureLimit(label="Gross cap", scope="gross_exposure", max_percent_of_nav=100)]
+
+    breaches = detect_exposure_breaches(positions, nav=Decimal("100"), limits=limits)
+
+    assert len(breaches) == 1
+    assert breaches[0].exposure_percent == Decimal("110.00")
+
+
+def test_detect_exposure_breaches_issuer_targeted_limit() -> None:
+    positions = [
+        Position(fund="Fund X", security_id="SEC1", quantity=1, price=20, issuer="Acme"),
+        Position(fund="Fund X", security_id="SEC2", quantity=1, price=5, issuer="Acme"),
+        Position(fund="Fund X", security_id="SEC3", quantity=1, price=5, issuer="Globex"),
+    ]
+    limits = [ExposureLimit(label="Acme cap", scope="issuer", key="Acme", max_percent_of_nav=10)]
+
+    breaches = detect_exposure_breaches(positions, nav=Decimal("100"), limits=limits)
+
+    assert len(breaches) == 1
+    assert breaches[0].key == "Acme"
+    assert breaches[0].exposure_percent == Decimal("25.00")
+
+
+def test_detect_exposure_breaches_untargeted_issuer_limit_checks_every_issuer() -> None:
+    positions = [
+        Position(fund="Fund X", security_id="SEC1", quantity=1, price=20, issuer="Acme"),
+        Position(fund="Fund X", security_id="SEC2", quantity=1, price=5, issuer="Globex"),
+    ]
+    limits = [
+        ExposureLimit(label="No single issuer", scope="issuer", key=None, max_percent_of_nav=10)
+    ]
+
+    breaches = detect_exposure_breaches(positions, nav=Decimal("100"), limits=limits)
+
+    assert len(breaches) == 1
+    assert breaches[0].key == "Acme"
+
+
+def test_detect_exposure_breaches_sector_scope() -> None:
+    positions = [Position(fund="Fund X", security_id="SEC1", quantity=1, price=20, sector="Tech")]
+    limits = [ExposureLimit(label="Tech cap", scope="sector", key="Tech", max_percent_of_nav=10)]
+
+    breaches = detect_exposure_breaches(positions, nav=Decimal("100"), limits=limits)
+
+    assert len(breaches) == 1
+    assert breaches[0].scope == "sector"
+
+
+def test_detect_exposure_breaches_returns_nothing_when_within_limit() -> None:
+    positions = [Position(fund="Fund X", security_id="SEC1", quantity=1, price=5)]
+    limits = [
+        ExposureLimit(label="Single position cap", scope="single_position", max_percent_of_nav=10)
+    ]
+
+    breaches = detect_exposure_breaches(positions, nav=Decimal("100"), limits=limits)
+
+    assert breaches == []
+
+
+# --- validate_management_fees ------------------------------------------------------------------
+
+
+def test_parse_fee_rules_and_administrator_fees_round_trip() -> None:
+    rules = parse_fee_rules(
+        json.dumps(
+            {
+                "fee_rules": [
+                    {
+                        "investor": "Investor A",
+                        "fee_rate": "0.0125",
+                        "fee_basis": "invested_capital",
+                        "source": "Side Letter §4.2",
+                    }
+                ]
+            }
+        ).encode()
+    )
+    assert rules == [
+        FeeRule(
+            investor="Investor A",
+            fee_rate=Decimal("0.0125"),
+            fee_basis="invested_capital",
+            source="Side Letter §4.2",
+        )
+    ]
+
+    fees = parse_administrator_fees(
+        json.dumps(
+            [
+                {
+                    "investor": "Investor A",
+                    "fee_basis": "invested_capital",
+                    "basis_amount": 1_000_000,
+                    "reported_fee": 12_500,
+                }
+            ]
+        ).encode()
+    )
+    assert fees[0].reported_fee == Decimal("12500.00")
+
+
+def test_validate_management_fees_matches_correct_fee() -> None:
+    rules = [
+        FeeRule(investor="Investor A", fee_rate=Decimal("0.0125"), fee_basis="invested_capital")
+    ]
+    fees = [
+        AdministratorFeeLine(
+            investor="Investor A",
+            fee_basis="invested_capital",
+            basis_amount=1_000_000,
+            reported_fee=12_500,
+        )
+    ]
+
+    result = validate_management_fees(rules, fees)
+
+    assert result.breaks == []
+    assert result.matched_count == 1
+
+
+def test_validate_management_fees_flags_basis_mismatch_regardless_of_amount() -> None:
+    rules = [
+        FeeRule(investor="Investor A", fee_rate=Decimal("0.0125"), fee_basis="invested_capital")
+    ]
+    fees = [
+        AdministratorFeeLine(
+            investor="Investor A",
+            fee_basis="committed_capital",
+            basis_amount=1_000_000,
+            reported_fee=12_500,
+        )
+    ]
+
+    result = validate_management_fees(rules, fees)
+
+    assert len(result.breaks) == 1
+    assert result.breaks[0].break_type == "basis_mismatch"
+    assert result.breaks[0].severity == "high"
+
+
+def test_validate_management_fees_flags_amount_mismatch() -> None:
+    rules = [
+        FeeRule(investor="Investor A", fee_rate=Decimal("0.0125"), fee_basis="invested_capital")
+    ]
+    fees = [
+        AdministratorFeeLine(
+            investor="Investor A",
+            fee_basis="invested_capital",
+            basis_amount=1_000_000,
+            reported_fee=12_800,
+        )
+    ]
+
+    result = validate_management_fees(rules, fees)
+
+    assert len(result.breaks) == 1
+    assert result.breaks[0].break_type == "amount_mismatch"
+    assert result.breaks[0].difference == Decimal("300.00")
+
+
+def test_validate_management_fees_flags_rule_unavailable() -> None:
+    fees = [
+        AdministratorFeeLine(
+            investor="Investor B",
+            fee_basis="invested_capital",
+            basis_amount=500_000,
+            reported_fee=6_250,
+        )
+    ]
+
+    result = validate_management_fees([], fees)
+
+    assert len(result.breaks) == 1
+    assert result.breaks[0].break_type == "rule_unavailable"
+    assert result.breaks[0].severity == "warning"
+
+
+def test_validate_management_fees_to_exceptions_carries_impact_amount() -> None:
+    rules = [
+        FeeRule(investor="Investor A", fee_rate=Decimal("0.0125"), fee_basis="invested_capital")
+    ]
+    fees = [
+        AdministratorFeeLine(
+            investor="Investor A",
+            fee_basis="invested_capital",
+            basis_amount=1_000_000,
+            reported_fee=12_800,
+        )
+    ]
+
+    exceptions = validate_management_fees(rules, fees).to_exceptions()
+
+    assert exceptions[0].category == "management_fee"
+    assert exceptions[0].impact_amount == Decimal("300.00")
+
+
+# --- reconcile_expense_allocations -------------------------------------------------------------
+
+
+def test_parse_expected_and_administrator_expenses_round_trip() -> None:
+    expected = parse_expected_expense_allocations(
+        json.dumps(
+            {
+                "expected_allocations": [
+                    {
+                        "expense_id": "EXP1",
+                        "description": "Board meeting travel",
+                        "amount": 5_000,
+                        "expected_category": "management_company",
+                    }
+                ]
+            }
+        ).encode()
+    )
+    assert expected == [
+        ExpectedExpenseAllocation(
+            expense_id="EXP1",
+            description="Board meeting travel",
+            amount=Decimal("5000.00"),
+            expected_category="management_company",
+        )
+    ]
+
+    administrator = parse_administrator_expenses(
+        json.dumps(
+            [
+                {
+                    "expense_id": "EXP1",
+                    "amount": 5_000,
+                    "allocated_category": "management_company",
+                }
+            ]
+        ).encode()
+    )
+    assert administrator[0].allocated_category == "management_company"
+
+
+def test_reconcile_expense_allocations_matches_clean_allocation() -> None:
+    expected = [
+        ExpectedExpenseAllocation(
+            expense_id="EXP1", amount=5_000, expected_category="management_company"
+        )
+    ]
+    administrator = [
+        AdministratorExpenseLine(
+            expense_id="EXP1", amount=5_000, allocated_category="management_company"
+        )
+    ]
+
+    result = reconcile_expense_allocations(expected, administrator)
+
+    assert result.breaks == []
+    assert result.matched_count == 1
+
+
+def test_reconcile_expense_allocations_flags_missing_internal() -> None:
+    administrator = [
+        AdministratorExpenseLine(expense_id="EXP1", amount=5_000, allocated_category="fund")
+    ]
+
+    result = reconcile_expense_allocations([], administrator)
+
+    assert len(result.breaks) == 1
+    assert result.breaks[0].break_type == "missing_internal"
+
+
+def test_reconcile_expense_allocations_flags_missing_external() -> None:
+    expected = [
+        ExpectedExpenseAllocation(expense_id="EXP1", amount=5_000, expected_category="fund")
+    ]
+
+    result = reconcile_expense_allocations(expected, [])
+
+    assert len(result.breaks) == 1
+    assert result.breaks[0].break_type == "missing_external"
+
+
+def test_reconcile_expense_allocations_flags_category_mismatch() -> None:
+    expected = [
+        ExpectedExpenseAllocation(
+            expense_id="EXP1", amount=5_000, expected_category="management_company"
+        )
+    ]
+    administrator = [
+        AdministratorExpenseLine(expense_id="EXP1", amount=5_000, allocated_category="fund")
+    ]
+
+    result = reconcile_expense_allocations(expected, administrator)
+
+    assert len(result.breaks) == 1
+    assert result.breaks[0].break_type == "category_mismatch"
+    assert result.breaks[0].severity == "high"
+
+
+def test_reconcile_expense_allocations_flags_portfolio_company_mismatch() -> None:
+    expected = [
+        ExpectedExpenseAllocation(
+            expense_id="EXP1",
+            amount=5_000,
+            expected_category="portfolio_company",
+            portfolio_company="Acme Co",
+        )
+    ]
+    administrator = [
+        AdministratorExpenseLine(
+            expense_id="EXP1",
+            amount=5_000,
+            allocated_category="portfolio_company",
+            portfolio_company="Other Co",
+        )
+    ]
+
+    result = reconcile_expense_allocations(expected, administrator)
+
+    assert len(result.breaks) == 1
+    assert result.breaks[0].break_type == "category_mismatch"
+
+
+def test_reconcile_expense_allocations_flags_amount_mismatch_when_category_matches() -> None:
+    expected = [
+        ExpectedExpenseAllocation(expense_id="EXP1", amount=5_000, expected_category="fund")
+    ]
+    administrator = [
+        AdministratorExpenseLine(expense_id="EXP1", amount=5_200, allocated_category="fund")
+    ]
+
+    result = reconcile_expense_allocations(expected, administrator)
+
+    assert len(result.breaks) == 1
+    assert result.breaks[0].break_type == "amount_mismatch"
+    assert result.breaks[0].severity == "warning"
+    assert result.breaks[0].difference == Decimal("-200.00")
+
+
+def test_reconcile_expense_allocations_to_exceptions_carries_impact_amount() -> None:
+    expected = [
+        ExpectedExpenseAllocation(expense_id="EXP1", amount=5_000, expected_category="fund")
+    ]
+    administrator = [
+        AdministratorExpenseLine(expense_id="EXP1", amount=5_200, allocated_category="fund")
+    ]
+
+    exceptions = reconcile_expense_allocations(expected, administrator).to_exceptions()
+
+    assert exceptions[0].category == "expense_allocation"
+    assert exceptions[0].impact_amount == Decimal("200.00")
+
+
+# --- prioritise_exceptions --------------------------------------------------------------------
+
+
+def test_prioritise_exceptions_ranks_severity_then_impact() -> None:
+    items = [
+        ExceptionItem(
+            category="cash",
+            code="c1",
+            title="low high",
+            detail="",
+            severity="high",
+            impact_amount=10,
+        ),
+        ExceptionItem(
+            category="cash",
+            code="c2",
+            title="warn",
+            detail="",
+            severity="warning",
+            impact_amount=1_000_000,
+        ),
+        ExceptionItem(
+            category="cash",
+            code="c3",
+            title="big high",
+            detail="",
+            severity="high",
+            impact_amount=1_000,
+        ),
+    ]
+
+    ranked = prioritise_exceptions(items)
+
+    assert [item.code for item in ranked] == ["c3", "c1", "c2"]
+
+
+def test_prioritise_exceptions_respects_top_n() -> None:
+    items = [
+        ExceptionItem(
+            category="cash", code=f"c{i}", title="x", detail="", severity="high", impact_amount=i
+        )
+        for i in range(5)
+    ]
+    ranked = prioritise_exceptions(items, top_n=2)
+    assert len(ranked) == 2
+    assert ranked[0].code == "c4"
+
+
+# --- attach_evidence ----------------------------------------------------------------------------
+
+
+def test_attach_evidence_stamps_every_source_on_every_exception() -> None:
+    items = [
+        ExceptionItem(
+            category="cash", code="c1", key="ACC1", title="x", detail="", severity="high"
+        ),
+        ExceptionItem(
+            category="cash", code="c2", key="ACC2", title="y", detail="", severity="warning"
+        ),
+    ]
+    sources = [
+        EvidenceSource(source_id="internal_cash", filename="internal.json", sha256="a" * 64),
+        EvidenceSource(source_id="external_cash", filename="external.json", sha256="b" * 64),
+    ]
+
+    stamped = attach_evidence(items, sources=sources)
+
+    assert len(stamped[0].evidence) == 2
+    assert {ref.source_id for ref in stamped[0].evidence} == {"internal_cash", "external_cash"}
+    assert {ref.filename for ref in stamped[0].evidence} == {"internal.json", "external.json"}
+    assert len(stamped[1].evidence) == 2
+
+
+def test_attach_evidence_uses_item_key_as_locator() -> None:
+    items = [
+        ExceptionItem(category="cash", code="c1", key="ACC1", title="x", detail="", severity="high")
+    ]
+    sources = [EvidenceSource(source_id="internal_cash", filename="internal.json", sha256="a" * 64)]
+
+    stamped = attach_evidence(items, sources=sources)
+
+    assert stamped[0].evidence[0].locator == "ACC1"
+    assert stamped[0].evidence[0].sha256 == "a" * 64
+
+
+def test_attach_evidence_locator_is_none_when_item_has_no_key() -> None:
+    items = [
+        ExceptionItem(
+            category="stale_price", code="s1", key=None, title="x", detail="", severity="high"
+        )
+    ]
+    sources = [EvidenceSource(source_id="prices", filename="prices.json", sha256="c" * 64)]
+
+    stamped = attach_evidence(items, sources=sources)
+
+    assert stamped[0].evidence[0].locator is None
+
+
+def test_attach_evidence_returns_unchanged_list_when_no_sources() -> None:
+    items = [
+        ExceptionItem(category="cash", code="c1", key="ACC1", title="x", detail="", severity="high")
+    ]
+
+    stamped = attach_evidence(items, sources=[])
+
+    assert stamped[0].evidence == []
+
+
+def test_attach_evidence_does_not_mutate_original_items() -> None:
+    original = ExceptionItem(
+        category="cash", code="c1", key="ACC1", title="x", detail="", severity="high"
+    )
+    sources = [EvidenceSource(source_id="internal_cash", filename="internal.json", sha256="a" * 64)]
+
+    attach_evidence([original], sources=sources)
+
+    assert original.evidence == []

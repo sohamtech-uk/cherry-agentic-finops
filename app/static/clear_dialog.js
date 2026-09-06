@@ -6,6 +6,12 @@
 
   const q = (selector) => document.querySelector(selector);
 
+  function todayIso() {
+    const now = new Date();
+    const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+    return local.toISOString().slice(0, 10);
+  }
+
   function injectStyles() {
     if (document.getElementById(STYLE_ID)) return;
     const style = document.createElement("style");
@@ -81,6 +87,11 @@
         color: #8c2e1d !important;
         font-weight: 800;
       }
+      .clear-dialog-safety {
+        margin: 8px 0 0 !important;
+        color: #64716c !important;
+        font-size: 11px !important;
+      }
       .clear-dialog-actions {
         display: flex;
         justify-content: flex-end;
@@ -109,6 +120,82 @@
       .clear-dialog-confirm:hover {
         background: #833220;
       }
+
+      .control-date-field {
+        border-color: #b9ccc3 !important;
+        background: linear-gradient(145deg, #f8fbf7, #eef6f0) !important;
+      }
+      .control-date-field > span {
+        color: #123c32 !important;
+      }
+      .control-date-field > span small {
+        color: #587168;
+        font-size: .82em;
+        font-weight: 750;
+      }
+      .control-date-row {
+        display: flex;
+        align-items: stretch;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      .control-date-row input[type="date"] {
+        min-width: 0;
+        min-height: 46px;
+        flex: 1 1 auto;
+        padding: 0 12px;
+        color: #17201d;
+        border: 1px solid #b8c9c0;
+        border-radius: 10px;
+        background: #fffdf8;
+        font-size: 13px;
+        font-weight: 750;
+        outline: none;
+      }
+      .control-date-row input[type="date"]:focus {
+        border-color: #4f7d6d;
+        box-shadow: 0 0 0 3px rgba(79, 125, 109, .12);
+      }
+      .control-date-today {
+        min-height: 46px;
+        padding: 0 13px;
+        color: #123c32;
+        border: 1px solid #b8c9c0;
+        border-radius: 10px;
+        background: #e9f8dc;
+        font: inherit;
+        font-size: 11px;
+        font-weight: 850;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .control-date-today:hover {
+        border-color: #709687;
+        background: #def2cc;
+      }
+      .control-date-help {
+        display: block;
+        margin-top: 8px;
+        color: #61706a !important;
+        font-size: 9px !important;
+        line-height: 1.45;
+      }
+
+      .navm-capability-button,
+      .navm-capability-button:disabled {
+        padding: 7px 10px !important;
+        color: #264d40 !important;
+        border: 1px solid #c9d7d0 !important;
+        border-radius: 8px !important;
+        background: #f1f7f2 !important;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+        font-size: 9px !important;
+        font-weight: 750 !important;
+        line-height: 1.2 !important;
+        opacity: 1 !important;
+        cursor: default !important;
+      }
+
       @media (max-width: 520px) {
         .clear-dialog-actions {
           flex-direction: column-reverse;
@@ -116,9 +203,225 @@
         .clear-dialog-actions button {
           width: 100%;
         }
+        .control-date-row {
+          flex-direction: column;
+        }
       }
     `;
     document.head.appendChild(style);
+  }
+
+  function enhanceControlDate() {
+    const input = q("#as-of-input");
+    if (!input) return;
+    const label = input.closest("label");
+    if (!label) return;
+
+    injectStyles();
+    label.classList.add("control-date-field");
+    input.required = false;
+    input.removeAttribute("required");
+    input.setAttribute("aria-describedby", "control-date-help");
+
+    const title = [...label.children].find((child) => child.tagName === "SPAN");
+    if (title) title.innerHTML = "Control date <small>(optional)</small>";
+
+    if (!input.parentElement?.classList.contains("control-date-row")) {
+      const row = document.createElement("div");
+      row.className = "control-date-row";
+      input.parentNode.insertBefore(row, input);
+      row.appendChild(input);
+
+      const todayButton = document.createElement("button");
+      todayButton.type = "button";
+      todayButton.className = "control-date-today";
+      todayButton.textContent = "Use today";
+      todayButton.addEventListener("click", () => {
+        input.value = todayIso();
+        input.focus();
+      });
+      row.appendChild(todayButton);
+    }
+
+    if (!q("#control-date-help")) {
+      const help = document.createElement("small");
+      help.id = "control-date-help";
+      help.className = "control-date-help";
+      help.textContent = "Optional · Used for due-date and ageing checks. Clear it to skip time-based controls.";
+      label.appendChild(help);
+    }
+
+    const originalHardcodedDate = "2026-09-05";
+    if (!input.value || input.value === originalHardcodedDate) input.value = todayIso();
+
+    const form = q("#upload-form");
+    if (form && form.dataset.controlDateResetBound !== "true") {
+      form.dataset.controlDateResetBound = "true";
+      form.addEventListener("reset", () => {
+        window.setTimeout(() => { input.value = todayIso(); }, 0);
+      });
+    }
+  }
+
+  function humaniseAgentCapabilities() {
+    const sections = [
+      {
+        selector: "#reconciliation-manager",
+        heading: "Available actions",
+        badge: "Governed actions",
+        actions: [
+          "Read workbook",
+          "Read cell",
+          "Calculate totals",
+          "Compare values",
+          "Build reconciliation bridge",
+          "Query records",
+        ],
+      },
+      {
+        selector: "#contract-manager",
+        heading: "Available actions",
+        badge: "Governed actions",
+        actions: [
+          "Search fund agreement",
+          "Search side letter",
+          "Extract clause",
+          "Check effective date",
+          "Get investor rule",
+        ],
+      },
+      {
+        selector: "#statement-agent",
+        heading: "Available actions",
+        badge: "Governed actions",
+        actions: [
+          "Read document",
+          "Compare periods",
+          "Find section",
+          "Find entity",
+          "Compare dates",
+        ],
+      },
+      {
+        selector: "#exception-agent",
+        heading: "Planned exception actions",
+        badge: "Planned actions · next build",
+        actions: [
+          "View exceptions",
+          "Group related issues",
+          "Check materiality",
+          "Trace dependencies",
+        ],
+      },
+    ];
+
+    let found = false;
+    sections.forEach((section) => {
+      const root = q(section.selector);
+      if (!root) return;
+      found = true;
+
+      const heading = root.querySelector(".navm-tool-label");
+      if (heading) heading.textContent = section.heading;
+
+      const badge = root.querySelector(".navm-agent-badge");
+      if (badge) badge.textContent = section.badge;
+
+      const tools = root.querySelector(".navm-tools");
+      if (!tools || tools.dataset.humanised === "true") return;
+      tools.dataset.humanised = "true";
+      tools.innerHTML = "";
+      section.actions.forEach((action) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.disabled = true;
+        button.className = "navm-tool navm-capability-button";
+        button.textContent = action;
+        button.setAttribute("aria-label", action);
+        tools.appendChild(button);
+      });
+    });
+    return found;
+  }
+
+  function scheduleCapabilityLabels() {
+    injectStyles();
+    if (humaniseAgentCapabilities()) return;
+
+    const observer = new MutationObserver(() => {
+      if (humaniseAgentCapabilities()) observer.disconnect();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    window.setTimeout(() => observer.disconnect(), 5000);
+  }
+
+  function datasetToastCopy() {
+    const results = q("#dataset-results");
+    const text = results?.textContent || "";
+    if (text.includes("Bank statements") && text.includes("journal entries")) {
+      return "Bank statement workflow detected. Uploaded evidence analysed successfully.";
+    }
+    if (text.includes("Investor-level GL")) {
+      return "Investor GL workflow detected. Uploaded evidence analysed successfully.";
+    }
+    return "Private-markets evidence analysed in its detected workflow.";
+  }
+
+  function neutraliseDatasetUiCopy() {
+    const uploadDescription = q(".upload-copy > h2 + p");
+    if (uploadDescription && uploadDescription.textContent.includes("Ylookup sponsor datasets")) {
+      uploadDescription.textContent = "Cherry detects the structure of the files you upload and routes bank-statement working files, investor-level GLs and capital-call evidence to the appropriate governed workflow. JSON cash evidence is optional.";
+    }
+
+    const title = q("#dataset-results .dataset-title h2");
+    if (title && title.textContent.includes("Ylookup")) {
+      title.textContent = "Native private-markets workflows, matched to your evidence.";
+    }
+
+    const eyebrow = q("#dataset-results .dataset-title .eyebrow");
+    if (eyebrow && eyebrow.textContent.includes("sponsor")) {
+      eyebrow.textContent = "Auto-detected private-markets evidence";
+    }
+
+    document.querySelectorAll("#dataset-results .dataset-head small").forEach((label) => {
+      if (label.textContent.includes("SPONSOR WORKFLOW")) {
+        label.textContent = label.textContent.replace("SPONSOR WORKFLOW", "DETECTED WORKFLOW");
+      }
+    });
+
+    const uploadMessage = q("#upload-message");
+    if (uploadMessage && uploadMessage.textContent.startsWith("Sponsor dataset detected:")) {
+      uploadMessage.textContent = uploadMessage.textContent.replace(
+        "Sponsor dataset detected:",
+        "Private-markets dataset detected:",
+      );
+    }
+  }
+
+  function installProductNeutralDatasetUi() {
+    neutraliseDatasetUiCopy();
+
+    const results = q("#dataset-results");
+    if (results) {
+      const resultObserver = new MutationObserver(() => neutraliseDatasetUiCopy());
+      resultObserver.observe(results, { childList: true, subtree: true, characterData: true });
+    }
+
+    const uploadMessage = q("#upload-message");
+    if (uploadMessage) {
+      const messageObserver = new MutationObserver(() => neutraliseDatasetUiCopy());
+      messageObserver.observe(uploadMessage, { childList: true, subtree: true, characterData: true });
+    }
+
+    const toastNode = q("#toast");
+    if (toastNode) {
+      const toastObserver = new MutationObserver(() => {
+        if (toastNode.textContent.includes("Ylookup sponsor evidence analysed")) {
+          toastNode.textContent = datasetToastCopy();
+        }
+      });
+      toastObserver.observe(toastNode, { childList: true, subtree: true, characterData: true });
+    }
   }
 
   function ensureDialog() {
@@ -141,9 +444,10 @@
         <ul class="clear-dialog-list">
           <li>the PDF, Excel and JSON files currently selected in this browser;</li>
           <li>the rendered analysis and exception results on this page; and</li>
-          <li>temporary server workflow memory created for the current session.</li>
+          <li>temporary server workflow memory when this deployment uses an in-memory backend.</li>
         </ul>
-        <p class="clear-dialog-warning">This action cannot be undone.</p>
+        <p class="clear-dialog-warning">This action cannot be undone in the current browser session.</p>
+        <p class="clear-dialog-safety">No upload token is required. Persistent audit/workflow records are not deleted.</p>
       </div>
       <div class="clear-dialog-actions">
         <button class="clear-dialog-cancel" type="button">Cancel</button>
@@ -158,13 +462,14 @@
   }
 
   async function clearDataAndMemory(dialog) {
-    const token = q("#upload-token")?.value.trim() || "";
-    const headers = token ? { "X-Cherry-Demo-Token": token } : {};
     dialog.close();
+
+    // Clear the browser workspace first. This must never depend on a protected upload token.
+    if (typeof resetEvidenceWorkspace === "function") resetEvidenceWorkspace();
     if (typeof loading === "function") loading(true);
 
     try {
-      const response = await fetch("/api/session/clear-memory", { method: "POST", headers });
+      const response = await fetch("/api/session/clear-memory", { method: "POST" });
       let body = {};
       try { body = await response.json(); } catch { body = {}; }
       if (!response.ok) {
@@ -174,12 +479,16 @@
         throw new Error(detail);
       }
 
-      if (typeof resetEvidenceWorkspace === "function") resetEvidenceWorkspace();
+      const memoryBacked = body.persistence_backend === "memory";
       const count = Number(body.cleared_workflow_records || 0);
-      const message = `Uploaded data and memory cleared · ${count} server workflow record${count === 1 ? "" : "s"} removed.`;
+      const message = memoryBacked
+        ? `Uploaded data and session memory cleared · ${count} temporary workflow record${count === 1 ? "" : "s"} removed.`
+        : "Uploaded data and current analysis cleared. Persistent audit records were left unchanged.";
       if (typeof toast === "function") toast(message);
     } catch (error) {
-      if (typeof toast === "function") toast(error.message, true);
+      const message = "Uploaded data and current analysis were cleared in this browser. Server memory reset could not be confirmed.";
+      if (typeof toast === "function") toast(message, true);
+      console.warn("Cherry FundOps clear-memory request failed:", error);
     } finally {
       if (typeof loading === "function") loading(false);
     }
@@ -201,5 +510,10 @@
     });
   }
 
-  document.addEventListener("DOMContentLoaded", bindCustomClearDialog);
+  document.addEventListener("DOMContentLoaded", () => {
+    enhanceControlDate();
+    bindCustomClearDialog();
+    scheduleCapabilityLabels();
+    installProductNeutralDatasetUi();
+  });
 })();

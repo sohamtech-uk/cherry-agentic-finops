@@ -920,3 +920,51 @@ def test_metrics_endpoint_aggregates_tracked_cases() -> None:
     assert body["tracked_cases"] >= 1
     assert body["closed_cases"] >= 1
     assert body["average_rounds_to_close"] is not None
+
+
+def test_daily_health_check_endpoint_classifies_ready_and_attention_needed_funds() -> None:
+    clean_bytes = json.dumps(
+        {
+            "legal_entity": "Fund Ready",
+            "period_end": "2026-06-30",
+            "total_assets": 5_000_000,
+            "total_liabilities": 150_000,
+            "reported_equity": 4_850_000,
+            "opening_nav": 4_700_000,
+            "contributions": 250_000,
+            "distributions": 100_000,
+            "income": 10_000,
+            "expenses": 10_000,
+            "closing_nav": 4_850_000,
+        }
+    ).encode()
+    broken_bytes = json.dumps(
+        {
+            "legal_entity": "Fund Broken",
+            "period_end": "2026-06-30",
+            "total_assets": 5_000_000,
+            "total_liabilities": 150_000,
+            "reported_equity": 4_000_000,
+            "opening_nav": 4_700_000,
+            "contributions": 250_000,
+            "distributions": 100_000,
+            "income": 10_000,
+            "expenses": 10_000,
+            "closing_nav": 4_850_000,
+        }
+    ).encode()
+    _submit_review(clean_bytes)
+    _submit_review(broken_bytes)
+
+    response = client.get("/api/nav-quality/daily-health-check")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["tracked_funds"] == 2
+    assert body["ready"] == 1
+    assert body["attention_needed"] == 1
+    assert body["entries"][0]["legal_entity"] == "Fund Broken"
+    assert body["entries"][0]["status"] == "attention_needed"
+    assert body["entries"][0]["critical_root_causes"] >= 1
+    assert body["entries"][1]["legal_entity"] == "Fund Ready"
+    assert body["entries"][1]["status"] == "ready"

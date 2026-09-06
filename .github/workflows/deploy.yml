@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: cloud-run-production
+  cancel-in-progress: false
+
 permissions:
   contents: read
   id-token: write
@@ -13,30 +17,65 @@ env:
   REGION: europe-west1
   SERVICE: cherry-finops
   REPOSITORY: cherry-agent
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: production
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+
+      - name: Validate deployment configuration
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN: ${{ secrets.CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN }}
+          WIF_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          test -n "${PROJECT_ID}" || { echo "Missing production variable GCP_PROJECT_ID." >&2; exit 1; }
+          test -n "${WIF_PROVIDER}" || { echo "Missing production variable GCP_WORKLOAD_IDENTITY_PROVIDER." >&2; exit 1; }
+          test -n "${DEPLOY_SERVICE_ACCOUNT}" || { echo "Missing production variable GCP_DEPLOY_SERVICE_ACCOUNT." >&2; exit 1; }
+          test -n "${GOOGLE_API_KEY}" || { echo "Missing production secret GOOGLE_API_KEY." >&2; exit 1; }
+          test -n "${CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN}" || { echo "Missing production secret CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN." >&2; exit 1; }
+          echo "Target project: ${PROJECT_ID}"
+          echo "Target service: ${SERVICE} (${REGION})"
+          echo "Runtime mode: Gemini API key with Firestore persistence"
 
       - id: auth
         uses: google-github-actions/auth@v3
         with:
-          project_id: ${{ vars.GCP_PROJECT_ID }}
+          project_id: ${{ env.PROJECT_ID }}
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
           token_format: access_token
 
       - uses: google-github-actions/setup-gcloud@v3
 
+      - name: Verify deployment identity and target project
+        run: |
+          set -euo pipefail
+          gcloud projects describe "${PROJECT_ID}" --format='value(projectId)' | grep -Fx "${PROJECT_ID}"
+          ACTIVE_ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n 1)"
+          test -n "${ACTIVE_ACCOUNT}" || { echo "Google Cloud authentication produced no active account." >&2; exit 1; }
+          echo "Authenticated deployment identity: ${ACTIVE_ACCOUNT}"
+          echo "Verified target project access: ${PROJECT_ID}"
+          gcloud firestore databases describe \
+            --database='(default)' \
+            --project="${PROJECT_ID}" \
+            --format='value(name)' >/dev/null || {
+              echo "The default Firestore database is missing or inaccessible in ${PROJECT_ID}." >&2
+              exit 1
+            }
+
       - name: Configure Artifact Registry authentication
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
       - name: Build and push
         env:
-          IMAGE: ${{ env.REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ github.sha }}
+          IMAGE: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ github.sha }}
         run: |
           docker build --tag "${IMAGE}" .
           docker push "${IMAGE}"
@@ -45,45 +84,99 @@ jobs:
       - id: deploy
         uses: google-github-actions/deploy-cloudrun@v3
         with:
-          project_id: ${{ vars.GCP_PROJECT_ID }}
+          project_id: ${{ env.PROJECT_ID }}
           region: ${{ env.REGION }}
           service: ${{ env.SERVICE }}
           image: ${{ env.IMAGE }}
           wait: true
           env_vars: |-
             CHERRY_ENVIRONMENT=production
-            CHERRY_PUBLIC_BASE_URL=https://finops.cherrymoney.co.uk
             CHERRY_PERSISTENCE_BACKEND=firestore
+            CHERRY_FUND_MANAGER_FIRESTORE_COLLECTION=fund_manager_cases
             CHERRY_GEMINI_MODEL=gemini-3.7-flash
             CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN=${{ secrets.CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN }}
-            CHERRY_MONEY_API_URL=https://cherrymoney.co.uk
-            CHERRY_MONEY_API_TOKEN=${{ secrets.CHERRY_MONEY_API_TOKEN }}
-            FUNDOPS_STUDIO_API_URL=${{ vars.FUNDOPS_STUDIO_API_URL }}
-            FUNDOPS_STUDIO_AUDIENCE=${{ vars.FUNDOPS_STUDIO_AUDIENCE }}
-            FUNDOPS_STUDIO_API_TOKEN=${{ secrets.FUNDOPS_STUDIO_API_TOKEN }}
-            FUNDOPS_STUDIO_TIMEOUT_SECONDS=25
-            GOOGLE_GENAI_USE_VERTEXAI=true
-            GOOGLE_CLOUD_PROJECT=${{ vars.GCP_PROJECT_ID }}
+            GOOGLE_GENAI_USE_VERTEXAI=false
+            GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
+            GOOGLE_CLOUD_PROJECT=${{ env.PROJECT_ID }}
             GOOGLE_CLOUD_LOCATION=global
-            CHERRY_EVIDENCE_BUCKET=${{ vars.GCP_PROJECT_ID }}-cherry-finops-evidence
-            CHERRY_PUBSUB_TOPIC=finance-workflow-events
           flags: >-
             --no-invoker-iam-check
             --ingress=all
             --default-url
-            --service-account=cherry-agent-runtime@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
             --memory=1Gi
             --cpu=1
             --min-instances=0
             --max-instances=5
 
-      - name: Smoke test
+      - name: Set the generated Cloud Run URL
+        env:
+          SERVICE_URL: ${{ steps.deploy.outputs.url }}
         run: |
-          SERVICE_URL="${{ steps.deploy.outputs.url }}"
-          echo "Testing ${SERVICE_URL}"
-          curl --fail --retry 12 --retry-delay 5 --retry-all-errors "${SERVICE_URL}/"
-          curl --fail --retry 12 --retry-delay 5 --retry-all-errors "${SERVICE_URL}/api/config"
-          curl --fail --retry 12 --retry-delay 5 --retry-all-errors "${SERVICE_URL}/api/private-markets/health"
-          curl --fail --retry 12 --retry-delay 5 --retry-all-errors "${SERVICE_URL}/api/private-markets/integration/health"
+          set -euo pipefail
+          test -n "${SERVICE_URL}" || { echo "Cloud Run did not return a service URL." >&2; exit 1; }
+          gcloud run services update "${SERVICE}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --update-env-vars="CHERRY_PUBLIC_BASE_URL=${SERVICE_URL}" \
+            --quiet
+
+      - name: Smoke test
+        env:
+          SERVICE_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          set -euo pipefail
+          DEPLOYED_IMAGE="$(gcloud run services describe "${SERVICE}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --format='value(spec.template.spec.containers[0].image)')"
+          test "${DEPLOYED_IMAGE}" = "${IMAGE}" || {
+            echo "Cloud Run is serving ${DEPLOYED_IMAGE}, expected ${IMAGE}." >&2
+            exit 1
+          }
+          echo "Testing ${SERVICE_URL} at commit ${GITHUB_SHA}"
+          curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors \
+            "${SERVICE_URL}/health" >/dev/null
+          curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors \
+            "${SERVICE_URL}/api/config" > "${RUNNER_TEMP}/cherry-config.json"
+          python3 - "${RUNNER_TEMP}/cherry-config.json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as config_file:
+              config = json.load(config_file)
+          if not config.get("google_ready"):
+              raise SystemExit("Runtime reports that Gemini is not configured.")
+          if config.get("persistence_backend") != "firestore":
+              raise SystemExit("Runtime is not using Firestore persistence.")
+          print("Runtime configuration verified: Gemini ready, Firestore persistence.")
+          PY
+          curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors \
+            "${SERVICE_URL}/api/fund-manager/health" > "${RUNNER_TEMP}/fund-manager-health.json"
+          python3 - "${RUNNER_TEMP}/fund-manager-health.json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as health_file:
+              health = json.load(health_file)
+          if health.get("case_storage") != "firestore":
+              raise SystemExit("Fund Manager cases are not using Firestore persistence.")
+          print("Runtime configuration verified: Fund Manager case storage is durable.")
+          PY
+          curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors \
+            "${SERVICE_URL}/api/private-markets/health" > "${RUNNER_TEMP}/private-markets-health.json"
+          python3 - "${RUNNER_TEMP}/private-markets-health.json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as health_file:
+              health = json.load(health_file)
+          if not health.get("upload_token_configured"):
+              raise SystemExit(
+                  "Runtime reports that CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN is not configured."
+              )
+          print("Runtime configuration verified: private-markets upload token is configured.")
+          PY
+          curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors \
+            "${SERVICE_URL}/api/private-markets/integration/health" >/dev/null
           curl --fail --retry 12 --retry-delay 5 --retry-all-errors \
-            -X POST "${SERVICE_URL}/api/private-markets/demo/clean"
+            -X POST "${SERVICE_URL}/api/private-markets/demo/clean" >/dev/null

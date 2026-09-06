@@ -6,22 +6,35 @@ from pathlib import Path
 
 import pytest
 from openpyxl import Workbook
+from reportlab.pdfgen import canvas
 
 from app.agent_tools import (
+    compare_bank_statement_cash,
     compare_dates,
     compare_periods,
+    detect_exposure_breaches,
+    detect_stale_prices,
+    detect_unsettled_trades,
     find_entity,
     find_section,
     get_nav_case_iterations,
     get_nav_iteration_metrics,
     identify_ylookup_workbook,
     inspect_workflow,
+    investigate_exception,
+    prioritise_exceptions,
     query_database,
     read_document,
+    reconcile_cash,
+    reconcile_expense_allocations,
     reconcile_investor_gl_workbook,
     reconcile_loader_sample_workbook,
+    reconcile_positions,
+    reconcile_trades,
+    run_daily_fund_health_check,
     run_finance_scenario,
     run_nav_quality_review,
+    validate_management_fees,
 )
 from app.nav_review_history import get_nav_review_history_store
 
@@ -165,6 +178,30 @@ def test_get_nav_iteration_metrics_reflects_recorded_reviews(tmp_path: Path) -> 
 
     assert metrics["tracked_cases"] >= 1
     assert metrics["closed_cases"] >= 1
+
+
+def test_run_daily_fund_health_check_classifies_ready_and_attention_needed(
+    tmp_path: Path,
+) -> None:
+    clean_path = _write_nav_summary(
+        tmp_path / "clean.json", legal_entity="Fund Ready", period_end="2026-06-30"
+    )
+    broken_path = _write_nav_summary(
+        tmp_path / "broken.json",
+        legal_entity="Fund Broken",
+        period_end="2026-06-30",
+        reported_equity=4_000_000,
+    )
+    run_nav_quality_review(clean_path)
+    run_nav_quality_review(broken_path)
+
+    report = run_daily_fund_health_check()
+
+    assert report["tracked_funds"] == 2
+    assert report["ready"] == 1
+    assert report["attention_needed"] == 1
+    assert report["entries"][0]["legal_entity"] == "Fund Broken"
+    assert report["entries"][0]["status"] == "attention_needed"
 
 
 def test_run_nav_quality_review_flags_balance_sheet_mismatch(tmp_path: Path) -> None:
@@ -340,3 +377,369 @@ def test_run_nav_quality_review_with_ledger_produces_investor_root_cause(tmp_pat
         g["investor"] == "Investor A" and g["impact_amount"] == "1000000.00"
         for g in investor_groups
     )
+
+
+def _write_json(path: Path, payload: object) -> str:
+    path.write_text(json.dumps(payload))
+    return str(path)
+
+
+def _write_pdf(path: Path, *lines: str) -> str:
+    pdf = canvas.Canvas(str(path))
+    for index, line in enumerate(lines):
+        pdf.drawString(100, 750 - index * 20, line)
+    pdf.save()
+    return str(path)
+
+
+def test_reconcile_positions_tool_flags_a_break(tmp_path: Path) -> None:
+    internal_path = _write_json(
+        tmp_path / "internal-positions.json",
+        [{"fund": "Fund X", "security_id": "SEC1", "quantity": 100, "price": 10}],
+    )
+    external_path = _write_json(
+        tmp_path / "external-positions.json",
+        [{"fund": "Fund X", "security_id": "SEC1", "quantity": 90, "price": 10}],
+    )
+
+    result = reconcile_positions(internal_path, external_path)
+
+    assert result["matched_count"] == 0
+    assert result["breaks"][0]["break_type"] == "quantity_mismatch"
+    assert result["exceptions"][0]["category"] == "position"
+    evidence = result["exceptions"][0]["evidence"]
+    assert {ref["filename"] for ref in evidence} == {
+        "internal-positions.json",
+        "external-positions.json",
+    }
+    assert all(ref["locator"] == "SEC1" for ref in evidence)
+    assert all(len(ref["sha256"]) == 64 for ref in evidence)
+
+
+def test_reconcile_positions_tool_wraps_invalid_json(tmp_path: Path) -> None:
+    bad_path = tmp_path / "internal-positions.json"
+    bad_path.write_text("not json")
+    external_path = _write_json(tmp_path / "external-positions.json", [])
+
+    with pytest.raises(ValueError, match="Invalid internal positions"):
+        reconcile_positions(str(bad_path), external_path)
+
+
+def test_reconcile_cash_tool_flags_a_break(tmp_path: Path) -> None:
+    internal_path = _write_json(
+        tmp_path / "internal-cash.json",
+        [{"fund": "Fund X", "account": "ACC1", "currency": "USD", "balance": 1000}],
+    )
+    external_path = _write_json(
+        tmp_path / "external-cash.json",
+        [{"fund": "Fund X", "account": "ACC1", "currency": "USD", "balance": 900}],
+    )
+
+    result = reconcile_cash(internal_path, external_path)
+
+    assert result["breaks"][0]["break_type"] == "balance_mismatch"
+    evidence = result["exceptions"][0]["evidence"]
+    assert {ref["filename"] for ref in evidence} == {"internal-cash.json", "external-cash.json"}
+    assert all(ref["locator"] == "ACC1/USD" for ref in evidence)
+
+
+def test_compare_bank_statement_cash_tool_flags_a_break(tmp_path: Path) -> None:
+    internal_path = _write_json(
+        tmp_path / "internal-cash.json",
+        [
+            {
+                "fund": "Fund X",
+                "account": "GB29NWBK60161331926819",
+                "currency": "GBP",
+                "balance": 12000,
+            }
+        ],
+    )
+    statement_path = _write_pdf(
+        tmp_path / "chase_statement.pdf",
+        "Statement of Account",
+        "Closing Balance: GBP 12,345.67",
+    )
+
+    result = compare_bank_statement_cash(
+        statement_path,
+        internal_path,
+        account="GB29NWBK60161331926819",
+        currency="GBP",
+        balance="12345.67",
+    )
+
+    assert result["breaks"][0]["break_type"] == "balance_mismatch"
+    evidence = result["exceptions"][0]["evidence"]
+    assert {ref["filename"] for ref in evidence} == {"internal-cash.json", "chase_statement.pdf"}
+    assert all(ref["locator"] == "GB29NWBK60161331926819/GBP" for ref in evidence)
+
+
+def test_compare_bank_statement_cash_tool_rejects_a_malformed_extracted_balance(
+    tmp_path: Path,
+) -> None:
+    internal_path = _write_json(
+        tmp_path / "internal-cash.json",
+        [{"fund": "Fund X", "account": "ACC1", "currency": "USD", "balance": 1000}],
+    )
+    statement_path = _write_pdf(tmp_path / "statement.pdf", "Statement of Account")
+
+    with pytest.raises(ValueError, match="Invalid extracted bank statement balance"):
+        compare_bank_statement_cash(
+            statement_path,
+            internal_path,
+            account="ACC1",
+            currency="USD",
+            balance="not-a-number",
+        )
+
+
+def test_reconcile_trades_tool_flags_a_break(tmp_path: Path) -> None:
+    trade = {
+        "trade_id": "T1",
+        "fund": "Fund X",
+        "security_id": "SEC1",
+        "side": "buy",
+        "quantity": 100,
+        "price": 10,
+        "trade_date": "2026-06-01",
+    }
+    internal_path = _write_json(tmp_path / "internal-trades.json", [trade])
+    external_path = _write_json(tmp_path / "external-trades.json", [{**trade, "side": "sell"}])
+
+    result = reconcile_trades(internal_path, external_path)
+
+    assert result["breaks"][0]["break_type"] == "side_mismatch"
+    evidence = result["exceptions"][0]["evidence"]
+    assert {ref["filename"] for ref in evidence} == {
+        "internal-trades.json",
+        "external-trades.json",
+    }
+    assert all(ref["locator"] == "T1" for ref in evidence)
+
+
+def test_detect_stale_prices_tool_flags_a_high_severity_finding(tmp_path: Path) -> None:
+    prices_path = _write_json(
+        tmp_path / "prices.json",
+        [{"security_id": "SEC1", "price": 10, "price_date": "2026-05-01"}],
+    )
+
+    result = detect_stale_prices(prices_path, "2026-06-30", max_age_days=3)
+
+    assert result["findings"][0]["severity"] == "high"
+    assert result["exceptions"][0]["category"] == "stale_price"
+    evidence = result["exceptions"][0]["evidence"]
+    assert len(evidence) == 1
+    assert evidence[0]["filename"] == "prices.json"
+    assert evidence[0]["locator"] == "SEC1"
+
+
+def test_validate_management_fees_tool_flags_amount_mismatch(tmp_path: Path) -> None:
+    rules_path = _write_json(
+        tmp_path / "fee-rules.json",
+        [{"investor": "Investor A", "fee_rate": "0.0125", "fee_basis": "invested_capital"}],
+    )
+    fees_path = _write_json(
+        tmp_path / "administrator-fees.json",
+        [
+            {
+                "investor": "Investor A",
+                "fee_basis": "invested_capital",
+                "basis_amount": 1_000_000,
+                "reported_fee": 12_800,
+            }
+        ],
+    )
+
+    result = validate_management_fees(rules_path, fees_path)
+
+    assert result["breaks"][0]["break_type"] == "amount_mismatch"
+    assert result["exceptions"][0]["category"] == "management_fee"
+    evidence = result["exceptions"][0]["evidence"]
+    assert {ref["filename"] for ref in evidence} == {"fee-rules.json", "administrator-fees.json"}
+    assert all(ref["locator"] == "Investor A" for ref in evidence)
+
+
+def test_validate_management_fees_tool_wraps_invalid_json(tmp_path: Path) -> None:
+    bad_path = tmp_path / "fee-rules.json"
+    bad_path.write_text("not json")
+    fees_path = _write_json(tmp_path / "administrator-fees.json", [])
+
+    with pytest.raises(ValueError, match="Invalid fee rules"):
+        validate_management_fees(str(bad_path), fees_path)
+
+
+def test_reconcile_expense_allocations_tool_flags_category_mismatch(tmp_path: Path) -> None:
+    expected_path = _write_json(
+        tmp_path / "expected-allocations.json",
+        [{"expense_id": "EXP1", "amount": 5_000, "expected_category": "management_company"}],
+    )
+    administrator_path = _write_json(
+        tmp_path / "administrator-expenses.json",
+        [{"expense_id": "EXP1", "amount": 5_000, "allocated_category": "fund"}],
+    )
+
+    result = reconcile_expense_allocations(expected_path, administrator_path)
+
+    assert result["breaks"][0]["break_type"] == "category_mismatch"
+    assert result["exceptions"][0]["category"] == "expense_allocation"
+    evidence = result["exceptions"][0]["evidence"]
+    assert {ref["filename"] for ref in evidence} == {
+        "expected-allocations.json",
+        "administrator-expenses.json",
+    }
+    assert all(ref["locator"] == "EXP1" for ref in evidence)
+
+
+def test_reconcile_expense_allocations_tool_wraps_invalid_json(tmp_path: Path) -> None:
+    bad_path = tmp_path / "expected-allocations.json"
+    bad_path.write_text("not json")
+    administrator_path = _write_json(tmp_path / "administrator-expenses.json", [])
+
+    with pytest.raises(ValueError, match="Invalid expected expense allocations"):
+        reconcile_expense_allocations(str(bad_path), administrator_path)
+
+
+def test_investigate_exception_tool_defaults_to_highest_priority() -> None:
+    exceptions = [
+        {
+            "category": "trade",
+            "code": "trade.price_mismatch",
+            "key": "ACC1",
+            "title": "Trade break",
+            "detail": "Trade break detail.",
+            "severity": "high",
+            "impact_amount": "100.00",
+        },
+        {
+            "category": "cash",
+            "code": "cash.balance_mismatch",
+            "key": "ACC1",
+            "title": "Cash break",
+            "detail": "Cash break detail.",
+            "severity": "high",
+            "impact_amount": "500.00",
+        },
+    ]
+
+    result = investigate_exception(exceptions)
+
+    assert result["exception"]["code"] == "cash.balance_mismatch"
+    assert [item["code"] for item in result["related_exceptions"]] == ["trade.price_mismatch"]
+    assert result["recommended_owner"] == "Treasury / fund controller"
+    assert result["next_step"] == "escalate_immediately"
+
+
+def test_investigate_exception_tool_selects_by_code() -> None:
+    exceptions = [
+        {
+            "category": "stale_price",
+            "code": "stale_price.overdue",
+            "key": "SEC1",
+            "title": "Stale price",
+            "detail": "Stale price detail.",
+            "severity": "warning",
+            "impact_amount": "0",
+        }
+    ]
+
+    result = investigate_exception(exceptions, code="stale_price.overdue")
+
+    assert result["exception"]["code"] == "stale_price.overdue"
+    assert result["next_step"] == "request_evidence"
+
+
+def test_investigate_exception_tool_raises_when_code_not_found() -> None:
+    exceptions = [
+        {
+            "category": "cash",
+            "code": "cash.balance_mismatch",
+            "key": "ACC1",
+            "title": "Cash break",
+            "detail": "Cash break detail.",
+            "severity": "high",
+            "impact_amount": "500.00",
+        }
+    ]
+
+    with pytest.raises(ValueError, match="No exception with code"):
+        investigate_exception(exceptions, code="does.not.exist")
+
+
+def test_detect_unsettled_trades_tool_flags_an_overdue_trade(tmp_path: Path) -> None:
+    trades_path = _write_json(
+        tmp_path / "trades.json",
+        [
+            {
+                "trade_id": "T1",
+                "fund": "Fund X",
+                "security_id": "SEC1",
+                "side": "buy",
+                "quantity": 100,
+                "price": 10,
+                "trade_date": "2026-06-01",
+                "settlement_date": "2026-06-01",
+                "status": "unsettled",
+            }
+        ],
+    )
+
+    result = detect_unsettled_trades(trades_path, "2026-06-30", grace_days=3)
+
+    assert result["findings"][0]["severity"] == "high"
+    assert result["exceptions"][0]["category"] == "unsettled_trade"
+    evidence = result["exceptions"][0]["evidence"]
+    assert len(evidence) == 1
+    assert evidence[0]["filename"] == "trades.json"
+    assert evidence[0]["locator"] == "T1"
+
+
+def test_detect_exposure_breaches_tool_flags_a_breach(tmp_path: Path) -> None:
+    positions_path = _write_json(
+        tmp_path / "positions.json",
+        [{"fund": "Fund X", "security_id": "SEC1", "quantity": 1, "price": 15}],
+    )
+    limits_path = _write_json(
+        tmp_path / "limits.json",
+        [{"label": "Single position cap", "scope": "single_position", "max_percent_of_nav": 10}],
+    )
+
+    result = detect_exposure_breaches(positions_path, "100", limits_path)
+
+    assert result["breaches"][0]["key"] == "SEC1"
+    assert result["exceptions"][0]["category"] == "exposure_breach"
+    evidence = result["exceptions"][0]["evidence"]
+    assert {ref["filename"] for ref in evidence} == {"positions.json", "limits.json"}
+
+
+def test_detect_exposure_breaches_tool_wraps_zero_nav(tmp_path: Path) -> None:
+    positions_path = _write_json(tmp_path / "positions.json", [])
+    limits_path = _write_json(tmp_path / "limits.json", [])
+
+    with pytest.raises(ValueError, match="Could not compute exposure breaches"):
+        detect_exposure_breaches(positions_path, "0", limits_path)
+
+
+def test_prioritise_exceptions_tool_ranks_by_severity_and_impact() -> None:
+    exceptions = [
+        {
+            "category": "cash",
+            "code": "c1",
+            "title": "a",
+            "detail": "",
+            "severity": "warning",
+            "impact_amount": 1_000_000,
+        },
+        {
+            "category": "cash",
+            "code": "c2",
+            "title": "b",
+            "detail": "",
+            "severity": "high",
+            "impact_amount": 10,
+        },
+    ]
+
+    result = prioritise_exceptions(exceptions)
+
+    assert [item["code"] for item in result["exceptions"]] == ["c2", "c1"]

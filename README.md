@@ -129,6 +129,34 @@ Parsed contract evidence is held in ephemeral memory for the hackathon deploymen
 
 ## FundOps Agent Studio microservice
 
+## Agentic Fund Manager control pipeline
+
+`POST /api/fund-manager/analyse` now runs one bounded, traceable pipeline over a mixed evidence
+batch:
+
+```text
+upload -> classify -> agent plans controls -> deterministic tools run
+       -> unified exception queue -> agent investigates -> human action recommended
+```
+
+The planning agent can select only tools in the checked-in control catalogue. It forms statement,
+position, trade and cash comparison pairs from explicit filename roles (`prior`/`current`,
+`internal`/`external`), or from exactly two compatible sources with reduced confidence. Ambiguous
+batches are returned as evidence-gap exceptions; the agent never guesses a comparison side.
+
+Each response includes:
+
+- a content-derived `case_id` and evidence-manifest hash;
+- the agent's control plan, rationale, confidence, source roles and missing evidence;
+- deterministic control runs and their exact tool names;
+- one severity/materiality-ranked exception queue, including data-quality failures;
+- an investigation for every exception with the selected tool path and recommended human action;
+- lineage from investigation to exception, control run, source ID and source SHA-256.
+
+`clean` is returned only when at least one applicable control executed, every planned control
+completed, and no exception was generated. Missing adapters or comparison evidence return
+`insufficient_evidence`/`partially_evaluated`, never a silent pass.
+
 Sunil's `fundops-agent-studio` backend is kept as a separate service instead of copying it into this
 repository. Configure:
 
@@ -284,7 +312,14 @@ block (`round_number`, `prior_rounds`).
 ```text
 GET /api/nav-quality/cases/{legal_entity}/{period_end}   -- one case's full round history
 GET /api/nav-quality/metrics                             -- rounds-to-close across every case
+GET /api/nav-quality/daily-health-check                  -- every case, ranked, with open root causes
 ```
+
+`daily-health-check` (`app/nav_health_check.py`) is the portfolio-level view: every reviewed
+fund/period classified `ready` or `attention_needed`, ranked by open critical root causes then
+round count, each carrying the root causes still open as of its latest round. It's built entirely
+from recorded rounds — nothing here re-runs a review. Running it daily is a deployment choice (a
+scheduler hitting the endpoint); this only answers correctly whenever it's called.
 
 In-memory only, matching `app.contracts.ContractRepository`'s scope: this is demo/session state,
 not a system of record.
@@ -386,6 +421,7 @@ app/nav_quality.py                           NAV Quality Controller schemas, GL 
 app/nav_quality_router.py                    NAV Quality Controller endpoint
 app/nav_exceptions.py                        root-cause grouping of NAV review findings
 app/nav_review_history.py                    NAV review iteration/round tracking
+app/nav_health_check.py                      daily portfolio-level fund health check
 app/contracts.py                             contract evidence, precedence and NAV rule checks
 app/contract_tools.py                        constrained contract specialist tools
 app/contract_router.py                       contract ingestion, search and NAV APIs

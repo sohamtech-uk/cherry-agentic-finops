@@ -11,6 +11,15 @@ def test_health_endpoint() -> None:
     assert response.json()["status"] == "ok"
 
 
+def test_private_markets_health_reports_upload_token_configuration(monkeypatch) -> None:
+    monkeypatch.setenv("CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN", "configured-demo-token")
+
+    response = client.get("/api/private-markets/health")
+
+    assert response.status_code == 200
+    assert response.json()["upload_token_configured"] is True
+
+
 def test_autonomous_demo_endpoint() -> None:
     response = client.post("/api/demo/autonomous")
     assert response.status_code == 200

@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     amount_tolerance_percent: float = Field(
         default=2.0, ge=0, le=100, validation_alias="CHERRY_AMOUNT_TOLERANCE_PERCENT"
     )
-    max_upload_mb: int = Field(default=12, ge=1, le=50, validation_alias="CHERRY_MAX_UPLOAD_MB")
+    max_upload_mb: int = Field(default=50, ge=1, le=50, validation_alias="CHERRY_MAX_UPLOAD_MB")
 
     cash_agent_model: str = Field(
         default="google/gemini-2.5-flash-lite",
@@ -68,6 +68,10 @@ class Settings(BaseSettings):
 
     firestore_collection: str = Field(
         default="finance_workflows", validation_alias="CHERRY_FIRESTORE_COLLECTION"
+    )
+    fund_manager_firestore_collection: str = Field(
+        default="fund_manager_cases",
+        validation_alias="CHERRY_FUND_MANAGER_FIRESTORE_COLLECTION",
     )
     evidence_bucket: str | None = Field(default=None, validation_alias="CHERRY_EVIDENCE_BUCKET")
     pubsub_topic: str | None = Field(
