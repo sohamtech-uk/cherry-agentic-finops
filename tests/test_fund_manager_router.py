@@ -148,9 +148,7 @@ def mock_agentic_stages(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _positions() -> bytes:
-    return json.dumps(
-        [{"fund": "F1", "security_id": "ABC", "quantity": 100, "price": 10}]
-    ).encode()
+    return json.dumps([{"fund": "F1", "security_id": "ABC", "quantity": 100, "price": 10}]).encode()
 
 
 def _create_case() -> dict[str, Any]:
