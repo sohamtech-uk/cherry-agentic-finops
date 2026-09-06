@@ -32,6 +32,7 @@ from typing import Any, Literal
 
 from app.contracts import read_document_pages
 from app.fund_reconciliation import parse_cash_balances, parse_positions, parse_trades
+from app.nav_quality import parse_administrator_nav_summary, parse_side_letter_rules
 from app.ylookup_datasets import inspect_workbook
 
 SourceStatus = Literal["processed", "unknown", "unreadable"]
@@ -72,6 +73,25 @@ _JSON_KEY_RULES: tuple[tuple[str, frozenset[str]], ...] = (
     ("trades", frozenset({"trade_id", "side"})),
     ("bank_transactions", frozenset({"transaction_id", "booking_date"})),
     ("cash_transactions", frozenset({"account", "currency", "balance"})),
+    ("side_letter_rules", frozenset({"investor", "rule"})),
+)
+
+# The administrator NAV summary is a single JSON object (not an array of row records like the
+# _JSON_KEY_RULES shapes above), so it needs its own top-level-key check rather than the
+# array-of-records path _classify_json otherwise follows. Mirrors
+# app.nav_quality._REQUIRED_SUMMARY_FIELDS -- kept as a separate literal here (rather than
+# importing that private constant) since classification only needs to *recognise* the shape; the
+# real strict validator below is what actually accepts or rejects it.
+_NAV_SUMMARY_REQUIRED_KEYS = frozenset(
+    {
+        "legal_entity",
+        "period_end",
+        "total_assets",
+        "total_liabilities",
+        "reported_equity",
+        "opening_nav",
+        "closing_nav",
+    }
 )
 
 
@@ -124,10 +144,13 @@ def _classify_json(content: bytes, file_name: str) -> tuple[str, list[str]]:
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         return "unknown_json", [f"{file_name}: invalid JSON ({exc})."]
 
+    if isinstance(payload, dict) and _NAV_SUMMARY_REQUIRED_KEYS.issubset(payload):
+        return "nav_summary", []
+
     if isinstance(payload, list):
         rows: Any = payload
     elif isinstance(payload, dict):
-        rows = next(iter(payload.values()), None)
+        rows = payload["rules"] if "rules" in payload else next(iter(payload.values()), None)
     else:
         rows = None
     if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
@@ -215,6 +238,10 @@ _STRICT_JSON_VALIDATORS = {
     "positions": parse_positions,
     "trades": parse_trades,
     "cash_transactions": parse_cash_balances,
+    "side_letter_rules": parse_side_letter_rules,
+    # parse_administrator_nav_summary returns a single object, not a list; wrap it so the shared
+    # "if not records" empty-check below stays meaningful for every registered validator.
+    "nav_summary": lambda content: [parse_administrator_nav_summary(content)],
 }
 
 

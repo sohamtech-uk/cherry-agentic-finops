@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from app import fund_manager_nav_router
 from app.api import app
 from app.fund_manager_cases import case_store
+from app.fund_manager_classification import classify_and_validate_sources
 from app.fund_manager_nav_controller import build_nav_readiness
 
 client = TestClient(app)
@@ -42,6 +43,22 @@ def _nav_summary() -> bytes:
 
 
 def _case() -> Any:
+    """Build a case using the real classifier, so these tests exercise the same acceptance gate
+    that build_nav_readiness relies on rather than a hand-rolled classification shortcut."""
+
+    files = [("nav-summary.json", _nav_summary(), "application/json")]
+    classification = {"sources": classify_and_validate_sources(files)}
+    return case_store.create(files, classification=classification, fund_name="Northstar Fund III")
+
+
+def test_case_fixture_classifies_and_accepts_the_nav_summary() -> None:
+    case = _case()
+    source = case.classification["sources"][0]
+    assert source["detected_type"] == "nav_summary"
+    assert source["validation_status"] == "accepted"
+
+
+def test_nav_readiness_rejects_unaccepted_nav_summary() -> None:
     files = [("nav-summary.json", _nav_summary(), "application/json")]
     classification = {
         "sources": [
@@ -53,7 +70,12 @@ def _case() -> Any:
             }
         ]
     }
-    return case_store.create(files, classification=classification, fund_name="Northstar Fund III")
+    case = case_store.create(files, classification=classification, fund_name="Northstar Fund III")
+
+    readiness = build_nav_readiness(case)
+
+    assert readiness["status"] == "needs_input"
+    assert readiness["inputs"]["nav_summary"] is None
 
 
 def test_nav_readiness_identifies_structured_nav_summary() -> None:
@@ -98,6 +120,19 @@ def test_nav_reconcile_review_and_decision_are_staged(monkeypatch: pytest.Monkey
             "stage": "reviewed",
             "recommended_human_action": "return_to_administrator",
             "investigations": [],
+            "deterministic_action": "needs_review",
+            "root_causes": [],
+            "remediation_package": {
+                "mode": "consolidated_first_pass",
+                "finding_count": 1,
+                "root_cause_count": 0,
+                "work_item_count": 0,
+            },
+            "control_boundary": (
+                "The agent explains and consolidates deterministic NAV findings. It cannot "
+                "change the NAV calculation, control result or official NAV."
+            ),
+            "round_reduction_target": {"target": "1-2 review iterations"},
         }
 
     monkeypatch.setattr(fund_manager_nav_router, "run_case_nav_reconciliation", fake_reconcile)
@@ -109,7 +144,11 @@ def test_nav_reconcile_review_and_decision_are_staged(monkeypatch: pytest.Monkey
 
     review = client.post(f"/api/fund-manager/cases/{case.case_id}/nav/review")
     assert review.status_code == 200
-    assert review.json()["workflows"]["nav_quality_controller"]["review"]["stage"] == "reviewed"
+    reviewed = review.json()["workflows"]["nav_quality_controller"]["review"]
+    assert reviewed["stage"] == "reviewed"
+    assert reviewed["remediation_package"]["mode"] == "consolidated_first_pass"
+    assert reviewed["control_boundary"]
+    assert reviewed["round_reduction_target"] == {"target": "1-2 review iterations"}
 
     decision = client.post(
         f"/api/fund-manager/cases/{case.case_id}/nav/decision",
@@ -125,3 +164,23 @@ def test_nav_review_requires_reconciliation() -> None:
     case = _case()
     response = client.post(f"/api/fund-manager/cases/{case.case_id}/nav/review")
     assert response.status_code == 409
+
+
+def test_nav_decision_requires_review(monkeypatch: pytest.MonkeyPatch) -> None:
+    case = _case()
+    case.nav_readiness = build_nav_readiness(case)
+
+    def fake_reconcile(_: Any) -> dict[str, Any]:
+        return {"workflow": "nav_quality_controller", "legal_entity": "Northstar Fund III"}
+
+    monkeypatch.setattr(fund_manager_nav_router, "run_case_nav_reconciliation", fake_reconcile)
+
+    reconcile = client.post(f"/api/fund-manager/cases/{case.case_id}/nav/reconcile")
+    assert reconcile.status_code == 200
+
+    response = client.post(
+        f"/api/fund-manager/cases/{case.case_id}/nav/decision",
+        json={"action": "approve_nav"},
+    )
+    assert response.status_code == 409
+    assert "agentic NAV review" in response.json()["detail"]

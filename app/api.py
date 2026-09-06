@@ -7,7 +7,7 @@ from typing import Annotated, Any, cast
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import TypeAdapter, ValidationError
 from slowapi import _rate_limit_exceeded_handler
@@ -96,13 +96,8 @@ async def invalid_workflow_action_handler(_: Request, exc: InvalidWorkflowAction
 
 
 @app.get("/", include_in_schema=False)
-async def home() -> Response:
-    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
-    html = html.replace(
-        "</body>",
-        '<script src="/static/nav_quality_controller.js"></script>\n</body>',
-    )
-    return Response(content=html, media_type="text/html")
+async def home() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.get("/health", tags=["operations"])

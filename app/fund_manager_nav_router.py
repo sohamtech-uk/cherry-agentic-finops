@@ -144,7 +144,12 @@ async def decide_nav_case(
     case_id: str,
     decision: NAVDecision,
 ) -> dict[str, Any]:
-    """Record a NAV-specific human decision without amending the official NAV."""
+    """Record a NAV-specific human decision without amending the official NAV.
+
+    Requires the agentic NAV review to have run first: the decision is meant to respond to the
+    consolidated remediation package (every finding, root cause and agent investigation in one
+    pass), not to the raw deterministic reconciliation alone.
+    """
 
     _require_upload_access()
     case = _case_or_404(case_id)
@@ -152,6 +157,11 @@ async def decide_nav_case(
         raise HTTPException(
             status_code=409,
             detail="Run NAV reconciliation before recording a NAV decision.",
+        )
+    if case.nav_review is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Run the agentic NAV review before recording a NAV decision.",
         )
     case.nav_decision = {
         "action": decision.action,
