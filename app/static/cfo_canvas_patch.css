@@ -156,6 +156,47 @@ dialog[open] {
   font-weight: 700;
 }
 
+.upload-progress {
+  margin-top: 14px;
+  padding: 11px 12px;
+  border: 1px solid #dfe6df;
+  border-radius: 10px;
+  background: #f7faf5;
+}
+.upload-progress-bar {
+  height: 6px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e4eae4;
+}
+.upload-progress-bar i {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--forest);
+  transition: width .22s ease;
+}
+.upload-progress strong {
+  display: block;
+  color: #24312b;
+  font-size: 9.5px;
+}
+.upload-progress small {
+  display: block;
+  margin-top: 3px;
+  color: #5d6a63;
+  font-size: 8.5px;
+  line-height: 1.4;
+}
+.upload-progress.error {
+  border-color: #efc5bd;
+  background: #fff4f1;
+}
+.upload-progress.error .upload-progress-bar i { background: var(--coral); }
+.upload-progress.error strong { color: #8f3c2f; }
+
 /* Keep the top upload action prominent even when the workflow buttons are disabled. */
 .upload-primary {
   min-width: 126px;
