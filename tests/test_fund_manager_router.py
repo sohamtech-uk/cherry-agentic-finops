@@ -285,6 +285,25 @@ def test_classify_endpoint_decompresses_a_zip_of_evidence_files() -> None:
     assert {source["detected_type"] for source in body["sources"]} == {"positions", "trades"}
 
 
+def test_classify_endpoint_accepts_a_zip_alongside_a_plain_file_in_one_batch() -> None:
+    trades = json.dumps([{"trade_id": "T1", "side": "buy"}]).encode()
+    archive = _zip_bytes({"trades.json": trades})
+
+    response = client.post(
+        "/api/fund-manager/classify",
+        files=[
+            ("files", ("positions.json", _positions(), "application/json")),
+            ("files", ("evidence.zip", archive, "application/zip")),
+        ],
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_count"] == 2
+    assert {source["filename"] for source in body["sources"]} == {"positions.json", "trades.json"}
+    assert {source["detected_type"] for source in body["sources"]} == {"positions", "trades"}
+
+
 def test_case_creation_accepts_a_zip_of_evidence_files() -> None:
     archive = _zip_bytes({"positions.json": _positions()})
 
