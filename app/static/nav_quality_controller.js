@@ -137,7 +137,10 @@
   }
 
   function displayedStep() {
-    return state.viewStep == null ? currentStep() : Math.min(state.viewStep, currentStep());
+    if (state.viewStep == null) return currentStep();
+    const current = currentStep();
+    const furthestAllowed = current === 3 ? 4 : current;
+    return Math.min(state.viewStep, furthestAllowed);
   }
 
   function navApplicable(caseData = state.caseData) {
