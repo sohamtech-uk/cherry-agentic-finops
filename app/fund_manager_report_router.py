@@ -19,10 +19,10 @@ def _decided_case_or_404(case_id: str) -> FundManagerCase:
     if case is None:
         raise HTTPException(status_code=404, detail=f"Fund Manager case {case_id} was not found.")
     if case.stage != "decided":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Case {case.case_id} must have a recorded decision before reports can download.",
+        detail = (
+            f"Case {case.case_id} must have a recorded decision before reports can download."
         )
+        raise HTTPException(status_code=409, detail=detail)
     return case
 
 
