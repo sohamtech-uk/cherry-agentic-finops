@@ -36,8 +36,7 @@ def _nav_report_case(case_id: str) -> FundManagerCase:
     case = _case_or_404(case_id)
     if case.nav_decision is None:
         detail = (
-            f"NAV reports are unavailable until case {case.case_id} "
-            "has a recorded NAV decision."
+            f"NAV reports are unavailable until case {case.case_id} has a recorded NAV decision."
         )
         raise HTTPException(status_code=409, detail=detail)
     if case.nav_reconciliation is None:
@@ -67,9 +66,7 @@ def _nav_report_case(case_id: str) -> FundManagerCase:
         )
 
     critical = sum(1 for issue in issues if issue["severity"] in {"critical", "high"})
-    material = sum(
-        1 for issue in issues if issue["severity"] in {"critical", "high", "material"}
-    )
+    material = sum(1 for issue in issues if issue["severity"] in {"critical", "high", "material"})
     execution = {
         "status": review.get("action", "needs_review"),
         "issues_found": len(issues),
