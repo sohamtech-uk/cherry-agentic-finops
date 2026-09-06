@@ -3,131 +3,169 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Cherry CFO turns cash application into an evidence-driven workspace with deterministic controls and controller review.">
-  <title>Cherry CFO — Cash Application Workspace</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2216%22 fill=%22%23dff7cf%22/><text x=%2232%22 y=%2243%22 text-anchor=%22middle%22 font-size=%2236%22 font-family=%22Arial%22 font-weight=%22700%22 fill=%22%23163c32%22>C</text></svg>">
-  <link rel="stylesheet" href="/static/cfo_canvas.css">
+  <meta name="description" content="Cherry FundOps reconciles private-markets evidence across PDFs, fund workbooks and optional cash data.">
+  <title>Cherry FundOps — Private markets control room</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2216%22 fill=%22%23bdf28d%22/><text x=%2232%22 y=%2243%22 text-anchor=%22middle%22 font-size=%2236%22 font-family=%22Arial%22 font-weight=%22700%22 fill=%22%23123c32%22>C</text></svg>">
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/contract.css">
+  <link rel="stylesheet" href="/static/ylookup.css">
 </head>
 <body>
-  <div class="app-shell">
-    <aside class="sidebar" aria-label="Workspace navigation">
-      <a class="brand" href="/" aria-label="Cherry CFO home">
-        <span class="brand-mark">C</span>
-        <span class="brand-copy">Cherry <strong>CFO</strong></span>
-      </a>
+  <header class="topbar">
+    <a class="brand" href="#top" aria-label="Cherry FundOps home"><span class="brand-mark" aria-hidden="true">C</span><span>Cherry <strong>FundOps</strong></span></a>
+    <nav class="primary-nav" aria-label="Primary navigation">
+      <a href="#control-room">Control room</a>
+      <a href="#workflow">Workflow</a>
+      <a href="#upload">Analyse files</a>
+      <a href="/api/docs" target="_blank" rel="noreferrer">API</a>
+    </nav>
+    <div class="environment" id="cloud-state"><i></i><span>Checking environment</span></div>
+  </header>
 
-      <div class="sidebar-label">Workspace</div>
-      <button class="nav-item active" type="button" data-action="reset-board">
-        <span class="nav-icon">⌁</span><span>Cash application</span>
-      </button>
-      <a class="nav-item" href="/controller-review">
-        <span class="nav-icon">✓</span><span>Controller review</span>
-      </a>
-      <a class="nav-item" href="/api/docs" target="_blank" rel="noreferrer">
-        <span class="nav-icon">{ }</span><span>API</span>
-      </a>
-
-      <div class="sidebar-label cases-label">Demo cases</div>
-      <button class="case-link" type="button" data-scenario="clean">
-        <span class="case-dot clean"></span>
-        <span><b>Straight-through</b><small>£12.4k · 2 invoices</small></span>
-      </button>
-      <button class="case-link" type="button" data-scenario="shortpay">
-        <span class="case-dot review"></span>
-        <span><b>Short-pay exception</b><small>£500 · review required</small></span>
-      </button>
-
-      <div class="sidebar-note">
-        <span class="live-dot"></span>
-        <div><b>Simulation boundary</b><small>No payment initiation. No production ledger write.</small></div>
+  <main id="top">
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">Ylookup × Encode · Private markets track</p>
+        <h1>Close capital calls<br><em>before they become fund risk.</em></h1>
+        <p class="hero-lead">One control room understands private-markets evidence, checks ledgers and working files, matches cash when available and routes exceptions to the right owner—with evidence attached.</p>
+        <div class="hero-actions"><button class="button primary" data-scenario="exception">Run live control check <span>→</span></button><a class="button secondary" href="#workflow">See the workflow</a></div>
+        <div class="proof-row"><span><b>2</b> sponsor-native data workflows</span><span><b>1</b> call-grounded synthetic control</span><span><b>0</b> payment permissions</span></div>
       </div>
-    </aside>
-
-    <main class="workspace">
-      <header class="workspace-bar">
-        <div>
-          <div class="crumb">Syndicate · Track 2</div>
-          <h1>Cash application board</h1>
+      <div class="hero-terminal" role="group" aria-label="Example control result">
+        <div class="terminal-bar"><span></span><span></span><span></span><small>CASE CPGF-2026-03-LP001</small></div>
+        <div class="terminal-body">
+          <p><span>01</span> Notice extracted <b>98%</b></p><p><span>02</span> Commitment arithmetic <b class="good">PASS</b></p><p><span>03</span> Bank instructions <b class="bad">CHANGED</b></p><p><span>04</span> Cash receipt <b class="warn">£500 SHORT</b></p>
+          <div class="terminal-result"><i></i><div><small>CONTROL DECISION</small><strong>Hold &amp; route exceptions</strong></div></div>
         </div>
-        <div class="workspace-actions">
-          <span class="status-pill" id="environment-pill"><i></i><span>Checking runtime</span></span>
-          <button class="toolbar-button" type="button" data-scenario="clean">Run clean case</button>
-          <button class="toolbar-button primary" type="button" data-scenario="shortpay">Run £500 exception</button>
-        </div>
-      </header>
+      </div>
+    </section>
 
-      <section class="board-stage" id="board-stage" aria-label="Cherry CFO dynamic finance board">
-        <div class="board-toolbar" aria-label="Canvas controls">
-          <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
-          <span id="zoom-label">100%</span>
-          <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
-          <button type="button" id="zoom-reset" aria-label="Reset view">⌂</button>
-        </div>
+    <section class="source-strip" aria-label="Evidence flow"><span>PDF document batch</span><i>+</i><span>Fund Excel workbooks</span><i>+</i><span>Optional cash JSON</span><i>→</i><strong>Auto-routed governed workflows</strong></section>
 
-        <div class="scenario-actions hidden" id="scenario-actions">
-          <span id="scenario-status">Case ready</span>
-          <button type="button" id="investigate-case" class="mini-action hidden">Investigate with agent</button>
-          <a href="/controller-review" id="open-review" class="mini-action dark hidden">Open controller review</a>
+    <section class="control-room" id="control-room">
+      <div class="section-head">
+        <div><p class="eyebrow">Live control room</p><h2>See the break. Know the next move.</h2></div>
+        <div class="scenario-tabs" role="group" aria-label="Demo cases"><button class="active" data-scenario="exception">Control break</button><button data-scenario="awaiting-cash">Awaiting cash</button><button data-scenario="clean">Clean close</button></div>
+      </div>
+
+      <div class="dashboard" id="dashboard" aria-live="polite">
+        <div class="case-bar">
+          <div><span class="case-label">Active case</span><h3 id="case-title">Loading case…</h3><p id="case-subtitle">Reconciling fund evidence</p></div>
+          <div class="case-actions"><span class="decision-badge" id="decision-badge">Analysing</span><button class="icon-button" id="download-review" title="Download review brief" aria-label="Download review brief" disabled>↓</button></div>
         </div>
 
-        <div class="board-inner" id="board-inner">
-          <svg class="connections" id="connections" width="1500" height="900" aria-hidden="true"></svg>
-          <div class="nodes" id="nodes"></div>
+        <div class="metrics">
+          <article><span>Call amount</span><strong id="metric-expected">—</strong><small>Notice vs ledger</small></article><article><span>Cash received</span><strong id="metric-received">—</strong><small id="metric-progress">— funded</small></article><article id="outstanding-card"><span>Outstanding</span><strong id="metric-outstanding">—</strong><small id="metric-variance">— variance</small></article><article><span>Time to due date</span><strong id="metric-due">—</strong><small id="metric-due-date">—</small></article>
+        </div>
 
-          <div class="empty-state" id="empty-state">
-            <div class="empty-orbit"><span>C</span></div>
-            <p class="eyebrow">Autonomous Office of the CFO</p>
-            <h2>Ask once. Watch the finance work assemble.</h2>
-            <p>Cherry CFO turns bank receipts, remittance evidence, open AR and finance policy into a visible, auditable workflow. It proposes the plan first, then builds the evidence trail on the board.</p>
-            <div class="empty-chips">
-              <button type="button" data-scenario="clean">Apply the Northstar £12.4k receipt</button>
-              <button type="button" data-scenario="shortpay">Why is the £500 short-pay held?</button>
+        <div class="dashboard-grid">
+          <article class="panel notice-panel">
+            <div class="panel-head"><div><span>01 · Document intelligence</span><h3>Capital call notice</h3></div><b class="tag good" id="extraction-confidence">—</b></div>
+            <div class="notice-card">
+              <div class="notice-brand"><div class="fund-monogram">CP</div><div><strong id="notice-fund">—</strong><small>Capital call notice</small></div></div><div class="notice-number"><small>NOTICE</small><strong id="notice-id">—</strong></div>
+              <div class="notice-grid"><div><small>Investor</small><strong id="notice-investor">—</strong></div><div><small>Due date</small><strong id="notice-due">—</strong></div><div><small>Current call</small><strong id="notice-amount">—</strong></div><div><small>Payment reference</small><strong id="notice-reference">—</strong></div></div>
+              <div class="bank-box"><span>Payment instructions</span><div><strong id="notice-bank">—</strong><b id="notice-account">—</b></div></div>
             </div>
-          </div>
+          </article>
+
+          <article class="panel findings-panel"><div class="panel-head"><div><span>02 · Deterministic controls</span><h3>Control findings</h3></div><b class="tag" id="finding-count">—</b></div><div class="finding-list" id="finding-list"></div></article>
+          <article class="panel work-panel" id="exception-manager"><div class="panel-head"><div><span>03 · Exception routing</span><h3>Next-best work queue</h3></div><b class="tag" id="task-count">—</b></div><div class="task-list" id="task-list"></div></article>
+          <article class="panel ledger-panel">
+            <div class="panel-head"><div><span>04 · LP ledger</span><h3>Commitment position</h3></div><b class="tag good" id="ledger-status">—</b></div>
+            <div class="commitment-total"><span>Total commitment</span><strong id="total-commitment">—</strong></div><div class="commitment-bar"><i id="called-bar"></i><i id="current-bar"></i></div>
+            <div class="bar-legend"><span><i class="called"></i>Called before <b id="called-before">—</b></span><span><i class="current"></i>Current call <b id="current-call">—</b></span><span><i class="remaining"></i>Remaining <b id="remaining-call">—</b></span></div>
+            <div class="evidence-summary"><span>Matched cash evidence</span><strong id="matched-transactions">No matching transaction</strong></div>
+          </article>
         </div>
+      </div>
+    </section>
 
-        <section class="plan-panel hidden" id="plan-panel" aria-live="polite">
-          <div class="plan-head">
-            <div><span>Proposed plan</span><strong id="plan-title">Analyse cash application</strong></div>
-            <button type="button" id="close-plan" aria-label="Close plan">×</button>
-          </div>
-          <p id="plan-intro">Cherry CFO will use the supplied evidence and deterministic controls before any simulated posting.</p>
-          <ol id="plan-steps"></ol>
-          <div class="plan-boundary"><i></i><span>Numbers come from deterministic finance logic, not model-generated arithmetic.</span></div>
-          <button class="confirm-button" type="button" id="confirm-plan">Confirm &amp; run <span>→</span></button>
-        </section>
+    <section class="contract-section" id="contracts">
+      <div class="contract-intro">
+        <div>
+          <p class="eyebrow">Context-derived demo · Synthetic evidence</p>
+          <h2>Contract Agent</h2>
+          <p class="contract-subtitle">Governing documents → investor-specific rules → deterministic checks → review-ready evidence</p>
+        </div>
+        <div class="contract-disclosure">
+          <strong>SYNTHETIC HACKATHON DEMO — NOT A REAL CONTRACT</strong>
+          <p>Grounded in the side-letter fee problem described in Ylookup Call 1. The sponsor pack did not contain an LPA or side letter, so this isolated demo uses invented documents and parties.</p>
+          <button class="button primary" id="run-contract-demo" type="button">Run side-letter demo <span>→</span></button>
+        </div>
+      </div>
 
-        <aside class="inspector hidden" id="inspector" aria-label="Component details">
-          <div class="inspector-head">
-            <div><span id="inspector-kind">Evidence</span><h3 id="inspector-title">Component</h3></div>
-            <button type="button" id="close-inspector" aria-label="Close details">×</button>
-          </div>
-          <div class="inspector-summary" id="inspector-summary"></div>
-          <div class="inspector-section">
-            <span class="inspector-label">Finance details</span>
-            <div class="detail-list" id="inspector-details"></div>
-          </div>
-          <div class="inspector-section">
-            <span class="inspector-label">Evidence &amp; provenance</span>
-            <div class="source-list" id="inspector-sources"></div>
-          </div>
-          <details class="raw-details">
-            <summary>Raw component state</summary>
-            <pre id="inspector-raw"></pre>
-          </details>
-        </aside>
-      </section>
+      <div class="contract-results hidden" id="contract-results" aria-live="polite">
+        <header class="contract-decision">
+          <div><span>Contract-informed control decision</span><h3 id="contract-decision-title">Review required</h3><p id="contract-decision-subtitle">Cedar Pension Trust · Management fee / capital-call treatment</p></div>
+          <div><small>Potential overcall</small><strong id="contract-overcall">—</strong></div>
+        </header>
 
-      <form class="composer" id="composer">
-        <div class="composer-icon">⌘</div>
-        <input id="composer-input" type="text" autocomplete="off" placeholder="Ask Cherry CFO about a receipt, remittance or exception…" aria-label="Ask Cherry CFO">
-        <div class="composer-shortcut">Enter</div>
-        <button type="submit" aria-label="Submit question">↑</button>
-      </form>
-    </main>
-  </div>
+        <div class="contract-provenance"><span>CONTEXT-DERIVED DEMO</span><span id="contract-context-source">Ylookup Call 1</span><span>Sponsor-native metrics excluded</span></div>
 
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="/static/cfo_canvas.js" defer></script>
+        <div class="contract-story">
+          <article class="contract-panel rule-panel">
+            <div class="panel-kicker">01 · Governing rule stack</div>
+            <div class="rule-card">
+              <div><small>Fund default</small><b>LPA default</b></div>
+              <strong id="contract-lpa-rule">—</strong>
+              <p id="contract-lpa-source">—</p>
+            </div>
+            <div class="rule-arrow">↓ overridden for Cedar ↓</div>
+            <div class="rule-card override">
+              <div><small>Investor-specific</small><b>Side-letter override</b></div>
+              <strong id="contract-side-rule">—</strong>
+              <p id="contract-side-source">—</p>
+            </div>
+          </article>
+          <article class="contract-panel calculation-panel">
+            <div class="panel-kicker">02 · Deterministic calculation bridge</div>
+            <div class="calculation-rows">
+              <p><span>Commitment</span><strong id="contract-commitment">—</strong></p>
+              <p><span>Quarterly fee @ 0.50%</span><strong id="contract-fee">—</strong></p>
+              <p><span>Base contribution</span><strong id="contract-base">—</strong></p>
+              <p class="calculation-break"><span>Expected under side letter</span><strong id="contract-expected">—</strong></p>
+              <p><span>Administrator supplied</span><strong id="contract-observed">—</strong></p>
+              <p class="calculation-variance"><span>Variance / potential overcall</span><strong id="contract-variance">—</strong></p>
+            </div>
+            <div class="component-bridge"><span>Expected total</span><strong id="contract-component-total">—</strong><small><b id="contract-net-investment">—</b> net investment + <b id="contract-fee-component">—</b> management fee</small></div>
+          </article>
+
+          <article class="contract-panel finding-panel">
+            <div class="panel-kicker">03 · Finding &amp; owned action</div>
+            <div class="contract-finding"><span>High</span><div><code id="contract-finding-code">—</code><h4 id="contract-finding-title">—</h4><p id="contract-finding-detail">—</p></div></div>
+            <div class="contract-work-item"><small id="contract-work-owner">OWNER · —</small><strong id="contract-work-title">—</strong><p id="contract-work-instruction">—</p></div>
+          </article>
+
+          <article class="contract-panel comparison-panel">
+            <div class="panel-kicker">04 · Specificity check</div>
+            <div class="comparison-pass"><span>✓</span><div><h4 id="contract-standard-investor">Orchard Institutional LP</h4><p>No active side-letter override · LPA default applied</p></div><b>Pass</b></div>
+            <div class="comparison-values"><span>Expected <b id="contract-standard-expected">—</b></span><span>Observed <b id="contract-standard-observed">—</b></span></div>
+            <div class="contract-evidence"><small>Evidence manifest</small><code id="contract-evidence-hash">—</code><p>Source sections and SHA-256 identities retained. No legal advice. No payment initiation.</p></div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="workflow-section" id="workflow">
+      <div class="section-head compact"><div><p class="eyebrow">Designed for fund operations</p><h2>From fragmented evidence to controlled close.</h2></div></div>
+      <div class="workflow-grid"><article><b>01</b><span>Understand</span><h3>Auto-detect the workflow</h3><p>Cherry distinguishes capital-call controls, bank-statement working files and investor-level GL migration evidence instead of forcing every workbook into one schema.</p></article><article><b>02</b><span>Reconcile</span><h3>Cross-check the books</h3><p>Deterministic rules analyse the native workbook contract and optional cash feed, preserving deliberate unmatched rows as exceptions.</p></article><article><b>03</b><span>Control</span><h3>Stop silent risk</h3><p>Mapping gaps, unresolved counterparties, changed banking details and weak evidence are surfaced rather than silently filled.</p></article><article><b>04</b><span>Enrich</span><h3>Use AI where it helps</h3><p>Gemini and Agent Studio can enrich document understanding while Cherry retains the financial control boundary.</p></article></div>
+    </section>
+
+    <section class="upload-section" id="upload">
+      <div class="upload-copy"><p class="eyebrow">Bring your own evidence</p><h2>PDFs + fund workbooks → automatically routed analysis.</h2><p>Cherry first checks whether your files match the Ylookup sponsor datasets. Bank-statement working files and investor-level GLs are analysed in their native workflows; capital-call workbooks continue through the governed reconciliation flow. JSON cash evidence is optional.</p><ul><li>PDF capital-call notices or bank statements</li><li>XLSX LP commitments, bank-statement working files, investor GLs or loader samples</li><li>Optional UTF-8 JSON cash/bank export for capital-call cash reconciliation</li><li>Protected deployments require the demo token supplied by the team</li></ul></div>
+      <form class="upload-card" id="upload-form"><label><span>Documents · PDF(s)</span><input id="capital-call-input" type="file" accept="application/pdf,.pdf" multiple required><small id="capital-call-count">Select one or more PDFs</small></label><label><span>Fund workbooks · Excel workbook(s)</span><input id="commitments-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple required><small id="commitments-count">LP commitments, bank working files, investor GLs and loader samples are supported</small></label><label><span>Fund cash transactions · JSON <small>(optional)</small></span><input id="cash-input" type="file" accept=".json,application/json"><small>Leave blank when the sponsor workflow does not use a JSON cash feed</small></label><label><span>Control date</span><input id="as-of-input" type="date" value="2026-09-05"></label><label><span>Demo upload token <small>(protected deployment only)</small></span><input id="upload-token" type="password" autocomplete="off" placeholder="Not stored in the browser"></label><button class="button primary" type="submit">Analyse selected evidence <span>→</span></button><button class="button clear-memory-button" id="clear-upload-memory" type="button">Clear uploaded data &amp; memory</button><p class="form-message" id="upload-message">Cherry will auto-detect the workbook contract before applying workflow-specific controls.</p><p class="memory-note">Clear removes selected files, rendered analysis and ephemeral server workflow memory. Raw PDF/XLSX upload bytes are request-scoped and are not retained by these private-markets upload endpoints.</p><label id="batch-case-picker" class="hidden"><span>Processed cases</span><select id="batch-case-select" aria-label="Choose processed case to review"></select></label></form>
+      <div id="dataset-results" class="dataset-results hidden" aria-live="polite"></div>
+    </section>
+
+    <section class="boundary"><div><span>Decision boundary</span><h2>AI interprets evidence.<br>Controls decide what can proceed.</h2></div><p>Cherry FundOps is the control authority. AI enrichment cannot initiate payments, bypass controls or independently approve changed bank instructions.</p></section>
+  </main>
+
+  <footer><a class="brand" href="#top"><span class="brand-mark">C</span><span>Cherry <strong>FundOps</strong></span></a><p>Built for Rebuild Private Markets · Ylookup × Encode</p><p>Native sponsor datasets + governed controls · No payment initiation</p></footer>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div><div class="loading hidden" id="loading"><div class="loader"></div><strong>Analysing the evidence batch</strong><span>Detect workflow → validate → reconcile → surface exceptions</span></div>
+  <script src="/static/app.js" defer></script>
+  <script src="/static/clear_dialog.js" defer></script>
+  <script src="/static/fund_manager.js" defer></script>
+  <script src="/static/fund_manager_completion.js" defer></script>
+  <script src="/static/nav_quality_controller.js" defer></script>
 </body>
 </html>

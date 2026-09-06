@@ -13,12 +13,12 @@ from pydantic import TypeAdapter, ValidationError
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from app.cash_application.router import router as controller_review_router
 from app.config import get_settings
 from app.container import get_engine
 from app.contract_router import router as contract_router
 from app.document_ai import GeminiDocumentExtractor, GeminiUnavailable
 from app.fund_manager_nav_router import router as fund_manager_nav_router
+from app.fund_manager_report_router import router as fund_manager_report_router
 from app.fund_manager_router import router as fund_manager_router
 from app.models import ApprovalRequest, BankTransaction, RejectionRequest
 from app.nav_quality_router import router as nav_quality_router
@@ -69,8 +69,8 @@ app.include_router(session_router)
 app.include_router(nav_quality_router)
 app.include_router(contract_router)
 app.include_router(statement_review_router)
-app.include_router(controller_review_router)
 app.include_router(fund_manager_router)
+app.include_router(fund_manager_report_router)
 app.include_router(fund_manager_nav_router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -116,11 +116,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 @app.get("/", include_in_schema=False)
 async def home() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
-
-
-@app.get("/controller-review", include_in_schema=False)
-async def controller_review_page() -> FileResponse:
-    return FileResponse(STATIC_DIR / "controller_review.html")
 
 
 @app.get("/health", tags=["operations"])

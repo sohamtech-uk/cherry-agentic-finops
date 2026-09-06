@@ -35,6 +35,9 @@ jobs:
       - name: Check browser JavaScript
         run: |
           node --check app/static/app.js
+          node --check app/static/fund_manager.js
+          node --check app/static/fund_manager_completion.js
           node --check app/static/nav_manager.js
+          node --check app/static/nav_quality_controller.js
       - name: Build container
         run: docker build --tag cherry-agent:test .

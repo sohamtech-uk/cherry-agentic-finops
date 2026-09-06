@@ -62,13 +62,7 @@ jobs:
           test -n "${ACTIVE_ACCOUNT}" || { echo "Google Cloud authentication produced no active account." >&2; exit 1; }
           echo "Authenticated deployment identity: ${ACTIVE_ACCOUNT}"
           echo "Verified target project access: ${PROJECT_ID}"
-          gcloud firestore databases describe \
-            --database='(default)' \
-            --project="${PROJECT_ID}" \
-            --format='value(name)' >/dev/null || {
-              echo "The default Firestore database is missing or inaccessible in ${PROJECT_ID}." >&2
-              exit 1
-            }
+          echo "Firestore availability will be verified by the deployed service health check."
 
       - name: Configure Artifact Registry authentication
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
