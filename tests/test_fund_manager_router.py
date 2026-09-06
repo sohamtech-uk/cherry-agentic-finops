@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import json
+import zipfile
 from typing import Any
 
 import pytest
@@ -12,6 +14,14 @@ from app.fund_manager_cases import case_store
 from app.rate_limit import limiter
 
 client = TestClient(app)
+
+
+def _zip_bytes(members: dict[str, bytes]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w") as archive:
+        for name, content in members.items():
+            archive.writestr(name, content)
+    return buffer.getvalue()
 
 
 @pytest.fixture(autouse=True)
@@ -250,6 +260,66 @@ def test_classify_compatibility_endpoint_still_works() -> None:
     )
     assert response.status_code == 200
     assert response.json()["sources"][0]["detected_type"] == "positions"
+
+
+def test_classify_endpoint_decompresses_a_zip_of_evidence_files() -> None:
+    trades = json.dumps([{"trade_id": "T1", "side": "buy"}]).encode()
+    archive = _zip_bytes(
+        {
+            "positions.json": _positions(),
+            "trades.json": trades,
+            "__MACOSX/._positions.json": b"junk",
+            "notes/": b"",
+        }
+    )
+
+    response = client.post(
+        "/api/fund-manager/classify",
+        files=[("files", ("evidence.zip", archive, "application/zip"))],
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_count"] == 2
+    assert {source["filename"] for source in body["sources"]} == {"positions.json", "trades.json"}
+    assert {source["detected_type"] for source in body["sources"]} == {"positions", "trades"}
+
+
+def test_case_creation_accepts_a_zip_of_evidence_files() -> None:
+    archive = _zip_bytes({"positions.json": _positions()})
+
+    response = client.post(
+        "/api/fund-manager/cases",
+        files=[("files", ("evidence.zip", archive, "application/zip"))],
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["classification"]["sources"][0]["filename"] == "positions.json"
+    assert body["classification"]["sources"][0]["detected_type"] == "positions"
+
+
+def test_classify_endpoint_rejects_a_corrupt_zip() -> None:
+    response = client.post(
+        "/api/fund-manager/classify",
+        files=[("files", ("evidence.zip", b"not-a-zip", "application/zip"))],
+    )
+
+    assert response.status_code == 422
+
+
+def test_classify_endpoint_rejects_a_zip_with_too_many_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(fund_manager_router, "MAX_FILES", 2)
+    archive = _zip_bytes({f"file-{i}.json": b"[]" for i in range(3)})
+
+    response = client.post(
+        "/api/fund-manager/classify",
+        files=[("files", ("evidence.zip", archive, "application/zip"))],
+    )
+
+    assert response.status_code == 413
 
 
 def test_analyse_compatibility_endpoint_still_uses_agentic_flow() -> None:
