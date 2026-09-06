@@ -1,65 +1,56 @@
-# Cherry FundOps — Local Setup Guide
+# Cherry CFO — Local setup for the Syndicate branch
 
-This guide explains how to run the Cherry FundOps website and API locally for development, demos, and testing.
+This guide runs the **Syndicate NAV Quality Controller** locally from `ui/syndicate-cfo-canvas`.
 
-## 1. What runs locally
+Public demo: https://cherry-cfo-canvas.vercel.app
 
-The repository contains one FastAPI application that serves both the browser UI and the API. The default local configuration uses in-memory persistence, so no database is required for a basic setup.
-
-Local development can run in two modes:
-
-- **Deterministic/local mode** — suitable for synthetic demos, deterministic controls, static UI, API documentation, and many tests. Gemini credentials are optional.
-- **Agentic mode** — required for Fund Manager planning, execution orchestration, and investigation stages that call Google ADK/Gemini.
-
-The financial boundary is unchanged in both modes: Cherry FundOps performs review and decision support only; it does not initiate payments or silently modify an official NAV or ledger.
-
-## 2. Prerequisites
+## 1. Prerequisites
 
 Required:
 
 - Git
-- Python **3.11 or newer**
+- Python 3.11+
 - `pip`
 
 Recommended:
 
-- Python 3.12, matching the repository Docker image
-- `make` for convenience commands
-- Node.js for the browser JavaScript syntax quality gate
-- Docker Desktop or Docker Engine for container-based local runs
-- Google Cloud CLI only if you want to use Vertex AI locally
+- Python 3.12
+- Node.js for browser JavaScript checks
+- Docker for the container quality gate
+- Google Cloud CLI only when using Vertex AI locally
 
-Check your versions:
-
-```bash
-git --version
-python3 --version
-python3 -m pip --version
-```
-
-## 3. Clone the repository
-
-Using SSH:
-
-```bash
-git clone git@github.com:sohamtech-uk/cherry-agentic-finops.git
-cd cherry-agentic-finops
-```
-
-Or using HTTPS:
+## 2. Clone and select the Syndicate branch
 
 ```bash
 git clone https://github.com/sohamtech-uk/cherry-agentic-finops.git
 cd cherry-agentic-finops
+git fetch origin
+git switch ui/syndicate-cfo-canvas
 ```
 
-## 4. Create a Python virtual environment
+Confirm:
+
+```bash
+git branch --show-current
+```
+
+Expected:
+
+```text
+ui/syndicate-cfo-canvas
+```
+
+Do not merge this branch to `main` as part of the hackathon workflow.
+
+## 3. Python environment
 
 macOS / Linux:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
 ```
 
 Windows PowerShell:
@@ -67,94 +58,38 @@ Windows PowerShell:
 ```powershell
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
-
-Upgrade pip:
-
-```bash
 python -m pip install --upgrade pip
-```
-
-## 5. Install the application
-
-Install the application with development dependencies:
-
-```bash
 python -m pip install -e ".[dev]"
 ```
 
-Equivalent convenience command:
-
-```bash
-make install
-```
-
-The project requires Python 3.11+ and installs FastAPI, Google ADK, Google Gen AI, OpenPyXL, pypdf, ReportLab, Firestore/Storage clients, testing tools, Ruff, and mypy from `pyproject.toml`.
-
-## 6. Create the local environment file
-
-Copy the checked-in example:
+## 4. Environment file
 
 ```bash
 cp .env.example .env
 ```
 
-Windows PowerShell:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-For the simplest local run, the important values are:
+A minimal local configuration can use in-memory state:
 
 ```env
 CHERRY_ENVIRONMENT=local
 CHERRY_PUBLIC_BASE_URL=http://localhost:8080
 CHERRY_PERSISTENCE_BACKEND=memory
-CHERRY_GEMINI_MODEL=gemini-3.7-flash
 ```
 
-With `CHERRY_PERSISTENCE_BACKEND=memory`, Fund Manager cases stay only in the running Python process and are lost when the server restarts.
+The NAV case store is ephemeral in memory and resets when the process stops.
 
-## 7. Gemini / Google configuration
+## 5. Model-backed agent stages
 
-### Option A — run without Gemini credentials
+Deterministic NAV controls do not need a model provider. Agentic planning/investigation stages do.
 
-You can leave the Google fields empty when you only need deterministic demos, the website shell, API docs, and non-Gemini functionality.
-
-```env
-GOOGLE_CLOUD_PROJECT=
-GOOGLE_API_KEY=
-```
-
-Some Fund Manager agentic stages will not be able to complete without a configured Gemini provider.
-
-### Neatlogs tracing
-
-To send Google ADK and Gemini agent traces to the project's Neatlogs workspace, set the project
-API key in the ignored `.env` file:
-
-```env
-NEATLOGS_API_KEY=YOUR_PROJECT_KEY
-NEATLOGS_WORKFLOW_NAME=fund-manager-control-review
-```
-
-Leave `NEATLOGS_API_KEY` empty to run without exporting traces. Never commit a populated key.
-
-### Option B — Gemini Developer API
-
-Set:
+### Gemini Developer API
 
 ```env
 GOOGLE_GENAI_USE_VERTEXAI=false
 GOOGLE_API_KEY=YOUR_LOCAL_KEY
 ```
 
-Never commit the populated `.env` file or API key.
-
-### Option C — Vertex AI
-
-Set:
+### Vertex AI
 
 ```env
 GOOGLE_GENAI_USE_VERTEXAI=true
@@ -162,33 +97,99 @@ GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID
 GOOGLE_CLOUD_LOCATION=global
 ```
 
-Authenticate Application Default Credentials:
+Then authenticate Application Default Credentials:
 
 ```bash
 gcloud auth application-default login
 ```
 
-Your Google Cloud identity/project must have permission to use the configured Gemini model.
+Never commit populated secrets.
 
-## 8. Upload protection in local mode
+## 6. Neatlogs observability — optional
 
-The repository includes `CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN` for protected deployments.
+The branch includes Neatlogs instrumentation for agent tracing.
 
-For normal local development, it can remain empty:
+To enable export:
 
 ```env
-CHERRY_PRIVATE_MARKETS_UPLOAD_TOKEN=
+NEATLOGS_API_KEY=YOUR_PROJECT_KEY
+NEATLOGS_WORKFLOW_NAME=cherry-cfo-syndicate
 ```
 
-Do not copy a production upload token into screenshots, sample files, commits, or documentation.
+Leave the key empty to run without trace export. Observability is not financial authority and should not change a control result.
 
-## 9. Optional services
+## 7. Start the application
 
-### Firestore persistence
+```bash
+uvicorn app.api:app --reload --port 8080
+```
 
-The default local setup uses memory and requires no database.
+or:
 
-To exercise Firestore-backed Fund Manager cases:
+```bash
+make run
+```
+
+Open:
+
+```text
+http://localhost:8080
+http://localhost:8080/api/docs
+```
+
+The root page on this branch is the Cherry CFO NAV canvas workbench.
+
+## 8. Judge-facing NAV API
+
+The main case workflow is:
+
+```text
+POST /api/fund-manager/cases
+POST /api/fund-manager/cases/{case_id}/evidence
+GET  /api/fund-manager/cases/{case_id}
+POST /api/fund-manager/cases/{case_id}/nav/readiness
+POST /api/fund-manager/cases/{case_id}/nav/reconcile
+POST /api/fund-manager/cases/{case_id}/nav/review
+POST /api/fund-manager/cases/{case_id}/nav/decision
+```
+
+Typical local flow:
+
+1. upload one or more evidence sources;
+2. inspect classification;
+3. call NAV readiness;
+4. run deterministic controls if readiness permits;
+5. run agent review when a reconciliation result exists;
+6. record a human decision.
+
+## 9. Evidence that supports the NAV controller
+
+The workbench accepts mixed files, but a file is useful to a control only when it is recognised and passes its input contract.
+
+Useful evidence families include:
+
+- administrator NAV summary;
+- investor-level GL;
+- structured side-letter rules;
+- NAV workbooks;
+- financial statements;
+- supporting PDF / Excel / CSV / JSON evidence.
+
+A supported investor-level GL can enable a partial review without an administrator NAV summary. Missing evidence remains explicit.
+
+## 10. Large Excel files
+
+The public Vercel UI includes browser-side transport optimisation because hosted request bodies have size limits.
+
+A local Uvicorn run does not use that Vercel transport path, so local testing is preferable when you need to inspect large raw workbooks without browser compaction.
+
+The hosted optimisation is not a financial shortcut: after transport, the backend still classifies and validates the structured workbook before enabling NAV controls.
+
+## 11. Optional persistence
+
+Memory is simplest for the hackathon.
+
+Firestore-backed case persistence is available where configured:
 
 ```env
 CHERRY_PERSISTENCE_BACKEND=firestore
@@ -196,135 +197,11 @@ GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID
 CHERRY_FUND_MANAGER_FIRESTORE_COLLECTION=fund_manager_cases
 ```
 
-You will also need valid Google Application Default Credentials.
+You will need Google Application Default Credentials with the appropriate permissions.
 
-### FundOps Agent Studio
+## 12. Quality gates
 
-Agent Studio is optional. If it is not configured, Cherry should continue its local strict control analysis and report enrichment as unavailable.
-
-For a local/non-GCP Agent Studio service:
-
-```env
-FUNDOPS_STUDIO_API_URL=http://localhost:PORT
-FUNDOPS_STUDIO_API_TOKEN=YOUR_LOCAL_TOKEN
-FUNDOPS_STUDIO_TIMEOUT_SECONDS=25
-```
-
-For a private Cloud Run Agent Studio service, use the service URL and audience instead:
-
-```env
-FUNDOPS_STUDIO_API_URL=https://SERVICE_URL
-FUNDOPS_STUDIO_AUDIENCE=https://SERVICE_URL
-```
-
-### Cherry Money read-only bridge
-
-Optional:
-
-```env
-CHERRY_MONEY_API_URL=https://cherrymoney.co.uk
-CHERRY_MONEY_API_TOKEN=
-```
-
-The private-markets workflow must remain read-only against Cherry Money.
-
-## 10. Start the application
-
-Recommended development command:
-
-```bash
-uvicorn app.api:app --reload --port 8080
-```
-
-Or:
-
-```bash
-make run
-```
-
-You should see Uvicorn listening on `http://127.0.0.1:8080` or `http://localhost:8080`.
-
-## 11. Useful local URLs
-
-Open these in a browser:
-
-| Purpose | URL |
-| --- | --- |
-| Cherry FundOps website | http://localhost:8080 |
-| Fund Manager section | http://localhost:8080/#fund-manager |
-| API documentation | http://localhost:8080/api/docs |
-| Main service health | http://localhost:8080/health |
-| Fund Manager health | http://localhost:8080/api/fund-manager/health |
-| Private-markets health | http://localhost:8080/api/private-markets/health |
-| Integration health | http://localhost:8080/api/private-markets/integration/health |
-| NAV Quality health | http://localhost:8080/api/nav-quality/health |
-| Statement Review health | http://localhost:8080/api/statement-review/health |
-
-Quick health check:
-
-```bash
-curl http://localhost:8080/health
-```
-
-Expected shape:
-
-```json
-{"status":"ok","service":"cherry-agent","version":"0.1.0"}
-```
-
-## 12. Fund Manager local workflow
-
-The staged Fund Manager experience is:
-
-```text
-Upload evidence
-  → Evidence Review
-  → Review Plan
-  → Control Results
-  → Findings Review
-  → Human Decision
-  → Final report / Start new case
-```
-
-The planning and investigation stages are agentic, while financial calculations and reconciliations remain in deterministic tools.
-
-Typical accepted local evidence includes PDF, XLSX, CSV, JSON, TXT, and ZIP batches, depending on the workflow being exercised.
-
-## 13. Generate synthetic backup fixtures
-
-```bash
-make ylookup-fixtures
-```
-
-This generates the checked demo fixture shapes used by the private-markets workflows.
-
-## 14. Run with Docker
-
-The repository Docker image uses Python 3.12 and starts Uvicorn on port 8080.
-
-Using Docker Compose:
-
-```bash
-docker compose up --build
-```
-
-Then open:
-
-```text
-http://localhost:8080
-```
-
-Stop with:
-
-```bash
-docker compose down
-```
-
-The compose configuration forces local mode and in-memory persistence.
-
-## 15. Quality checks before opening a PR
-
-Run the same important checks used by CI:
+Run before submission or a release candidate:
 
 ```bash
 ruff check .
@@ -332,79 +209,38 @@ ruff format --check .
 mypy app agents
 pytest
 python -m compileall -q app agents
-node --check app/static/app.js
+node --check app/static/cfo_canvas.js
+node --check app/static/cfo_canvas_patch.js
+docker build --tag cherry-cfo:test .
 ```
 
-The repository also checks browser JavaScript and container buildability in CI.
+## 13. Troubleshooting
 
-Build the container locally:
+### Canvas loads but agent review fails
 
-```bash
-docker build --tag cherry-agent:test .
-```
+Check model configuration. The deterministic evidence/readiness/control path can still be demonstrated without model access.
 
-Or use the Make targets:
+### Evidence uploads but readiness remains `needs_input`
 
-```bash
-make lint
-make test
-```
+Inspect classification in the UI or case payload. A recognised but unsupported/invalid file does not count as the required NAV input. Add a supported administrator NAV summary or investor-level GL.
 
-## 16. Common problems
+### Hosted demo reports a request-size problem
 
-### `python` or `python3` is not found
+Hard refresh the Vercel page so the current transport-safe uploader is loaded. Large Excel evidence is optimised in the browser and may be sent as separate requests.
 
-Install Python 3.11+ and reopen the terminal. On Windows, try `py` instead of `python3`.
+### An Excel file is classified as unknown
 
-### The website opens but a Fund Manager agent step fails
+The classifier inspects workbook structure. Check that expected sheets/headers are present; filenames alone are not treated as proof.
 
-Check whether Gemini is configured. Fund Manager planning, control orchestration, and exception investigation use Google ADK/Gemini. Deterministic-only features can still work without those credentials.
+### `NEATLOGS_API_KEY` is absent
 
-### Vertex AI authentication error
+That is fine. Trace export is optional and the finance workflow must continue without it.
 
-Run:
+## 14. Hackathon provenance
 
-```bash
-gcloud auth application-default login
-```
+The official Syndicate start boundary and AO session record are in:
 
-Then confirm the correct project is configured in `.env`.
+- `SYNDICATE_BUILD_LOG.md`
+- `PREEXISTING_CODE.md`
 
-### Port 8080 is already in use
-
-Run on another port:
-
-```bash
-uvicorn app.api:app --reload --port 8081
-```
-
-If you change the port, update `CHERRY_PUBLIC_BASE_URL` accordingly.
-
-### Firestore errors locally
-
-Switch back to the no-dependency local store:
-
-```env
-CHERRY_PERSISTENCE_BACKEND=memory
-```
-
-Restart Uvicorn after changing `.env`.
-
-### Stale browser JavaScript or CSS
-
-Use a hard refresh after rebuilding/restarting:
-
-- macOS Chrome: `Cmd + Shift + R`
-- Windows/Linux Chrome: `Ctrl + Shift + R`
-
-## 17. Development safety notes
-
-- Keep `.env` local and never commit secrets.
-- Do not use production fund data for local development unless explicitly authorised and appropriately protected.
-- Prefer synthetic/anonymised evidence for demos and tests.
-- Cherry FundOps is a control/review system; do not extend local demos to initiate payments.
-- Treat report outputs as decision-support evidence, not as automatic ledger or NAV writes.
-
-## 18. Next documentation
-
-For the website layout, system architecture, and staged demo workflow, see [Website, System & Workflow Guide](WEBSITE_SYSTEM_AND_WORKFLOW.md).
+The source tree still contains pre-existing modules with historical private-markets names, including `ylookup_*`. Those remain for compatibility; the current branch documentation and judge-facing experience are **Syndicate / Cherry CFO NAV Quality Controller**.

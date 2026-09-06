@@ -1,123 +1,213 @@
-# Building Cherry Agent: Human-Governed Autonomous Finance Operations for SMEs
+# Building Cherry CFO for Syndicate: From NAV Evidence to Human-Governed Sign-Off
 
-> **Hackathon disclosure:** I created this article specifically for the purposes of entering the **Google All Things Agentic Hackathon**.
+> **Hackathon disclosure:** This document describes the Cherry CFO submission for **Syndicate by Maximor — Track 2: Autonomous Office of the CFO**. The repository includes pre-existing finance infrastructure; the post-kickoff build boundary is documented in `SYNDICATE_BUILD_LOG.md` and `PREEXISTING_CODE.md`.
 
-Small organisations rarely struggle because they cannot create an invoice or upload a receipt. They struggle because the work between those steps is fragmented: documents arrive in different formats, transactions need matching, exceptions need approval, and month-end evidence must still be assembled for a human reviewer.
+## The problem
 
-Cherry Agent is our attempt to turn that fragmented process into a controlled agentic workflow.
+Fund controllers do not usually receive NAV evidence as one clean, machine-ready object.
 
-## The problem we wanted to solve
+A close pack can contain administrator workbooks, investor-level GL exports, statements, side-letter terms, bank/custodian evidence and supporting documents. Some arrive together; others arrive later. Before a controller can sign off, someone has to answer a chain of questions:
 
-For many SMEs, charities and community organisations, finance operations still look like this:
+- What evidence did we receive?
+- Which controls can actually run from it?
+- Which balances foot?
+- What is missing?
+- Which breaks share a root cause?
+- What needs to go back to the administrator?
+- Does a human have enough support to approve the NAV?
 
-1. A bill or receipt arrives by email or upload.
-2. Someone manually reads the supplier, date, reference, subtotal, VAT and total.
-3. They choose an accounting category.
-4. They search the bank feed for a likely transaction.
-5. They decide whether the match is safe or needs approval.
-6. They preserve screenshots, notes and supporting documents for month end.
+That is the workflow we wanted Cherry CFO to automate.
 
-Each task is small, but together they create delay, inconsistency and a weak audit trail.
+## What we built
 
-We wanted an agent that could complete the repetitive work autonomously while making its reasoning visible and preserving a strict human-control boundary.
+**Cherry CFO** is an autonomous finance agent with a judge-facing **NAV Quality Controller** workflow.
 
-## What Cherry Agent does
+The operating model is:
 
-Cherry Agent turns an invoice or receipt into a governed finance-operations workflow:
+```text
+Evidence → Readiness → Deterministic NAV Controls → Exceptions
+        → Agentic Investigation → Human Decision → Audit-Ready Review
+```
 
-- **Document understanding:** Gemini extracts structured supplier, reference, date, currency, subtotal, tax, total and line-item information.
-- **Accounting suggestion:** the agent proposes a conservative bookkeeping category and VAT treatment.
-- **Transaction matching:** deterministic controls rank candidate bank transactions using amount, date, reference, supplier and currency factors.
-- **Risk decision:** policy rules determine whether the item can be reconciled automatically, requires human approval, or needs more evidence.
-- **Human handoff:** reviewers can approve or reject an exception with an attributable note.
-- **Audit evidence:** every important action is added to a tamper-evident event chain, and an evidence pack can be downloaded for review.
+The important design decision is that the model is not the financial authority.
 
-Cherry Agent is deliberately limited to **accounting reconciliation**. It does **not** initiate payments.
+> **AI understands. Deterministic controls verify. AI investigates. Humans decide.**
 
-## Why this is agentic rather than a chatbot
+## Evidence first
 
-The system does more than answer a question. It works toward an operational goal across several steps:
+The workbench accepts mixed evidence rather than requiring the user to manually map every file before starting.
 
-1. interpret an unstructured document;
-2. transform it into validated structured data;
-3. inspect candidate financial records;
-4. apply matching and risk controls;
-5. decide the next permitted action;
-6. execute that action or route the case to a person;
-7. preserve evidence of what happened.
+Cherry classifies each source, validates recognised schemas and preserves evidence identity. Unknown or invalid sources remain visible as review items instead of being silently coerced into a convenient interpretation.
 
-The agent combines probabilistic AI with deterministic financial controls. Gemini handles ambiguity in documents, while explicit scoring and policy rules control what the system is allowed to do.
+This gives the system a truthful answer to the first controller question: **what evidence do we actually have?**
 
-## Architecture
+## Readiness before reconciliation
 
-![Cherry Agent architecture](images/architecture.jpg)
+A common automation mistake is to jump directly from upload to “analysis complete.”
 
-The implementation uses:
+Cherry adds a readiness stage first.
 
-- **Google Gemini through Vertex AI** for structured multimodal document extraction;
-- **Google Agent Development Kit patterns** for orchestrating specialist finance tasks;
-- **FastAPI** for the application and workflow API;
-- **Cloud Run** for the containerised runtime;
-- **Firestore** for workflow state;
-- **Pub/Sub** for finance-workflow events;
-- **Cloud Storage** for evidence retention;
-- an external Google Cloud HTTPS load balancer for the public application.
+If an investor-level GL is present but an administrator NAV summary is not, Cherry can still perform the controls supported by the GL while explicitly showing the missing administrator summary as an evidence gap. It does not invent the missing NAV figures to make the workflow look complete.
 
-The browser interface presents the document extraction, candidate matches, policy decision, approval controls and audit evidence as one visual narrative.
+That means the system can be useful with partial evidence without pretending partial evidence is complete evidence.
 
-## The control model
+## Deterministic financial controls
 
-A finance agent should not treat confidence as permission.
+Authoritative NAV checks run in deterministic Python code.
 
-Cherry Agent separates three ideas:
+Depending on the evidence supplied, the control layer can support checks such as:
 
-- **Extraction confidence:** how reliable the document interpretation appears.
-- **Match score:** how strongly a bank transaction fits the document.
-- **Action policy:** whether the system is permitted to reconcile without a person.
+- balance-sheet footing;
+- NAV bridge footing;
+- independent NAV recalculation;
+- investor-level GL validation;
+- balance-sheet versus source-ledger checks;
+- investor-capital reconciliation; and
+- source-backed side-letter rule validation.
 
-A high extraction confidence cannot override a currency mismatch, an already-reconciled transaction, a material amount variance or a policy threshold. Exceptions are sent to a human with the relevant evidence and reasoning visible.
+A language model can help choose or explain a supported workflow, but it cannot make an arithmetic break disappear.
 
-## Three demo paths
+## Agentic exception investigation
 
-The public demo contains three scenarios:
+The agent becomes most valuable after the deterministic controls have done their work.
 
-### 1. Autonomous reconciliation
+Instead of giving a controller a flat list of warnings, the agent can help consolidate:
 
-A high-quality invoice and a strong bank match pass the deterministic controls. The workflow is reconciled automatically and the audit chain records the decision.
+- related findings;
+- likely root causes;
+- missing evidence;
+- remediation steps; and
+- the next supported human action.
 
-### 2. Human approval
+This is the part of finance work where context and synthesis are valuable, while the underlying accounting result remains grounded in deterministic state.
 
-The document and transaction are plausible, but the policy requires a reviewer. The reviewer can inspect the factors, approve the match and add an attributable note.
+## Human judgement as a product state
 
-### 3. Evidence required
+Human review is not a bolt-on “approve” button at the end.
 
-The available information is not strong enough to reconcile safely. The workflow pauses and asks for additional evidence rather than guessing.
+The workflow explicitly supports decisions such as:
+
+- Approve NAV;
+- Approve with exception;
+- Request evidence;
+- Return to administrator; or
+- Escalate.
+
+The user can inspect the evidence, control state and agentic review before recording the outcome.
+
+Cherry CFO does not silently amend an official NAV, post a correcting ledger entry or initiate a payment.
+
+## A dynamic finance workspace
+
+For Syndicate we wanted the interface to show how the finance work is connected, not just display a conventional dashboard.
+
+The **Canvas** view turns evidence and generated control objects into a visual map. Documents, readiness, controls, exceptions, agent review and human decision can appear as connected components with inspectable provenance.
+
+The **Document** view turns the same case state into a controller-style review report.
+
+That dual representation makes the system useful for both investigation and communication:
+
+- the canvas is good for understanding the work;
+- the document is good for reviewing and discussing the result.
+
+## How we built it
+
+The repository uses:
+
+- **Python / FastAPI** for the finance workflow and API;
+- **Pydantic** for typed boundaries;
+- **OpenPyXL and deterministic Python controls** for workbook and finance logic;
+- **Google ADK / Gemini** for bounded model-backed planning and investigation where configured;
+- **AO (Agent Orchestrator)** for coordinating hackathon engineering sessions;
+- **Codex** for implementation/review work during those sessions;
+- **Neatlogs** for agent observability when configured;
+- **JavaScript / CSS** for the dynamic canvas workbench; and
+- **Vercel** for the public Syndicate demo.
+
+## What was difficult
+
+### Defining the autonomy boundary
+
+The hardest question was not “can an LLM read this?” It was:
+
+> **When is the system allowed to continue, and when should it stop?**
+
+Finance automation needs more than a confidence score. A confident explanation cannot waive a missing source, broken balance, unsupported rule or human authority boundary.
+
+### Incomplete evidence
+
+Real close packs arrive incrementally. Designing readiness separately from reconciliation allowed Cherry to remain useful without hiding missing evidence.
+
+### Making provenance visible
+
+A controller needs to know where a finding came from. Evidence lineage therefore had to be part of the product experience, not only a backend log.
+
+### Hosted upload constraints
+
+The anonymised Excel evidence used for testing can be large. The public Vercel demo therefore performs browser-side transport optimisation and can split evidence into smaller requests. That optimisation changes transport representation, not the product's authority model: the backend still validates the structured evidence it receives before enabling controls.
+
+### Keeping the demo narrow
+
+The repository contains multiple finance-control capabilities. For the final Syndicate story we deliberately narrowed the judge-facing experience to one workflow: **NAV Quality Control**.
 
 ## What we learned
 
-### Probabilistic AI and deterministic controls work better together
+### Useful autonomy is not maximum autonomy
 
-Gemini is valuable for understanding varied invoices and receipts, but the final financial action should be governed by explicit controls that can be inspected and tested.
+The best finance agent is not the one that makes the most decisions. It is the one that removes repetitive investigation while making the remaining human decisions safer and faster.
 
-### Explainability must be part of the workflow
+### Workflow-shaped tools are easier to trust
 
-A score alone is not enough. Reviewers need to know which factors contributed to the score, why a policy was triggered and which actor approved the exception.
+Controllers think in actions such as “assess evidence,” “run NAV controls,” “investigate exceptions” and “record a decision.” Those are better agent boundaries than exposing low-level database or calculation operations directly.
 
-### Audit evidence should be generated as work happens
+### Evals should grade state, not eloquence
 
-Month-end evidence is more reliable when it is assembled from the workflow event stream instead of reconstructed later from memory, screenshots and messages.
+A finance agent should be evaluated on whether it ran the correct control, preserved evidence, blocked unsupported automation and required human review at the right moment — not just whether its explanation sounds plausible.
 
-### A useful agent needs a clear boundary
+### Visualising agent work helps trust
 
-Cherry Agent automates reconciliation and evidence preparation, but it does not initiate payments. That boundary keeps the hackathon prototype focused on a valuable, testable and human-governed use case.
+When a reviewer can see:
 
-## What comes next
+```text
+what came in → what was checked → what failed → why → what needs judgement
+```
 
-The next stage is to connect the workflow to live Open Banking feeds and accounting records, while preserving the same control model. We also want to add supplier-query handling, richer exception resolution and accountant-facing month-end workspaces.
+the system is easier to interrogate than a black-box conversational answer.
 
-## Try the project
+## AO and build provenance
 
-- **Live application:** [finops.cherrymoney.co.uk](https://finops.cherrymoney.co.uk)
-- **Source code:** [sohamtech-uk/cherry-agentic-finops](https://github.com/sohamtech-uk/cherry-agentic-finops)
+AO was mandatory for Syndicate, so we kept explicit session and commit evidence rather than treating the orchestration tool as a last-minute demo dependency.
 
-Cherry Agent demonstrates a practical form of agentic automation: not an unrestricted autonomous accountant, but a finance-operations agent that performs repetitive work, explains its decisions, respects policy boundaries and knows when to hand control back to a person.
+The build record is in:
+
+- `SYNDICATE_BUILD_LOG.md`
+- `SYNDICATE_TRACK2_PLAN.md`
+- `SYNDICATE_DOMAIN_RESEARCH.md`
+- `SYNDICATE_EVALS.md`
+- `AO_SESSION_01_CFO_WORKFLOW.md`
+
+The repository also records a pre-kickoff baseline so pre-existing work is not presented as hackathon-created work.
+
+## What's next
+
+The NAV Quality Controller is one Office of the CFO workflow. The same governed architecture can extend to:
+
+- month-end close;
+- account reconciliation;
+- cash application;
+- AP review;
+- invoice processing;
+- audit evidence gathering;
+- variance investigation;
+- management reporting; and
+- controller close checklists.
+
+For NAV specifically, the next steps are persistent workspaces, administrator/custodian connectors, a broader control library, policy/materiality configuration, multi-period comparisons, reviewer assignment and exportable evidence packs.
+
+## Try it
+
+**Live Syndicate workbench:** https://cherry-cfo-canvas.vercel.app
+
+**Source branch:** `ui/syndicate-cfo-canvas`
+
+Cherry CFO's goal is not to replace financial judgement. It is to make sure the controller spends that judgement on the cases that genuinely need it.

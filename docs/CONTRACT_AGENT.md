@@ -1,66 +1,64 @@
-# Contract Agent — NAV quality-control integration
+# Contract Agent — optional Syndicate NAV control specialist
 
-## Why this exists
+## Purpose
 
-The fund-manager interview identified a recurring failure: administrator calculations do not always
-apply bespoke investor economics from side letters. The sponsor pack contains no LPA or side letter,
-so the public example uses clearly labelled synthetic evidence: Cedar Pension Trust should pay
-GBP 1,000,000 under its override, but the administrator applied the LPA default and reported
-GBP 1,100,000. The deterministic control catches the GBP 100,000 potential overcall.
+Cherry CFO's final Syndicate workflow is the **NAV Quality Controller**. Contract and side-letter evidence is an optional specialist input when an investor-specific term can change a NAV-related control.
 
-This component is the contract-control slice of NAV Quality Control & Reconciliation. It does not
-calculate an official NAV and does not let a language model turn prose directly into an approved
-number.
+This component exists to keep a language model from turning prose directly into financial authority.
 
-## Processing boundary
+The contract path is:
 
 ```text
 LPA + investor side letter
           ↓
-text-preserving parser
+text-preserving parsing / retrieval
           ↓
-section/page search and effective-date detection
+source-backed clause + effective date
           ↓
-structured rule with citations
+structured investor rule with citation
           ↓
-deterministic Decimal calculation
+deterministic finance control
           ↓
 PASS / FAIL / REVIEW_REQUIRED
 ```
 
-The language-model specialist chooses retrieval tools and explains evidence. Python controls source
-precedence and financial arithmetic. A person resolves ambiguity.
+A model may choose retrieval tools and explain the evidence. Deterministic code controls rule precedence and arithmetic. A human resolves ambiguity.
+
+## Why it matters to NAV review
+
+Fund controllers may need to verify that administrator calculations reflect bespoke investor economics. A side letter can override a fund-level default for one investor without changing the rule for everyone else.
+
+Cherry therefore requires a source-backed rule before a contract term can affect a deterministic control.
+
+The synthetic fixture under `fixtures/contracts/synthetic_side_letter_demo/` demonstrates this boundary without claiming that the fictional investors or figures came from a real fund.
 
 ## Tool contracts
 
 ### `search_lpa()`
 
-Ranks LPA clauses using transparent lexical relevance. Every hit includes the document ID, filename,
-section reference, page number, excerpt, effective date and SHA-linked source document.
+Ranks LPA clauses using transparent retrieval. Hits include source identity, section reference, page/excerpt information where available, effective-date evidence and SHA-linked document identity.
 
 ### `search_side_letter()`
 
-Uses the same search contract with optional exact investor and fund scoping. Side letters cannot be
-ingested without an investor identity.
+Uses the same contract with investor/fund scoping. A side letter cannot be treated as an investor override without an investor identity.
 
 ### `extract_clause()`
 
-Returns the full parsed section, page range and citation. It fails with a not-found result instead of
-selecting a similar provision silently.
+Returns the parsed clause and source locator. It fails with not-found rather than silently substituting a similar clause.
 
 ### `get_effective_date()`
 
-Returns the parsed or explicitly supplied effective date with its supporting text. An undated
-relevant document blocks automated rule resolution.
+Returns the parsed or supplied date and source evidence. A relevant undated rule cannot become automatic financial authority.
 
 ### `get_investor_rule()`
 
-Resolves one supported rule at a requested reporting date. An active investor-specific term takes
-precedence over the fund-level LPA only when it has an exact investor match and explicit override
-language. Equal-precedence contradictions return `conflict`; complex or undated provisions return
-`review_required`.
+Resolves one supported investor rule for a reporting date. An investor-specific term takes precedence only when the system has an exact investor match, explicit override semantics and sufficient source evidence.
+
+Contradictory, complex, missing or undated terms return `review_required` / conflict rather than being guessed.
 
 ## Supported structured rules
+
+Current structured rule families include:
 
 - `management_fee_offsets_called_capital`
 - `management_fee_rate`
@@ -70,36 +68,51 @@ language. Equal-precedence contradictions return `conflict`; complex or undated 
 - `mfn`
 - `excuse_right`
 
-Only rules with a deterministic parser return an automatically consumable value. Relevant text that
-cannot be structured is still cited but routed to review.
+Only a rule with a deterministic parser can become a machine-consumable financial input. Relevant text that cannot be safely structured remains evidence for a human reviewer.
 
-## NAV check
+## NAV integration
 
-`POST /api/contracts/nav-checks/investor-capital` accepts gross called capital, management fee,
-administrator called capital and an as-of date. It resolves the effective contract rule first, then
-uses `Decimal` arithmetic to produce expected called capital and variance.
+The standalone contract/NAV path includes:
 
-The check has three outcomes:
+```text
+POST /api/contracts/documents
+POST /api/contracts/search/lpa
+POST /api/contracts/search/side-letter
+GET  /api/contracts/documents/{document_id}/clauses/{section_reference}
+GET  /api/contracts/documents/{document_id}/effective-date
+POST /api/contracts/investor-rules/resolve
+POST /api/contracts/nav-checks/investor-capital
+```
 
-- `pass`: administrator and contract-derived values agree;
-- `fail`: an exact variance is reported with contract citations;
-- `review_required`: a rule is missing, ambiguous, conflicting or undated.
+The NAV Quality Controller can consume resolved contract evidence only when its source requirements are satisfied. Incomplete evidence stops at review rather than becoming an approved number.
 
-`POST /api/contracts/demo/side-letter-fee` loads the isolated fixture under
-`fixtures/contracts/synthetic_side_letter_demo/`. It demonstrates both the Cedar exception and the
-Orchard Institutional LP standard case, and returns document/workbook hashes, source locators, stable
-finding codes, calculation components and an owned work item.
+## Synthetic demonstration
 
-The NAV Quality Controller introduced in PR #22 can use the same evidence path. Upload the governing
-documents first, then send `use_contract_documents=true` to `POST /api/nav-quality/review`. The NAV
-engine receives only source-backed resolved terms; incomplete or unresolved contract evidence stops
-at `needs_review` rather than becoming financial authority.
+`POST /api/contracts/demo/side-letter-fee` loads the isolated synthetic fixture. It demonstrates one investor-specific override and one standard/default investor case so the system proves that an exception is scoped rather than applied across the entire investor population.
+
+Synthetic documents and figures are deliberately labelled as such.
+
+## Authority boundary
+
+- The model does not invent a contract clause.
+- A retrieved clause is not automatically an approved rule.
+- A rule without sufficient source/effective-date evidence is not applied automatically.
+- Contract evidence cannot override deterministic NAV arithmetic by model confidence alone.
+- Ambiguity is routed to a human.
 
 ## Current limits
 
 - PDF text must be extractable; scanned documents require OCR before ingestion.
-- Search is deterministic lexical retrieval, not embeddings.
-- Clause parsing recognises numbered sections and articles; unusual layouts may require a supplied
-  section map.
-- The in-process repository is intentionally ephemeral and suited to the hackathon demonstration,
-  not durable production storage.
+- Retrieval is deterministic lexical search rather than embeddings.
+- Unusual contract layouts may need better parsing / section mapping.
+- The in-process contract repository is suitable for the hackathon demonstration, not a production system of record.
+
+## Syndicate positioning
+
+This is a **supporting specialist capability**, not a separate judge-facing product. The final user journey remains one NAV controller workflow:
+
+```text
+Upload evidence → readiness → deterministic NAV controls → agent review → human decision
+```
+
+Contract evidence participates only when it is relevant to a supported NAV control.

@@ -1,68 +1,96 @@
-# Three-minute judge demo — Cherry CFO cash application
+# Two-minute judge demo — Cherry CFO NAV Quality Controller
 
-Primary artifact: `/controller-review`
+**Live demo:** https://cherry-cfo-canvas.vercel.app
 
-## 0:00–0:25 — The CFO problem
+The goal is to show one realistic Office of the CFO workflow, not every capability in the repository.
 
-“Cash application is easy until a receipt covers several invoices or a customer takes a deduction.
-AR teams then reconstruct bank evidence, remittance, invoice state and policy before deciding what
-can post. Cherry CFO clears the routine case and turns the material exception into a
-decision-ready controller packet.”
+## 0:00–0:15 — The problem
 
-Point to the header: **SIMULATED AR · NO PRODUCTION WRITES**.
+> “Fund controllers receive a NAV close pack spread across administrator files, investor GLs, side-letter rules, statements and supporting evidence. The hard part is not just calculating a number — it is proving what can be checked, finding exceptions, and knowing when a human must step in.”
 
-## 0:25–0:55 — RCPT-1041: routine cash applies itself
+Open the Cherry CFO workbench.
 
-1. Click **Run deterministic application**.
-2. Show `POSTED_SIMULATED / MULTI_INVOICE`.
-3. Read the bridge: GBP 10,000 to `INV-2208` + GBP 2,400 to `INV-2214`; GBP 0 residual.
-4. Point out the hash-linked audit event count and SIMULATED label.
+## 0:15–0:30 — What Cherry CFO is
 
-Key line: “The agent does not do the arithmetic. Fixed-point controls prove the receipt and every
-invoice allocation before simulated posting.”
+> “Cherry CFO is an autonomous NAV Quality Controller. It turns fragmented evidence into deterministic finance controls, agentic exception investigation and human-governed sign-off in one visual workspace.”
 
-## 0:55–1:40 — RCPT-1042: the system stops for judgement
+Point to **NAV Quality Controller** and the empty canvas.
 
-1. Show GBP 9,500 booked against GBP 10,000 open on `INV-2208`.
-2. Show the explicit GBP 500 residual: cash remains HELD and GBP 0 is applied before review.
-3. Show the located `DAMAGED_GOODS` remittance claim—customer evidence, not independently proven
-   fact.
-4. Show `SHORTPAY-01 v3`: GBP 50 automatic limit and the two stop reasons.
-5. Scan the non-overridable PASS controls and evidence locators/hashes.
+## 0:30–0:50 — Upload mixed evidence
 
-Key line: “This is a real accounting stop: the value exceeds policy and the reason needs human
-judgement. A confidence score cannot override settlement, duplicate, currency, version or footing
-controls.”
+Click **Upload NAV documents**.
 
-## 1:40–2:15 — Read-only agent investigation
+Upload multiple evidence sources. For the current anonymised demo pack this may include:
 
-1. Click **Run investigation agent**.
-2. Show the recommended `CREATE_DISPUTE` or `LEAVE_BALANCE_OPEN` action.
-3. Show that every displayed sentence carries known evidence IDs.
-4. Show the actual two-step model/tool trajectory:
-   `investigate_cash_application` → `submit_controller_advice`.
-5. Point to **ADVISORY · HUMAN DECISION REQUIRED** and `production_write_performed=false`.
+- `Investor-Level GL - Q2 activity - all entities (anonymised).xlsx`
+- a loader/reference workbook;
+- a supporting workbook;
+- an administrator NAV summary if available for a full NAV review.
 
-Key line: “The model chooses which supported facts matter; the server refuses invented claim IDs.
-It has read-only workflow tools and no posting, payment or policy tool.”
+Say:
 
-If Vercel AI Gateway is not enabled, show the fail-closed provider message and say: “Model access
-is unavailable, so the deterministic controller workflow remains usable and nothing changes.”
+> “I can bring the close pack as it exists and select multiple files or batches. Cherry classifies every source, preserves evidence lineage and only enables controls supported by the evidence actually present.”
 
-## 2:15–2:48 — Controller owns the accounting outcome
+Click **Upload & classify**.
 
-1. Select **Create dispute**; keep reason `DAMAGED_GOODS` and owner `Deductions team`.
-2. Enter: “Customer deduction is evidenced; preserve the residual for deductions follow-up.”
-3. Click **Record simulated decision**.
-4. Show GBP 9,500 applied, GBP 500 still open, invoice `DISPUTED`, and the new hash-linked audit
-   events.
-5. If time permits, reset and show **Leave balance open** as the collections alternative.
+If a large workbook is used, point briefly to the real preparation stages. The Vercel demo may optimise the workbook locally for transport before upload; do not spend demo time explaining the hosting limit unless asked.
 
-Key line: “The controller chooses the treatment, but approval still re-runs every fundamental
-control. Human judgement cannot bypass the ledger invariants.”
+## 0:50–1:10 — Evidence readiness
 
-## 2:48–3:00 — Close
+When the canvas appears, point to the evidence nodes and **Evidence readiness**.
 
-“Cherry CFO gives the Office of the CFO the right split: deterministic accounting controls,
-agentic exception investigation, explicit human judgement and audit-ready evidence. It never
-initiates a payment and this demo never writes to production.”
+> “Cherry first asks what it can safely check. It does not invent missing evidence. If I have the investor GL but no administrator NAV summary, Cherry can still run a partial source review and explicitly records the missing summary as an evidence gap.”
+
+This fail-closed behaviour is useful to show. Missing evidence should never appear as an unexplained pass.
+
+## 1:10–1:32 — Deterministic controls
+
+Click **Run NAV controls**.
+
+> “The financial checks are deterministic. The model does not generate authoritative NAV numbers. It can coordinate and explain, but the accounting result comes from reproducible controls.”
+
+Point to the control result / finding cards and, if useful, open the evidence inspector.
+
+> “Every finding stays connected to the evidence and control state that produced it.”
+
+## 1:32–1:47 — Agentic review
+
+Click **Agent review**.
+
+> “Once the controls identify issues, the agent consolidates findings, evidence gaps and likely remediation so the controller does not have to investigate every break manually. It cannot override the deterministic result.”
+
+Show the agentic review / remediation node.
+
+## 1:47–1:58 — Human decision
+
+Click **Record decision** and show the available actions:
+
+- Approve NAV
+- Approve with exception
+- Request evidence
+- Return to administrator
+- Escalate
+
+Say:
+
+> “Human judgement is a first-class workflow state. Cherry does the repetitive investigation, but the controller still owns financial sign-off.”
+
+## 1:58–2:00 — Close
+
+> “Cherry CFO does the finance work required to reach a decision — while humans remain responsible for the decisions that matter.”
+
+## Three judge takeaways
+
+If time is tight, make sure the judges remember only these three points:
+
+1. **Evidence-aware automation** — Cherry runs only what the supplied evidence supports.
+2. **Deterministic finance authority** — the LLM does not create the accounting truth.
+3. **Human-governed judgement** — exceptions end in an explicit controller decision, not hidden autonomous action.
+
+## Demo safety fallback
+
+If an external model provider is unavailable during the demo, continue through evidence readiness and deterministic controls and explain:
+
+> “The agentic explanation layer is unavailable, so Cherry fails closed. The deterministic financial workflow still works and nothing is silently approved.”
+
+That behaviour is consistent with the product boundary and preferable to fabricating an agent result.
