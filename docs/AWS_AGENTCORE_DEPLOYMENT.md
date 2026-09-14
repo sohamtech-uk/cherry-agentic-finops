@@ -211,3 +211,22 @@ Once ACM reports ISSUED, run `python scripts/attach_finops_domain.py`. Wait unti
 `E25DLWEQBEAV79` reports Deployed, verify HTTPS for the custom hostname against its CloudFront IP,
 then replace only the existing `finops` A record with a CNAME to `d32u7o814bb2xb.cloudfront.net`.
 The custom hostname remains pending until these DNS steps are completed.
+
+
+### Branded demo and focused AI reports
+
+The AWS demo uses the Cherry Money palette: burgundy `#581425`, coral `#d93b52`,
+and warm white `#f6f7f2`. Scenario states have text labels as well as green, amber and red colours.
+The gateway prompt now requests only the selected scenario, shared workflow evidence across
+specialists, and a structured Decision / Evidence checked / Next action / Control boundary report.
+The frontend renders headings, lists and evidence tables using DOM text nodes, without executing
+model-supplied HTML. It includes elapsed-time feedback, reduced-motion support and report copying.
+
+A live approval scenario completed in 59 seconds after this update. The report concerned only
+the selected approval workflow, showed `awaiting_approval`, null human consent and the deterministic
+threshold, and rendered the evidence table successfully. Browser error logs were empty.
+The web gateway tests (9 cases), Ruff checks and JavaScript syntax check passed.
+
+The finops ACM certificate has been issued and attached to CloudFront. HTTPS for the custom hostname
+has been verified directly against the CloudFront origin address with normal certificate validation.
+The final GoDaddy `finops` record must point to `d32u7o814bb2xb.cloudfront.net`.

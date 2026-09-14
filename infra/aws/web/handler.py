@@ -17,8 +17,20 @@ SCENARIOS = {
     "exception": "Run a synthetic evidence exception scenario and refuse to guess.",
 }
 PROMPT_END = (
-    " Explain what the agent did, the deterministic outcome and evidence, what the human must "
-    "review, and what the agent is prohibited from doing. Be concise. Never approve or pay."
+    " Run ONLY the requested scenario, exactly once through the workflow specialist. "
+    "Do not run other demo scenarios or report unrelated exception-queue items. "
+    "Pass the resulting workflow ID to the control and evidence specialists so all findings "
+    "refer to the same workflow. Use tools for every amount, status, threshold and audit fact. "
+    "If a fact is absent, say it is unavailable; never infer consent or successful reconciliation. "
+    "Write a focused Markdown report under 350 words with these headings: "
+    "## Decision, ## Evidence checked, ## Next action, ## Control boundary. "
+    "Lead with the deterministic outcome and one-sentence reason. Include the workflow ID, "
+    "supplier, amount and currency only when returned by tools. Use a compact evidence table "
+    "with Check and Finding columns. State who must act next and what they must review or supply. "
+    "If no human action is required, say so only when the deterministic outcome supports it. "
+    "Separate completed actions from suggested next steps. Avoid generic finance advice, "
+    "repeated disclaimers, invented totals and claims of a legal audit opinion. "
+    "End with the actual approval/payment boundary. Never approve or pay."
 )
 
 
