@@ -1,5 +1,11 @@
 # Cherry Strands deployment to Amazon Bedrock AgentCore
 
+> **Current endpoint assignment:** `finops.cherrymoney.co.uk` serves the original Google All Things
+> Agentic / Google ADK deployment at `8.233.220.231`. The AWS / Agents for Humans demo uses
+> `https://d32u7o814bb2xb.cloudfront.net/`. This supersedes the earlier custom-domain cutover notes
+> below. Do not reattach or repoint `finops` to AWS unless the user explicitly requests another migration.
+
+
 Target: account **821465445270**, profile **devops-user**, region **eu-west-2**.
 Only deploy `feat/agents-for-humans-strands-aws`. Existing Google Cloud services are outside this
  deployment. Never store AWS credentials in source or runtime environment configuration.
@@ -254,3 +260,12 @@ shows the Strands orchestrator, three specialist agents, Bedrock Claude Sonnet 4
 Cherry tools and controlled outcomes. Supporting notes explain private S3 response polling,
 one-day result retention, CloudWatch, scoped IAM and in-memory demo workflow state.
 The previous Google Cloud diagram describes the preserved GCP implementation, not the AWS demo.
+
+
+### Separate Google and AWS demos restored
+
+At the user's request, `finops` was restored to its original A record `8.233.220.231`; the
+Google All Things Agentic site remained healthy throughout and required no redeployment.
+The AWS frontend remains at the CloudFront hostname, with its original-style dark hero,
+large headline, Cherry orbit animation, and live autonomous/approval buttons. AWS technology
+labels and architecture remain accurate for AgentCore, Strands and Bedrock.

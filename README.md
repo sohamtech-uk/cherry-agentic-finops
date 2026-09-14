@@ -26,6 +26,9 @@ The AWS build uses Amazon Bedrock and is designed for Amazon Bedrock AgentCore d
 The synthetic scenarios retain deterministic controls and human-approval boundaries.
 [Deployment details](docs/AWS_AGENTCORE_DEPLOYMENT.md).
 
+**Original Google All Things Agentic demo:** https://finops.cherrymoney.co.uk/
+The Google and AWS demos remain separate deployments.
+
 The new hackathon layer is implemented in:
 
 ```text
