@@ -15,9 +15,16 @@ real decision, exception or approval is required.
 
 This branch is the AWS / **Professional Agents** version of Cherry Agent.
 
-**Live AWS demo:** https://finops.cherrymoney.co.uk/ — backed by Amazon Bedrock
-AgentCore in London. The three synthetic scenarios retain deterministic controls and human approval
-boundaries. [Deployment details](docs/AWS_AGENTCORE_DEPLOYMENT.md).
+**Live application for judges and reviewers:** https://d32u7o814bb2xb.cloudfront.net
+
+Use the live CloudFront site as the primary application-testing entry point. The three recommended
+synthetic scenarios are routine autonomous reconciliation, human approval required, and evidence
+exception/refusal to guess. Full reviewer instructions are in
+[`docs/TESTING_INSTRUCTIONS.md`](docs/TESTING_INSTRUCTIONS.md).
+
+The AWS build uses Amazon Bedrock and is designed for Amazon Bedrock AgentCore deployment in London.
+The synthetic scenarios retain deterministic controls and human-approval boundaries.
+[Deployment details](docs/AWS_AGENTCORE_DEPLOYMENT.md).
 
 The new hackathon layer is implemented in:
 
@@ -278,11 +285,16 @@ PREEXISTING_CODE.md                           reuse disclosure
 
 **Track:** Professional Agents (Agents for Humans).
 
+**Live test site:** https://d32u7o814bb2xb.cloudfront.net
+
+**Testing instructions:** [`docs/TESTING_INSTRUCTIONS.md`](docs/TESTING_INSTRUCTIONS.md)
+
 **Built with:** Strands Agents SDK, Amazon Bedrock, Amazon Bedrock AgentCore, Python,
 FastAPI, Pydantic, Docker, and deterministic financial controls.
 
 Demo: autonomous routine reconciliation; human approval required; evidence exception / refusal to
- guess. See the AWS deployment guide for live verification commands and deployment prerequisites.
+guess. See the testing instructions and AWS deployment guide for live verification commands and
+deployment prerequisites.
 
 ## Licence
 
