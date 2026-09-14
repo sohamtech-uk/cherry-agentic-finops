@@ -8,6 +8,24 @@ Cherry Agent is submitted to the **Professional Agents** track. The hackathon-sp
 feat/agents-for-humans-strands-aws
 ```
 
+## Live judge testing site
+
+The deployed application can be tested directly at:
+
+**https://d32u7o814bb2xb.cloudfront.net**
+
+This is the recommended starting point for judges who want to evaluate the application without setting up a local development environment.
+
+Suggested test flow:
+
+1. Open the live site.
+2. Run a routine/autonomous finance scenario and review the reconciliation outcome.
+3. Run an approval-required scenario and confirm that Cherry Agent stops for human review rather than inventing approval.
+4. Run an exception/evidence-gap scenario and confirm that the agent surfaces missing or conflicting evidence rather than guessing.
+5. Review the audit/evidence output and the distinction between Strands orchestration, deterministic Cherry controls, and human approval authority.
+
+> Financial safety boundary: Cherry Agent performs reconciliation and decision support only. It does not initiate payments, modify bank beneficiaries or invent human approval.
+
 The project uses:
 
 - Strands Agents SDK for orchestration and specialist-agent delegation;
@@ -15,8 +33,6 @@ The project uses:
 - Amazon Bedrock AgentCore-compatible runtime entrypoint;
 - deterministic Cherry finance controls for reconciliation, policy and audit outcomes;
 - explicit human approval boundaries for higher-risk or ambiguous cases.
-
-> Financial safety boundary: Cherry Agent performs reconciliation and decision support only. It does not initiate payments, modify bank beneficiaries or invent human approval.
 
 ---
 
