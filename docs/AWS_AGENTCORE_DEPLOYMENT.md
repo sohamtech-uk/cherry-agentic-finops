@@ -230,3 +230,17 @@ The web gateway tests (9 cases), Ruff checks and JavaScript syntax check passed.
 The finops ACM certificate has been issued and attached to CloudFront; the distribution is Deployed. HTTPS for the custom hostname
 has been verified directly against a CloudFront edge address with normal certificate validation.
 The final GoDaddy `finops` record must point to `d32u7o814bb2xb.cloudfront.net`.
+
+
+### Custom domain cutover and original animation
+
+The GoDaddy `finops` CNAME now points to `d32u7o814bb2xb.cloudfront.net`, confirmed against
+the authoritative nameserver and both Cloudflare and Google public DNS resolvers. The custom
+hostname passed HTTPS checks against CloudFront for the homepage and AgentCore gateway health.
+Some local DNS caches can continue serving the previous GCP address until its TTL expires.
+
+The original FinOps Cherry character and counter-rotating orbit animation have been retained in
+the AWS frontend, with the Cherry Money palette, original 24-second/18-second motion, and a
+pause/resume control. Reduced-motion preferences stop the animation. Live browser checks
+confirmed both animation timings, pause/resume and no horizontal overflow. Only the AWS frontend
+was deployed; the existing Google Cloud service remains unchanged.

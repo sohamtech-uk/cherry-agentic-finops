@@ -15,7 +15,7 @@ real decision, exception or approval is required.
 
 This branch is the AWS / **Professional Agents** version of Cherry Agent.
 
-**Live AWS demo:** https://d32u7o814bb2xb.cloudfront.net/ — backed by Amazon Bedrock
+**Live AWS demo:** https://finops.cherrymoney.co.uk/ — backed by Amazon Bedrock
 AgentCore in London. The three synthetic scenarios retain deterministic controls and human approval
 boundaries. [Deployment details](docs/AWS_AGENTCORE_DEPLOYMENT.md).
 
