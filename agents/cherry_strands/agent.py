@@ -8,7 +8,9 @@ from strands.models import BedrockModel
 
 from app.agent_tools import inspect_workflow, list_open_finance_exceptions, run_finance_scenario
 
-DEFAULT_MODEL_ID = "global.anthropic.claude-sonnet-4-6"
+# Use the EU inference profile by default because the hackathon deployment targets London (eu-west-2).
+# Override STRANDS_BEDROCK_MODEL_ID if the AWS account uses another Bedrock model/profile.
+DEFAULT_MODEL_ID = "eu.anthropic.claude-sonnet-4-6"
 DEFAULT_AWS_REGION = "eu-west-2"
 
 
