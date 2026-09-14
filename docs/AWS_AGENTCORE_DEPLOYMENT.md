@@ -227,6 +227,6 @@ the selected approval workflow, showed `awaiting_approval`, null human consent a
 threshold, and rendered the evidence table successfully. Browser error logs were empty.
 The web gateway tests (9 cases), Ruff checks and JavaScript syntax check passed.
 
-The finops ACM certificate has been issued and attached to CloudFront. HTTPS for the custom hostname
-has been verified directly against the CloudFront origin address with normal certificate validation.
+The finops ACM certificate has been issued and attached to CloudFront; the distribution is Deployed. HTTPS for the custom hostname
+has been verified directly against a CloudFront edge address with normal certificate validation.
 The final GoDaddy `finops` record must point to `d32u7o814bb2xb.cloudfront.net`.
