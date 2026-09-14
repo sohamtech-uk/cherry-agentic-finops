@@ -244,3 +244,13 @@ the AWS frontend, with the Cherry Money palette, original 24-second/18-second mo
 pause/resume control. Reduced-motion preferences stop the animation. Live browser checks
 confirmed both animation timings, pause/resume and no horizontal overflow. Only the AWS frontend
 was deployed; the existing Google Cloud service remains unchanged.
+
+
+### Public architecture diagram
+
+The AWS frontend now exposes `/#architecture` and a header navigation link. The diagram describes
+the deployed path: CloudFront → Lambda gateway → asynchronous Lambda worker → AgentCore. It
+shows the Strands orchestrator, three specialist agents, Bedrock Claude Sonnet 4.6, deterministic
+Cherry tools and controlled outcomes. Supporting notes explain private S3 response polling,
+one-day result retention, CloudWatch, scoped IAM and in-memory demo workflow state.
+The previous Google Cloud diagram describes the preserved GCP implementation, not the AWS demo.
