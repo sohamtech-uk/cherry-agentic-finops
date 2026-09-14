@@ -13,10 +13,15 @@ app = BedrockAgentCoreApp()
 def agent_invocation(payload: dict[str, Any]) -> dict[str, Any]:
     """Amazon Bedrock AgentCore Runtime entrypoint for Cherry Agent."""
 
+    if not isinstance(payload, dict):
+        return {"error": "invalid_payload"}
     prompt = payload.get("prompt", "")
     if not isinstance(prompt, str) or not prompt.strip():
         return {"error": "prompt_required"}
-    return invoke_cherry_agent(prompt)
+    try:
+        return invoke_cherry_agent(prompt)
+    except Exception:
+        return {"error": "agent_unavailable"}
 
 
 if __name__ == "__main__":
