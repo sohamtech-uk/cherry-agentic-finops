@@ -13,6 +13,7 @@ response_file="$(mktemp)"
 trap 'rm -f "$response_file"' EXIT
 aws bedrock-agentcore invoke-agent-runtime \
   --region "$AWS_REGION" \
+  --cli-read-timeout 900 \
   --agent-runtime-arn "$runtime_arn" \
   --content-type application/json \
   --accept application/json \

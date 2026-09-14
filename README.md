@@ -15,6 +15,10 @@ real decision, exception or approval is required.
 
 This branch is the AWS / **Professional Agents** version of Cherry Agent.
 
+**Live AWS demo:** https://d32u7o814bb2xb.cloudfront.net/ — backed by Amazon Bedrock
+AgentCore in London. The three synthetic scenarios retain deterministic controls and human approval
+boundaries. [Deployment details](docs/AWS_AGENTCORE_DEPLOYMENT.md).
+
 The new hackathon layer is implemented in:
 
 ```text
@@ -50,23 +54,6 @@ Human = approval authority.
 - explains workflow outcomes and exceptions;
 - delegates control explanations and evidence summaries to specialist agents;
 - stops when the deterministic workflow requires human review.
-
-### NEW FOR AGENTS FOR HUMANS
-
-- Strands Agents SDK orchestration and specialist Strands agents
-- Amazon Bedrock model integration
-- AgentCore-compatible runtime and dedicated AWS deployment tooling
-- Dedicated `/api/strands/health` and `/api/strands/invoke` endpoints
-
-### PRE-EXISTING / REUSED
-
-- Cherry deterministic finance engine
-- Pre-existing Google ADK work
-- Pre-existing Ylookup/FundOps logic
-- Cherry Money product/infrastructure
-
-Strands = orchestration. Cherry deterministic engine = financial authority.
-Human = approval authority.
 
 ### What Strands does **not** do
 

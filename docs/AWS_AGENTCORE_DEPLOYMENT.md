@@ -139,16 +139,75 @@ Strands orchestrates; Cherry deterministic code holds financial authority; human
  authority. The existing reconciliation engine, Google ADK, Ylookup/FundOps and Cherry Money work
 are reused, not claimed as new hackathon work. See `PREEXISTING_CODE.md`.
 
-## Verification recorded 14 September 2026
+## Verified live deployment — 14 September 2026
 
-Account guard verified 821465445270 / eu-west-2 / devops-user. The selected EU Sonnet 4.6
-profile is ACTIVE and its foundation model is listed in London. The live hierarchy reached
-ConverseStream but failed with `ResourceNotFoundException`: Anthropic model use-case details
-have not been submitted for this account. AWS asks the account owner to submit the Anthropic
-use-case form (or allow 15 minutes if already submitted). This is an account onboarding blocker,
-not a missing profile or reason to broaden IAM. Other Sonnet profiles are listed as ACTIVE,
-but switching profiles does not resolve the account-wide Anthropic prerequisite.
+Anthropic use-case details were submitted successfully (HTTP 201) for Soham London CIC / Cherry
+Money. After propagation, the clean Bedrock hierarchy test passed. AgentCore returned HTTP 200
+with a synthetic approval workflow still paused for human review.
 
-No AgentCore runtime has been created or invoked by this implementation run. Complete the
-account's Anthropic use-case details with accurate organisational information, rerun the guarded
-Bedrock smoke test, and only then prepare/deploy the dedicated runtime as described above.
+- Account: `821465445270`; region: `eu-west-2`
+- Runtime ID: `CherryAgentAWS_CherryAgent-wT0VRK4Prn`
+- Runtime ARN: `arn:aws:bedrock-agentcore:eu-west-2:821465445270:runtime/CherryAgentAWS_CherryAgent-wT0VRK4Prn`
+- Version: 1; status: READY
+- Runtime role: `CherryAgentAWS-Runtime`
+- Model: `eu.anthropic.claude-sonnet-4-6`
+
+The generated CLI role grants broad Bedrock permissions. The actual deployment instead uses the
+scoped policy plus its exact private artifact object and runtime log prefix. No CDK bootstrap or
+administrator policy was created. The CLI packages Linux ARM64 dependencies; the guarded AWS SDK
+script provisions the runtime directly.
+
+### Reproduce the actual deployment
+
+After creating the dedicated CLI project using the command above:
+
+```bash
+python scripts/prepare_agentcore_package.py ../CherryAgentAWS/CherryAgentAWS
+agentcore package --directory ../CherryAgentAWS/CherryAgentAWS --runtime CherryAgent
+./scripts/verify_aws_target.sh
+python scripts/deploy_agentcore_runtime.py \
+  ../CherryAgentAWS/CherryAgentAWS/agentcore/CherryAgent.zip
+./scripts/test_agentcore_runtime.sh \
+  arn:aws:bedrock-agentcore:eu-west-2:821465445270:runtime/CherryAgentAWS_CherryAgent-wT0VRK4Prn
+```
+
+The package is approximately 58 MB compressed / 164 MB uncompressed. No credential directories
+or environment files are included. The smoke script allows 900 seconds; the AWS CLI default
+60-second read timeout is too short for specialist workflows and can retry a completed request.
+
+### AWS web demo
+
+`infra/aws/web/` contains a dedicated synthetic demo frontend and Lambda gateway. `scripts/deploy_finops_web.py`
+creates a CloudFront distribution with an IAM-only Lambda URL protected by CloudFront origin access
+control. A separate worker invokes only the named AgentCore runtime. The gateway accepts only the
+three predefined scenario names, never arbitrary prompts/customer data. An atomic S3 admission gate
+allows one run per two-minute window across all visitors; synthetic result objects expire after one day.
+The account Lambda quota does not currently allow reserved concurrency.
+
+```bash
+./scripts/verify_aws_target.sh
+python scripts/deploy_finops_web.py
+```
+
+CloudFront distribution: `E25DLWEQBEAV79`, hostname `d32u7o814bb2xb.cloudfront.net`.
+The custom domain requires a DNS-validated ACM certificate in us-east-1 (CloudFront requirement),
+then adding the domain alias and replacing only the `finops` DNS record. AgentCore, Lambda and S3
+remain in eu-west-2. Existing Google Cloud services are unchanged.
+
+
+The public browser scenario completed end to end through CloudFront, the Lambda gateway/worker and
+AgentCore on 14 September 2026. It reported auto-reconciliation for the routine item, human approval
+required for the high-value item, and an evidence exception for conflicting data. All 366 tests,
+Ruff lint/format and mypy checks passed. Worker IAM explicitly includes both the runtime ARN and
+its `/runtime-endpoint/DEFAULT` ARN.
+
+To finish the custom hostname, add this GoDaddy DNS record (leave it in place for certificate renewal):
+
+| Type | Name | Value |
+| --- | --- | --- |
+| CNAME | `_70af0cebda8505ece993210fd8f5dbf3.finops` | `_5192b18c7b602a5ef46e674a3f1dc139.wzccmgtwzk.acm-validations.aws` |
+
+Once ACM reports ISSUED, run `python scripts/attach_finops_domain.py`. Wait until distribution
+`E25DLWEQBEAV79` reports Deployed, verify HTTPS for the custom hostname against its CloudFront IP,
+then replace only the existing `finops` A record with a CNAME to `d32u7o814bb2xb.cloudfront.net`.
+The custom hostname remains pending until these DNS steps are completed.
