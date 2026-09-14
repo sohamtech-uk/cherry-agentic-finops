@@ -1,216 +1,154 @@
-# AWS / AgentCore deployment — Cherry Agent
+# Cherry Strands deployment to Amazon Bedrock AgentCore
 
-This guide deploys the **Agents for Humans** version of Cherry Agent with:
+Target: account **821465445270**, profile **devops-user**, region **eu-west-2**.
+Only deploy `feat/agents-for-humans-strands-aws`. Existing Google Cloud services are outside this
+ deployment. Never store AWS credentials in source or runtime environment configuration.
 
-- Strands Agents SDK;
-- Amazon Bedrock;
-- Amazon Bedrock AgentCore Runtime;
-- the existing deterministic Cherry finance controls.
-
-Target AWS account for the hackathon deployment:
-
-```text
-Account name: theinnerpeace
-Account ID:   821465445270
-Region:       eu-west-2 (London)
-```
-
-The repository intentionally does **not** contain AWS access keys, secret keys or temporary session
-credentials. The account ID and CLI profile name are identifiers, not credentials.
-
-## 1. Authenticate to the intended AWS account
-
-For local development, use the named AWS CLI profile:
+## Local setup and account guard
 
 ```bash
-export AWS_ACCOUNT_ID=821465445270
-export AWS_PROFILE=theinnerpeace
+export AWS_PROFILE=devops-user
 export AWS_REGION=eu-west-2
 export AWS_DEFAULT_REGION=eu-west-2
-
-aws sts get-caller-identity --profile "$AWS_PROFILE"
-```
-
-Do not deploy until the STS response contains:
-
-```json
-{
-  "Account": "821465445270"
-}
-```
-
-London (`eu-west-2`) supports Amazon Bedrock AgentCore and is the default region used by this
-Cherry Strands implementation.
-
-## 2. Confirm Bedrock model access
-
-Cherry Agent defaults to the EU Claude Sonnet 4.6 inference profile:
-
-```text
-eu.anthropic.claude-sonnet-4-6
-```
-
-Set it explicitly for local testing:
-
-```bash
+export AWS_ACCOUNT_ID=821465445270
 export STRANDS_BEDROCK_MODEL_ID=eu.anthropic.claude-sonnet-4-6
-```
-
-The local identity and the AgentCore runtime role need permission to invoke the configured Bedrock
-model. Keep these permissions separate from Cherry's deterministic financial-control permissions.
-
-## 3. Install the application locally
-
-```bash
-python3 -m venv .venv
+python3.13 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[dev]"
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -e '.[dev]'
+./scripts/verify_aws_target.sh
+aws bedrock list-foundation-models --region eu-west-2 --by-provider Anthropic \
+  --query 'modelSummaries[].{Name:modelName,Id:modelId}' --output table
+aws bedrock get-inference-profile --region eu-west-2 \
+  --inference-profile-identifier eu.anthropic.claude-sonnet-4-6
 ```
 
-Smoke-test the Strands hierarchy before provisioning anything:
+The guard fails on an account mismatch, region mismatch, conflicting default region or STS failure.
+Local BedrockModel uses boto's credential chain. AgentCore uses its execution role; do not configure
+`AWS_PROFILE`, access keys or session tokens inside the runtime.
+
+## Quality gates and synthetic Bedrock test
 
 ```bash
-python - <<'PY'
-from agents.cherry_strands import invoke_cherry_agent
-
-result = invoke_cherry_agent(
-    "Run an approval scenario and explain why the workflow needs a human."
-)
-print(result)
-PY
+ruff check .
+ruff format --check .
+mypy app agents
+pytest
+python -m compileall -q app agents agentcore
+docker build -t cherry-agent-strands:test .
+./scripts/verify_aws_target.sh
+python scripts/test_strands_bedrock.py
 ```
 
-## 4. Test the AgentCore-compatible entrypoint locally
+Unit/API tests mock model invocations and require no AWS credentials. Live tests use synthetic
+fixtures only. On AccessDenied, record the denied action/resource and correct the specific policy;
+do not attach broad managed policies. Deployment is gated on passing local checks and live Bedrock.
 
-The checked-in runtime entrypoint is:
+## Dedicated API and runtime
 
-```text
-agentcore/cherry_agent.py
-```
+`GET /api/strands/health` returns safe framework/model/region/boundary metadata; it is process health,
+not proof of Bedrock reachability. `POST /api/strands/invoke` accepts `{"prompt":"..."}`. Prompts must
+contain 1–8000 characters after whitespace normalization. Backend exceptions return a generic 503.
 
-It wraps the Strands hierarchy with `BedrockAgentCoreApp`, so it can be used as the implementation
-when creating the generated AgentCore project.
+`agentcore/cherry_agent.py` uses `BedrockAgentCoreApp`, validates input and returns sanitized errors.
+Each invocation constructs a fresh specialist hierarchy. Human approval and rejection are absent
+from the Strands tool surface. The underlying existing demo workflow store is process-local/shared;
+this synthetic hackathon endpoint is not a tenant-scoped customer-data API. Deploy only synthetic
+fixtures until authenticated tenant-scoped storage is implemented.
 
-## 5. Install the AgentCore CLI
-
-AgentCore's current CLI is installed through npm and requires Node.js 20+:
+## CLI syntax verified against installed AgentCore 0.29.0
 
 ```bash
-npm install -g @aws/agentcore
 agentcore --version
+agentcore --help
+agentcore create --help
+agentcore deploy --help
 ```
 
-## 6. Create a Python + Strands + Bedrock AgentCore project
-
-With the `theinnerpeace` profile still active:
+Create a dedicated project outside the source tree (creation generates local files):
 
 ```bash
-agentcore create \
-  --project-name CherryAgentAWS \
-  --name CherryAgent \
-  --language Python \
-  --framework Strands \
-  --model-provider Bedrock \
-  --memory none \
-  --build CodeZip
-
-cd CherryAgentAWS
+./scripts/verify_aws_target.sh
+agentcore create --project-name CherryAgentAWS --name CherryAgent \
+  --language Python --framework Strands --model-provider Bedrock \
+  --memory none --build CodeZip --skip-git --skip-python-setup --skip-install \
+  --output-dir ../CherryAgentAWS
 ```
 
-The generated project contains the AgentCore deployment configuration and AWS CDK assets. Replace
-its generated agent implementation with the Cherry implementation from this repository, retaining
-the generated AgentCore project structure.
+Before deploying, replace the generated agent implementation with this repository's
+`agentcore/cherry_agent.py`, and package `agents/`, `app/`, and `fixtures/` with the project dependencies.
+The runtime must start that entrypoint, not the generated demo chatbot or the legacy FastAPI server.
+Inspect the generated project schema and synthesized IAM before deployment; scaffold generation alone
+is not a deployable Cherry build. Runtime environment must include the selected model and region.
+Use the proposed scoped runtime policy below in place of any generated broad Bedrock permissions.
 
-Before creating resources, preview the deployment:
+From the generated project, with the repository's absolute guard-script path available:
 
 ```bash
+"$CHERRY_REPO/scripts/verify_aws_target.sh"
 agentcore deploy --dry-run
-```
-
-Confirm that the target is account `821465445270` in `eu-west-2` before continuing.
-
-Deploy:
-
-```bash
-agentcore deploy
-```
-
-Check status:
-
-```bash
+agentcore deploy --diff
+"$CHERRY_REPO/scripts/verify_aws_target.sh"
+agentcore deploy --yes
 agentcore status
 ```
 
-Invoke the deployed agent:
+Set `CHERRY_REPO` to your repository path before these commands. Capture the actual runtime ARN from
+successful deployment/status output, then invoke it from the repository:
 
 ```bash
-agentcore invoke --prompt \
-  "Run an approval scenario and explain why the workflow stopped for human review."
+./scripts/test_agentcore_runtime.sh "$RUNTIME_ARN"
 ```
 
-The CLI provisions the AgentCore Runtime resources and runtime IAM role in the currently
-authenticated AWS account.
+The script checks account/region and ARN scope, fails on AWS API errors and runtime error responses,
+and requires a Strands response. Do not claim deployment succeeded until creation and invocation pass.
 
-## 7. IAM boundary
+## A. Deployment identity permissions
 
-For the hackathon deployment, keep permissions narrow. The runtime requires Bedrock model invocation
-and AgentCore runtime permissions. Add access to another AWS service only if a Cherry tool actually
-uses that service.
+Provisioning permissions belong to the deployment identity, never the runtime identity. AgentCore CLI
+0.29.0 deploys via CDK/CloudFormation. Scope CloudFormation operations to the generated Cherry stack;
+artifact upload to its exact deployment bucket/prefix; AgentCore create/update/get/list operations to
+this runtime where AWS supports resource scoping; IAM role/policy operations to the Cherry runtime
+role; and `iam:PassRole` to that exact role with `iam:PassedToService=bedrock-agentcore.amazonaws.com`.
+CDK bootstrap roles/artifact bucket must be pre-provisioned or separately reviewed. Container builds
+add ECR/build permissions; CodeZip does not justify unrestricted ECR, S3 or Secrets Manager access.
+Derive exact resource names from the generated template before granting provisioning permissions.
 
-The agent must not receive permission to:
+## B. Runtime identity permissions
 
-- move money;
-- modify bank beneficiaries;
-- bypass the human-approval state machine;
-- mutate source accounting evidence without an explicit product requirement.
+`infra/aws/agentcore-runtime-policy.json` proposes only `bedrock:InvokeModel` and
+`bedrock:InvokeModelWithResponseStream` for the selected EU profile and its seven actual destination
+model ARNs (verified using GetInferenceProfile). Foundation-model invocation is conditioned on the
+selected profile, following [AWS inference-profile IAM guidance](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-prereq.html).
 
-Cherry's payment boundary is intentional: the hackathon demo is reconciliation and decision support,
-not payment initiation.
+The runtime role trust must allow AgentCore with source account 821465445270 and the runtime ARN
+scope. If the selected deployment needs artifact reads or log delivery, add only its exact artifact
+object and log group/stream permissions after inspecting generated assets. No payment, beneficiary,
+approval, administrator, unrestricted IAM/S3 or secrets permissions are part of the runtime policy.
 
-## 8. Judge-facing demo sequence
+## Demo / Devpost
 
-Use three short prompts to prove the product boundary.
+Track: **Professional Agents**. Built with Strands Agents SDK, Amazon Bedrock, Amazon Bedrock AgentCore,
+Python, FastAPI, Pydantic, Docker and deterministic financial controls.
 
-### Autonomous routine case
+1. Autonomous routine reconciliation: show deterministic match and policy evidence.
+2. Human approval required: explain the blocked workflow and explicit human review.
+3. Evidence exception: explain missing/conflicting evidence and refuse to guess.
 
-```text
-Run an autonomous scenario. Tell me what was reconciled automatically and which deterministic
-control allowed it.
-```
+Strands orchestrates; Cherry deterministic code holds financial authority; humans hold approval
+ authority. The existing reconciliation engine, Google ADK, Ylookup/FundOps and Cherry Money work
+are reused, not claimed as new hackathon work. See `PREEXISTING_CODE.md`.
 
-### Human approval case
+## Verification recorded 14 September 2026
 
-```text
-Run an approval scenario. Explain exactly why the workflow stopped and what the human must review.
-```
+Account guard verified 821465445270 / eu-west-2 / devops-user. The selected EU Sonnet 4.6
+profile is ACTIVE and its foundation model is listed in London. The live hierarchy reached
+ConverseStream but failed with `ResourceNotFoundException`: Anthropic model use-case details
+have not been submitted for this account. AWS asks the account owner to submit the Anthropic
+use-case form (or allow 15 minutes if already submitted). This is an account onboarding blocker,
+not a missing profile or reason to broaden IAM. Other Sonnet profiles are listed as ACTIVE,
+but switching profiles does not resolve the account-wide Anthropic prerequisite.
 
-### Evidence exception
-
-```text
-Run an exception scenario. Show the missing or conflicting evidence and explain why Cherry refuses
-to guess.
-```
-
-For each result, explicitly show:
-
-```text
-User request
-  -> Strands orchestrator
-  -> specialist agent
-  -> bounded tool
-  -> deterministic finance control
-  -> autonomous outcome OR human review
-  -> audit evidence
-```
-
-## 9. Production hardening after the hackathon
-
-Before using real customer data:
-
-- put AgentCore behind authenticated identity;
-- use least-privilege runtime IAM;
-- add request/session isolation and persistent audit storage;
-- use AWS Secrets Manager or another approved secrets store rather than environment-file credentials;
-- add CloudWatch/AgentCore observability and alarms;
-- configure data-retention and privacy controls;
-- complete threat modelling and financial-control review.
+No AgentCore runtime has been created or invoked by this implementation run. Complete the
+account's Anthropic use-case details with accurate organisational information, rerun the guarded
+Bedrock smoke test, and only then prepare/deploy the dedicated runtime as described above.

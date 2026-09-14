@@ -71,6 +71,12 @@ hackathon-specific implementation is intentionally separated so it can be review
 ```text
 agents/cherry_strands/agent.py   Strands Agents SDK orchestrator + specialist agents
 agentcore/cherry_agent.py        Amazon Bedrock AgentCore Runtime entrypoint
+app/strands_router.py            Dedicated Strands API, preserving existing routers
+tests/test_strands_*.py          Offline Strands/API validation
+scripts/verify_aws_target.sh     Account/region deployment guard
+scripts/test_*bedrock.py         Synthetic Bedrock verification
+scripts/test_agentcore_runtime.sh Synthetic deployed-runtime verification
+infra/aws/agentcore-runtime-policy.json Proposed scoped model invocation policy
 docs/AWS_AGENTCORE_DEPLOYMENT.md AWS/AgentCore deployment documentation
 ```
 

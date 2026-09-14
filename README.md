@@ -1,4 +1,4 @@
-# Cherry Agent — Autonomous Finance Ops for SMEs
+# Cherry Agent: Autonomous Finance Ops for SMEs
 
 [![CI](https://github.com/sohamtech-uk/cherry-agentic-finops/actions/workflows/ci.yml/badge.svg)](https://github.com/sohamtech-uk/cherry-agentic-finops/actions/workflows/ci.yml)
 
@@ -25,6 +25,23 @@ agentcore/cherry_agent.py        Amazon Bedrock AgentCore Runtime entrypoint
 The Strands implementation deliberately reuses the repository's existing deterministic finance
 engines rather than asking a model to perform accounting arithmetic itself.
 
+### NEW FOR AGENTS FOR HUMANS
+
+- Strands Agents SDK orchestration and specialist Strands agents
+- Amazon Bedrock model integration
+- AgentCore-compatible runtime and dedicated AWS deployment tooling
+- Dedicated `/api/strands/health` and `/api/strands/invoke` endpoints
+
+### PRE-EXISTING / REUSED
+
+- Cherry deterministic finance engine
+- Pre-existing Google ADK work
+- Pre-existing Ylookup/FundOps logic
+- Cherry Money product/infrastructure
+
+Strands = orchestration. Cherry deterministic engine = financial authority.
+Human = approval authority.
+
 ### What Strands does
 
 - receives the user's finance-operations request;
@@ -33,6 +50,23 @@ engines rather than asking a model to perform accounting arithmetic itself.
 - explains workflow outcomes and exceptions;
 - delegates control explanations and evidence summaries to specialist agents;
 - stops when the deterministic workflow requires human review.
+
+### NEW FOR AGENTS FOR HUMANS
+
+- Strands Agents SDK orchestration and specialist Strands agents
+- Amazon Bedrock model integration
+- AgentCore-compatible runtime and dedicated AWS deployment tooling
+- Dedicated `/api/strands/health` and `/api/strands/invoke` endpoints
+
+### PRE-EXISTING / REUSED
+
+- Cherry deterministic finance engine
+- Pre-existing Google ADK work
+- Pre-existing Ylookup/FundOps logic
+- Cherry Money product/infrastructure
+
+Strands = orchestration. Cherry deterministic engine = financial authority.
+Human = approval authority.
 
 ### What Strands does **not** do
 
@@ -128,7 +162,7 @@ Default development configuration:
 
 ```env
 AWS_REGION=eu-west-2
-STRANDS_BEDROCK_MODEL_ID=global.anthropic.claude-sonnet-4-6
+STRANDS_BEDROCK_MODEL_ID=eu.anthropic.claude-sonnet-4-6
 ```
 
 For local development, authenticate with your own AWS CLI/SSO profile. Do **not** commit AWS access
@@ -150,7 +184,7 @@ source .venv/bin/activate
 python -m pip install -e ".[dev]"
 
 export AWS_REGION=eu-west-2
-export STRANDS_BEDROCK_MODEL_ID=global.anthropic.claude-sonnet-4-6
+export STRANDS_BEDROCK_MODEL_ID=eu.anthropic.claude-sonnet-4-6
 ```
 
 Then invoke from Python:
@@ -252,6 +286,16 @@ app/nav_quality*                              pre-existing NAV quality controls
 app/static/                                   product / demo UI
 PREEXISTING_CODE.md                           reuse disclosure
 ```
+
+## Devpost
+
+**Track:** Professional Agents (Agents for Humans).
+
+**Built with:** Strands Agents SDK, Amazon Bedrock, Amazon Bedrock AgentCore, Python,
+FastAPI, Pydantic, Docker, and deterministic financial controls.
+
+Demo: autonomous routine reconciliation; human approval required; evidence exception / refusal to
+ guess. See the AWS deployment guide for live verification commands and deployment prerequisites.
 
 ## Licence
 
