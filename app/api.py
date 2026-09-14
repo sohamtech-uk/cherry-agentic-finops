@@ -27,6 +27,7 @@ from app.private_markets_router import router as private_markets_router
 from app.rate_limit import limiter
 from app.session_router import router as session_router
 from app.statement_review_router import router as statement_review_router
+from app.strands_router import router as strands_router
 from app.workflow import InvalidWorkflowAction, WorkflowNotFound
 from app.ylookup_router import router as ylookup_router
 
@@ -47,8 +48,8 @@ app = FastAPI(
     title="Cherry Agent API",
     version="0.1.0",
     description=(
-        "Autonomous, human-governed finance operations using Gemini, Google ADK and "
-        "deterministic financial controls."
+        "Strands Agents SDK + Amazon Bedrock + deterministic Cherry controls. "
+        "Pre-existing Google ADK/Gemini and Ylookup workflows are retained."
     ),
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -62,6 +63,7 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+app.include_router(strands_router)
 app.include_router(private_markets_router)
 app.include_router(private_markets_integration_router)
 app.include_router(ylookup_router)

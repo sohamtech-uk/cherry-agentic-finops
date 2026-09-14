@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/agents-for-humans-strands-aws]
   pull_request:
 
 permissions:
@@ -28,7 +28,7 @@ jobs:
       - name: Test
         run: pytest
       - name: Compile
-        run: python -m compileall -q app agents
+        run: python -m compileall -q app agents agentcore
       - uses: actions/setup-node@v6
         with:
           node-version: "24"

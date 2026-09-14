@@ -8,10 +8,23 @@ from strands.models import BedrockModel
 
 from app.agent_tools import inspect_workflow, list_open_finance_exceptions, run_finance_scenario
 
-# Use the EU inference profile by default because the hackathon deployment targets London (eu-west-2).
+# Use the EU inference profile by default because the hackathon deployment targets London (eu-
+# west-2).
 # Override STRANDS_BEDROCK_MODEL_ID if the AWS account uses another Bedrock model/profile.
 DEFAULT_MODEL_ID = "eu.anthropic.claude-sonnet-4-6"
 DEFAULT_AWS_REGION = "eu-west-2"
+MAX_PROMPT_LENGTH = 8000
+FINANCIAL_BOUNDARY = "Reconciliation and decision support only; no payment initiation."
+
+
+def agent_metadata() -> dict[str, str]:
+    return {
+        "framework": "Strands Agents SDK",
+        "model_provider": "Amazon Bedrock",
+        "model_id": os.getenv("STRANDS_BEDROCK_MODEL_ID", DEFAULT_MODEL_ID),
+        "aws_region": os.getenv("AWS_REGION", DEFAULT_AWS_REGION),
+        "financial_boundary": FINANCIAL_BOUNDARY,
+    }
 
 
 def _model() -> BedrockModel:
@@ -78,11 +91,14 @@ def build_cherry_agent() -> Agent:
             "reconciliation outcomes and deterministic policy decisions."
         ),
         model=model,
+        callback_handler=None,
         system_prompt=(
             "You are Cherry Agent's workflow specialist. Use tools for every workflow fact. "
             "Never fabricate transactions, totals, matches or approvals. For a demonstration, call "
-            "run_sme_finance_scenario. If a workflow needs human approval, report that state and stop; "
-            "do not claim the approval happened. Cherry performs accounting reconciliation only and "
+            "run_sme_finance_scenario. If a workflow needs human approval, report that state "
+            "and stop; "
+            "do not claim the approval happened. Cherry performs accounting reconciliation "
+            "only and "
             "does not initiate payments."
         ),
         tools=[run_sme_finance_scenario, inspect_finance_workflow],
@@ -94,10 +110,14 @@ def build_cherry_agent() -> Agent:
             "Explains why deterministic finance controls allowed automation or required a human."
         ),
         model=model,
+        callback_handler=None,
         system_prompt=(
-            "You are Cherry Agent's finance-control specialist. Inspect the workflow before explaining "
-            "a control decision. Distinguish agent orchestration from deterministic controls. Never "
-            "invent consent, never approve a workflow, and never recommend bypassing a failed control."
+            "You are Cherry Agent's finance-control specialist. Inspect the workflow before "
+            "explaining "
+            "a control decision. Distinguish agent orchestration from deterministic controls."
+            " Never "
+            "invent consent, never approve a workflow, and never recommend bypassing a failed"
+            " control."
         ),
         tools=[inspect_finance_workflow],
     )
@@ -108,9 +128,12 @@ def build_cherry_agent() -> Agent:
             "Summarises audit evidence, open exceptions and what a human reviewer needs to do next."
         ),
         model=model,
+        callback_handler=None,
         system_prompt=(
-            "You are Cherry Agent's audit-evidence specialist. Use the workflow and exception tools; "
-            "do not infer evidence that is absent. Make actor, status and next required human action "
+            "You are Cherry Agent's audit-evidence specialist. Use the workflow and exception"
+            " tools; "
+            "do not infer evidence that is absent. Make actor, status and next required human"
+            " action "
             "clear. Do not present the evidence pack as an external audit opinion or tax advice."
         ),
         tools=[inspect_finance_workflow, get_open_finance_exceptions],
@@ -130,12 +153,15 @@ Operating boundary:
 1. Strands provides reasoning, tool selection and specialist delegation.
 2. Deterministic Cherry code decides arithmetic, reconciliation and policy outcomes.
 3. Human approval is required where the deterministic workflow says so. You cannot grant approval.
-4. Do not initiate payments or change bank details.
+4. Do not initiate payments or change bank details. Never claim payment authorised, payment sent,
+bank details updated or human approval recorded without a specific deterministic system record.
 5. Do not provide tax, legal or external-audit opinions.
 6. When data is missing or ambiguous, surface the exception instead of guessing.
 
-For demos, start with workflow_specialist and choose the scenario that best matches the user's request.
-Always make it obvious what the agent did, what deterministic controls did, and where a human is still
+For demos, start with workflow_specialist and choose the scenario that best matches the user's
+request.
+Always make it obvious what the agent did, what deterministic controls did, and where a human is
+still
 required.
 """.strip()
 
@@ -143,6 +169,7 @@ required.
         name="cherry_agent",
         description="Strands-powered autonomous finance operations with deterministic controls.",
         model=model,
+        callback_handler=None,
         system_prompt=orchestrator_prompt,
         tools=[
             workflow_specialist.as_tool(
@@ -151,7 +178,7 @@ required.
             ),
             control_specialist.as_tool(
                 name="control_specialist",
-                description="Explain deterministic finance-control outcomes and escalation reasons.",
+                description="Explain deterministic controls and escalation reasons.",
             ),
             evidence_specialist.as_tool(
                 name="evidence_specialist",
@@ -185,13 +212,12 @@ def invoke_cherry_agent(prompt: str) -> dict[str, Any]:
     if not isinstance(prompt, str) or not prompt.strip():
         return {"error": "prompt_required"}
 
+    if len(prompt) > MAX_PROMPT_LENGTH:
+        return {"error": "prompt_too_large"}
+
     agent = build_cherry_agent()
     result = agent(prompt.strip())
     return {
         "response": _result_text(result),
-        "framework": "Strands Agents SDK",
-        "model_provider": "Amazon Bedrock",
-        "model_id": os.getenv("STRANDS_BEDROCK_MODEL_ID", DEFAULT_MODEL_ID),
-        "aws_region": os.getenv("AWS_REGION", DEFAULT_AWS_REGION),
-        "financial_boundary": "Reconciliation and decision support only; no payment initiation.",
+        **agent_metadata(),
     }
